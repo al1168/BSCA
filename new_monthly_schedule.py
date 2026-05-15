@@ -1,6 +1,7 @@
 """CLI: generate a monthly schedule workbook for one SADC member."""
 
 import argparse
+import os
 import random
 import sys
 
@@ -26,6 +27,21 @@ def parse_center_ids(raw):
         if value not in result:
             result.append(value)
     return result
+
+
+def schedule_filename(center_id, year, month):
+    """Workbook filename for a member/month."""
+    return f"Schedule_{center_id}_{year:04d}-{month:02d}.xlsx"
+
+
+def resolve_output_dir(base, plan_code, year, month):
+    """Output directory for the run. Non-plan modes write directly in
+    `base`; plan mode nests a `<CODE>_<YYYY-MM>` subdirectory (CODE
+    upper-cased). `plan_code` is None for single/list modes."""
+    if plan_code is None:
+        return base
+    sub = f"{plan_code.upper()}_{year:04d}-{month:02d}"
+    return os.path.join(base, sub)
 
 
 def parse_args(argv):

@@ -102,3 +102,21 @@ def test_parse_center_ids_empty():
 def test_parse_center_ids_non_int_raises():
     with pytest.raises(ValueError):
         cli.parse_center_ids("24010,abc")
+
+
+import os
+
+
+def test_schedule_filename():
+    assert cli.schedule_filename(24010, 2026, 5) == \
+        "Schedule_24010_2026-05.xlsx"
+
+
+def test_resolve_output_dir_non_plan_is_base():
+    assert cli.resolve_output_dir(".", None, 2026, 5) == "."
+    assert cli.resolve_output_dir("out", None, 2026, 5) == "out"
+
+
+def test_resolve_output_dir_plan_nests_uppercased_subdir():
+    assert cli.resolve_output_dir("out", "hof", 2026, 5) == \
+        os.path.join("out", "HOF_2026-05")
