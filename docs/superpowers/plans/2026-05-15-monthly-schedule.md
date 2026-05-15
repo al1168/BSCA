@@ -917,7 +917,7 @@ Implements spec §5. Two tables stacked on one sheet with a manual row page brea
 `tests/test_workbook.py`:
 
 ```python
-from datetime import date
+from datetime import date, datetime
 
 from openpyxl import load_workbook
 
@@ -965,7 +965,8 @@ def test_workbook_structure(tmp_path):
         "Date", "Day", "Time-In", "Time-Out"
     ]
     # table 1 first data row
-    assert ws.cell(row=5, column=1).value == date(2026, 5, 1)
+    # openpyxl reads date-serial cells back as datetime.datetime, not date
+    assert ws.cell(row=5, column=1).value == datetime(2026, 5, 1)
     assert ws.cell(row=5, column=1).number_format == "m/d/yyyy"
     assert ws.cell(row=5, column=3).value == "08:17"
     assert ws.cell(row=5, column=4).value == "12:13"
@@ -976,7 +977,6 @@ def test_workbook_structure(tmp_path):
     assert ws.row_breaks.count == 1
 
     # table 2 appears later with its own header block + 6-col header
-    cells = [c.value for col in ws.iter_cols(values_only=True) for c in [None]]  # noop
     found_t2 = False
     for r in range(1, ws.max_row + 1):
         if ws.cell(row=r, column=1).value == "Date" and ws.cell(
