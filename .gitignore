@@ -1,0 +1,13 @@
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Generated schedule workbooks
+Schedule_*.xlsx
+
+# Office lock / temp files
+~$*
+
+# Claude local config
+.claude/
