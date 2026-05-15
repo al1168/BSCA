@@ -69,16 +69,19 @@ def format_summary(verb, success_count, total, scope, out_dir,
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(
-        description="Generate a printable monthly schedule workbook."
+        description="Generate printable monthly schedule workbooks."
     )
-    parser.add_argument("--center-id", type=int, required=True)
+    selector = parser.add_mutually_exclusive_group(required=True)
+    selector.add_argument("--center-id", type=int)
+    selector.add_argument("--center-ids")
+    selector.add_argument("--plan")
     parser.add_argument("--year", type=int, required=True)
     parser.add_argument(
         "--month", type=int, required=True,
         choices=range(1, 13), metavar="{1-12}",
     )
     parser.add_argument("--db-path", default=DEFAULT_DB)
-    parser.add_argument("--output-path", default=None)
+    parser.add_argument("--output-path", default=".")
     parser.add_argument("--preview-data", action="store_true")
     return parser.parse_args(argv)
 

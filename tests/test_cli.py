@@ -153,3 +153,29 @@ def test_format_summary_with_failures_lists_them():
         "  - ID 24100 (Smith, John): write — "
         "PermissionError — denied"
     )
+
+
+def test_parse_args_requires_a_selector():
+    with pytest.raises(SystemExit):
+        cli.parse_args(["--year", "2026", "--month", "5"])
+
+
+def test_parse_args_rejects_two_selectors():
+    with pytest.raises(SystemExit):
+        cli.parse_args(
+            ["--center-id", "1", "--plan", "HOF",
+             "--year", "2026", "--month", "5"]
+        )
+
+
+def test_parse_args_accepts_each_selector():
+    a = cli.parse_args(
+        ["--center-ids", "1,2", "--year", "2026", "--month", "5"]
+    )
+    assert a.center_ids == "1,2"
+    assert a.center_id is None and a.plan is None
+    b = cli.parse_args(
+        ["--plan", "HOF", "--year", "2026", "--month", "5"]
+    )
+    assert b.plan == "HOF"
+    assert b.output_path == "."  # new default: base directory
