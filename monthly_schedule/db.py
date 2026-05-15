@@ -22,7 +22,9 @@ def build_connection_string(db_path):
 
 def map_member_row(row):
     return {
-        "center_id": row[0],
+        # Access returns [Center ID] as a float; normalize to int so
+        # the header reads "ID: 24010", not "ID: 24010.0".
+        "center_id": int(row[0]),
         "last_name": row[1],
         "first_name": row[2],
         "health_plan": row[3],

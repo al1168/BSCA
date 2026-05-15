@@ -25,8 +25,13 @@ def test_member_query_columns_and_filter():
 
 
 def test_map_member_row():
-    row = (24010, "Cheng", "Lizhu", "Elderplan Homefirst", "1.3.4.5")
-    assert map_member_row(row) == {
+    # Access returns [Center ID] as a float (e.g. 24010.0); it must be
+    # normalized to an int so the header reads "ID: 24010" not "24010.0".
+    row = (24010.0, "Cheng", "Lizhu", "Elderplan Homefirst", "1.3.4.5")
+    result = map_member_row(row)
+    assert result["center_id"] == 24010
+    assert isinstance(result["center_id"], int)
+    assert result == {
         "center_id": 24010,
         "last_name": "Cheng",
         "first_name": "Lizhu",
