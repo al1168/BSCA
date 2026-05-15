@@ -4,7 +4,9 @@ from monthly_schedule.db import (
     build_connection_string,
     map_member_row,
     MEMBER_QUERY,
+    MEMBERS_BY_PLAN_QUERY,
     get_member,
+    get_members_by_plan,
 )
 
 
@@ -44,3 +46,19 @@ def test_get_member_missing_db_raises(tmp_path):
     missing = tmp_path / "nope.accdb"
     with pytest.raises(FileNotFoundError):
         get_member(24010, str(missing))
+
+
+def test_members_by_plan_query_columns_and_filter():
+    assert "[Center ID]" in MEMBERS_BY_PLAN_QUERY
+    assert "[Last Name]" in MEMBERS_BY_PLAN_QUERY
+    assert "[First Name]" in MEMBERS_BY_PLAN_QUERY
+    assert "[Health Plan]" in MEMBERS_BY_PLAN_QUERY
+    assert "[SADC]" in MEMBERS_BY_PLAN_QUERY
+    assert "WHERE [Health Plan] = ?" in MEMBERS_BY_PLAN_QUERY
+    assert "ORDER BY [Center ID]" in MEMBERS_BY_PLAN_QUERY
+
+
+def test_get_members_by_plan_missing_db_raises(tmp_path):
+    missing = tmp_path / "nope.accdb"
+    with pytest.raises(FileNotFoundError):
+        get_members_by_plan("HOF", str(missing))
