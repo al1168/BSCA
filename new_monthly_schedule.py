@@ -32,7 +32,11 @@ def parse_args(argv):
 def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
 
-    member = get_member(args.center_id, args.db_path)
+    try:
+        member = get_member(args.center_id, args.db_path)
+    except (FileNotFoundError, RuntimeError) as exc:
+        print(exc, file=sys.stderr)
+        return 1
     if member is None:
         print(
             f"No member found with Center ID {args.center_id}",

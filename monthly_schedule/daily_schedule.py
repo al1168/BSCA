@@ -24,6 +24,10 @@ def validate_schedule(pickup, arrival, time_in, time_out, departure, dropoff, ru
             f"Start ordering violated: pickup={pickup} arrival={arrival} "
             f"time_in={time_in}"
         )
+    if not (time_in <= time_out):
+        raise ValueError(
+            f"Mid ordering violated: time_in={time_in} time_out={time_out}"
+        )
     if not (time_out <= departure < dropoff):
         raise ValueError(
             f"End ordering violated: time_out={time_out} "

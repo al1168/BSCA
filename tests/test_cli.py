@@ -50,3 +50,23 @@ def test_invalid_month_rejected(monkeypatch):
             ["--center-id", "24010", "--year", "2026", "--month", "13",
              "--preview-data"]
         )
+
+
+def test_missing_db_returns_1(monkeypatch, capsys):
+    def _raise(cid, db):
+        raise FileNotFoundError("Database not found: X")
+    monkeypatch.setattr(cli, "get_member", _raise)
+    rc = cli.main(["--center-id", "24010", "--year", "2026", "--month", "5",
+                   "--preview-data"])
+    assert rc == 1
+    assert "Database not found" in capsys.readouterr().err
+
+
+def test_driver_error_returns_1(monkeypatch, capsys):
+    def _raise(cid, db):
+        raise RuntimeError("Could not open the Access database. ...")
+    monkeypatch.setattr(cli, "get_member", _raise)
+    rc = cli.main(["--center-id", "24010", "--year", "2026", "--month", "5",
+                   "--preview-data"])
+    assert rc == 1
+    assert "Could not open the Access database" in capsys.readouterr().err

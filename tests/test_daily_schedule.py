@@ -65,3 +65,10 @@ def test_validate_schedule_raises_on_session_length():
     with pytest.raises(ValueError):
         # 30-minute session, below min_session_hours
         validate_schedule(470, 480, 480, 510, 510, 520, rules)
+
+
+def test_validate_schedule_raises_on_time_in_after_time_out():
+    rules = SCHEDULE_RULES["Default"]
+    with pytest.raises(ValueError):
+        # valid ends individually, but time_in (600) > time_out (590)
+        validate_schedule(470, 480, 600, 590, 700, 710, rules)
