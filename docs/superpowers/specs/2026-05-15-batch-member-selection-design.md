@@ -110,9 +110,43 @@ clean handler (stderr message, exit 1).
 **Empty plan:** `--plan CODE` matching zero members is an error —
 stderr message, non-zero exit, no directory created.
 
-**Summary (stderr):** e.g.
-`Wrote 18 file(s); skipped 2: 24099 (not found), 24100 (not found)`.
-For preview mode the summary counts members previewed.
+**Summary (stderr):** printed at the end of every batch run. It has a
+one-line headline followed, when there are failures, by an itemized
+list — one line per failed member with enough detail to act on it
+without re-running:
+
+- **Headline:** `<verb> <S> of <T> member(s) for <period/scope>;
+  <F> failed.` where `<verb>` is `Wrote` (or `Previewed` in
+  `--preview-data` mode), `S` = successes, `T` = total selected,
+  `F` = failures, and `<period/scope>` names the run
+  (e.g. `2026-05` for id/list modes, `plan HOF 2026-05` for plan
+  mode). On success it also states the output directory the files
+  were written to.
+- **Per-failure lines** (only if `F > 0`), under a `Failures:`
+  heading, each formatted:
+  `  - ID <id><name?>: <stage> — <reason>`
+  - `<name?>` is ` (Last, First)` when the member record was
+    resolved; omitted when the id was never found.
+  - `<stage>` is where it failed: `lookup` (id not found / DB row
+    missing), `generate` (row/schedule building raised), or
+    `write` (workbook save raised).
+  - `<reason>` is the concrete cause: `not found in database`, or
+    the exception's type and message
+    (e.g. `PermissionError — [Errno 13] Permission denied:
+    'out\\Schedule_24100_2026-05.xlsx'`).
+
+Example:
+
+```
+Wrote 18 of 20 member(s) for plan HOF 2026-05 into out\HOF_2026-05; 2 failed.
+Failures:
+  - ID 24099: lookup — not found in database
+  - ID 24100 (Smith, John): write — PermissionError — [Errno 13] Permission denied: 'out\HOF_2026-05\Schedule_24100_2026-05.xlsx'
+```
+
+A fully successful run prints only the headline (no `Failures:`
+block). The same structure applies to `--preview-data` (headline verb
+`Previewed`, no output directory, failures still itemized).
 
 **Exit code:** `main()` returns `0` if every selected member
 succeeded and at least one member was selected; returns `2` if any
@@ -142,7 +176,12 @@ via `tmp_path`):
 - Plan mode writes into `<output-path>/<CODE>_<YYYY-MM>/` with the
   correct per-member filenames (assert files exist under the subdir).
 - Batch with one not-found id among valid ones: valid files written,
-  exit code non-zero, summary names the skipped id.
+  exit code `2`, and the stderr summary contains the headline with
+  the correct success/total/failed counts plus a `Failures:` line
+  naming the failed id, the `lookup` stage, and the
+  `not found in database` reason. A second test simulates a member
+  whose workbook write raises and asserts the failure line reports
+  the `write` stage and the exception text.
 - `--plan` with zero matched members: non-zero exit, message, no dir
   created.
 - `--preview-data` batch: prints a `=== ID <id> …===` header per
