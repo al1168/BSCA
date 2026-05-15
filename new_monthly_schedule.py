@@ -4,6 +4,7 @@ import argparse
 import os
 import random
 import sys
+from collections import namedtuple
 
 from monthly_schedule.db import get_member
 from monthly_schedule.auth_days import get_authorized_weekdays
@@ -42,6 +43,28 @@ def resolve_output_dir(base, plan_code, year, month):
         return base
     sub = f"{plan_code.upper()}_{year:04d}-{month:02d}"
     return os.path.join(base, sub)
+
+
+Failure = namedtuple("Failure", "center_id name stage reason")
+
+
+def format_summary(verb, success_count, total, scope, out_dir,
+                   failures):
+    """Build the end-of-run summary (spec section 5). Headline only on
+    full success; an itemized `Failures:` block otherwise."""
+    head = f"{verb} {success_count} of {total} member(s) for {scope}"
+    if out_dir is not None:
+        head += f" into {out_dir}"
+    head += f"; {len(failures)} failed."
+    if not failures:
+        return head
+    lines = [head, "Failures:"]
+    for f in failures:
+        name = f" ({f.name})" if f.name else ""
+        lines.append(
+            f"  - ID {f.center_id}{name}: {f.stage} — {f.reason}"
+        )
+    return "\n".join(lines)
 
 
 def parse_args(argv):

@@ -120,3 +120,36 @@ def test_resolve_output_dir_non_plan_is_base():
 def test_resolve_output_dir_plan_nests_uppercased_subdir():
     assert cli.resolve_output_dir("out", "hof", 2026, 5) == \
         os.path.join("out", "HOF_2026-05")
+
+
+def test_format_summary_all_success_headline_only():
+    s = cli.format_summary("Wrote", 2, 2, "2026-05", "out", [])
+    assert s == "Wrote 2 of 2 member(s) for 2026-05 into out; 0 failed."
+    assert "Failures:" not in s
+
+
+def test_format_summary_preview_no_outdir():
+    s = cli.format_summary("Previewed", 1, 1, "2026-05", None, [])
+    assert s == "Previewed 1 of 1 member(s) for 2026-05; 0 failed."
+
+
+def test_format_summary_with_failures_lists_them():
+    failures = [
+        cli.Failure(24099, "", "lookup", "not found in database"),
+        cli.Failure(24100, "Smith, John", "write",
+                    "PermissionError — denied"),
+    ]
+    s = cli.format_summary(
+        "Wrote", 18, 20, "plan HOF 2026-05", "out/HOF_2026-05", failures
+    )
+    lines = s.split("\n")
+    assert lines[0] == (
+        "Wrote 18 of 20 member(s) for plan HOF 2026-05 "
+        "into out/HOF_2026-05; 2 failed."
+    )
+    assert lines[1] == "Failures:"
+    assert lines[2] == "  - ID 24099: lookup — not found in database"
+    assert lines[3] == (
+        "  - ID 24100 (Smith, John): write — "
+        "PermissionError — denied"
+    )
