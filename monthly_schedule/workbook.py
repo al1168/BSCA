@@ -4,6 +4,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Border, Side, Alignment, Font
 from openpyxl.worksheet.pagebreak import Break
 
+from monthly_schedule.health_plan import display_plan
+
 COMPANY_NAME = "Bowery Senior Care Inc"
 
 _THIN = Side(style="thin")
@@ -27,13 +29,13 @@ def _member_name(member):
 def _write_header_block(ws, start_row, member):
     ws.cell(row=start_row, column=1, value=COMPANY_NAME).font = _BOLD
     ws.cell(row=start_row + 1, column=1,
-            value=f"MLTC: {member['health_plan']}")
+            value=f"MLTC: {display_plan(member['health_plan'])}")
     ws.cell(row=start_row + 2, column=1,
             value=f"ID: {member['center_id']}")
     ws.cell(row=start_row + 2, column=2,
             value=f"Name: {_member_name(member)}")
     ws.cell(row=start_row + 2, column=4,
-            value=f"Auth Days: {member['sadc_auth']}")
+            value=f"Auth Days: {member['auth_days']}")
     return start_row + 3  # first free row after the block
 
 

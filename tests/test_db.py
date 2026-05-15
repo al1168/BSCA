@@ -19,7 +19,8 @@ def test_member_query_columns_and_filter():
     assert "[Last Name]" in MEMBER_QUERY
     assert "[First Name]" in MEMBER_QUERY
     assert "[Health Plan]" in MEMBER_QUERY
-    assert "[SADC Auth]" in MEMBER_QUERY
+    assert "[SADC]" in MEMBER_QUERY
+    assert "[SADC Auth]" not in MEMBER_QUERY
     assert "WHERE [Center ID] = ?" in MEMBER_QUERY
 
 
@@ -30,7 +31,7 @@ def test_map_member_row():
         "last_name": "Cheng",
         "first_name": "Lizhu",
         "health_plan": "Elderplan Homefirst",
-        "sadc_auth": "1.3.4.5",
+        "auth_days": "1.3.4.5",
     }
 
 

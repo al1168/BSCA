@@ -9,7 +9,7 @@ import os
 
 MEMBER_QUERY = (
     "SELECT [Center ID], [Last Name], [First Name], [Health Plan], "
-    "[SADC Auth] FROM [Contacts] WHERE [Center ID] = ?"
+    "[SADC] FROM [Contacts] WHERE [Center ID] = ?"
 )
 
 
@@ -26,7 +26,7 @@ def map_member_row(row):
         "last_name": row[1],
         "first_name": row[2],
         "health_plan": row[3],
-        "sadc_auth": row[4],
+        "auth_days": row[4],
     }
 
 

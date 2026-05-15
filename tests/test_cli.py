@@ -4,8 +4,8 @@ FAKE_MEMBER = {
     "center_id": 24010,
     "last_name": "Cheng",
     "first_name": "Lizhu",
-    "health_plan": "Elderplan Homefirst",
-    "sadc_auth": "1.3.4.5",
+    "health_plan": "HOF",
+    "auth_days": "1.3.4.5",
 }
 
 

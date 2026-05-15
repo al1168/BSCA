@@ -30,7 +30,7 @@ def parse_args(argv):
 
 
 def main(argv=None):
-    args = parse_args(sys.argv[1:] if argv is None else argv)
+    args = parse_args(sys.argvp[1:] if argv is None else argv)
 
     try:
         member = get_member(args.center_id, args.db_path)
@@ -44,11 +44,11 @@ def main(argv=None):
         )
         return 2
 
-    authorized = get_authorized_weekdays(member["sadc_auth"])
+    authorized = get_authorized_weekdays(member["auth_days"])
     if not authorized:
         print(
-            f"Warning: no authorized weekdays parsed from SADC Auth "
-            f"{member['sadc_auth']!r}; all time cells will be blank.",
+            f"Warning: no authorized weekdays parsed from SADC "
+            f"{member['auth_days']!r}; all time cells will be blank.",
             file=sys.stderr,
         )
 
