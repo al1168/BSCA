@@ -61,10 +61,14 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'monthly_schedule'`
 `requirements.txt`:
 
 ```
-pyodbc==5.1.0
+pyodbc==5.2.0
 openpyxl==3.1.5
 pytest==8.3.3
 ```
+
+(Pin corrected from 5.1.0 → 5.2.0 during execution: 5.1.0 has no
+Python 3.13 wheel; 5.2.0 ships `cp313` wheels and installs without a
+compiler.)
 
 `conftest.py`:
 
