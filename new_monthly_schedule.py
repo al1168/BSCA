@@ -91,17 +91,17 @@ def process_member(member, year, month, out_dir, preview):
     On success ok is True and stage/reason are None. On failure ok
     is False, stage is 'generate' or 'write', reason is the
     exception text."""
-    authorized = get_authorized_weekdays(member["auth_days"])
-    if not authorized:
-        print(
-            f"Warning: no authorized weekdays parsed from SADC "
-            f"{member['auth_days']!r} for ID {member['center_id']}; "
-            f"all time cells will be blank.",
-            file=sys.stderr,
-        )
-    rules = get_rules_for_plan(member["health_plan"])
     rng = random.Random()
     try:
+        authorized = get_authorized_weekdays(member["auth_days"])
+        if not authorized:
+            print(
+                f"Warning: no authorized weekdays parsed from SADC "
+                f"{member['auth_days']!r} for ID {member['center_id']}; "
+                f"all time cells will be blank.",
+                file=sys.stderr,
+            )
+        rules = get_rules_for_plan(member["health_plan"])
         rows = build_rows(year, month, authorized, rules, rng)
     except Exception as exc:  # reported in the run summary
         return (False, "generate", f"{type(exc).__name__} — {exc}")
@@ -203,6 +203,8 @@ def main(argv=None):
                        failures),
         file=sys.stderr,
     )
+    # total == 0 is defensive: empty --center-ids and empty --plan
+    # already return 2 earlier; this guards any future zero path.
     if failures or total == 0:
         return 2
     return 0

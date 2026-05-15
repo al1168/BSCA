@@ -27,6 +27,7 @@ def test_preview_data_returns_zero_and_prints(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "2026-05-01" in out
     assert out.count("\n") >= 31  # one line per day
+    assert "=== ID 24010 (Cheng, Lizhu) ===" in out
 
 
 def test_no_member_returns_2(monkeypatch, tmp_path, capsys):
