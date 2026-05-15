@@ -30,7 +30,7 @@ def parse_args(argv):
 
 
 def main(argv=None):
-    args = parse_args(sys.argvp[1:] if argv is None else argv)
+    args = parse_args(sys.argv[1:] if argv is None else argv)
 
     try:
         member = get_member(args.center_id, args.db_path)

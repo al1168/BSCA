@@ -70,3 +70,14 @@ def test_driver_error_returns_1(monkeypatch, capsys):
                    "--preview-data"])
     assert rc == 1
     assert "Could not open the Access database" in capsys.readouterr().err
+
+
+def test_main_reads_sys_argv_when_argv_none(monkeypatch):
+    """Exercises the argv is None branch (real CLI invocation path)."""
+    monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
+    monkeypatch.setattr(
+        cli.sys, "argv",
+        ["new_monthly_schedule.py", "--center-id", "24010",
+         "--year", "2026", "--month", "5", "--preview-data"],
+    )
+    assert cli.main() == 0
