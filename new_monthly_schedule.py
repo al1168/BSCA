@@ -13,6 +13,21 @@ from monthly_schedule.workbook import build_workbook
 DEFAULT_DB = r"\\BOWERY3\Users\Shared\Access Member 5.5.26_copy.accdb"
 
 
+def parse_center_ids(raw):
+    """Parse a comma-separated Center ID string into an ordered list
+    of unique ints. Whitespace is trimmed, blank entries dropped,
+    duplicates removed preserving first-seen order."""
+    result = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        value = int(part)
+        if value not in result:
+            result.append(value)
+    return result
+
+
 def parse_args(argv):
     parser = argparse.ArgumentParser(
         description="Generate a printable monthly schedule workbook."

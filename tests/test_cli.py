@@ -81,3 +81,24 @@ def test_main_reads_sys_argv_when_argv_none(monkeypatch):
          "--year", "2026", "--month", "5", "--preview-data"],
     )
     assert cli.main() == 0
+
+
+import pytest
+
+
+def test_parse_center_ids_basic():
+    assert cli.parse_center_ids("24010,24011") == [24010, 24011]
+
+
+def test_parse_center_ids_trims_dedupes_drops_blanks_keeps_order():
+    assert cli.parse_center_ids("24011, 24010 ,,24011") == [24011, 24010]
+
+
+def test_parse_center_ids_empty():
+    assert cli.parse_center_ids("") == []
+    assert cli.parse_center_ids(" , , ") == []
+
+
+def test_parse_center_ids_non_int_raises():
+    with pytest.raises(ValueError):
+        cli.parse_center_ids("24010,abc")
