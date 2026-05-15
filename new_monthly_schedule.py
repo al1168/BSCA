@@ -6,7 +6,7 @@ import random
 import sys
 from collections import namedtuple
 
-from monthly_schedule.db import get_member
+from monthly_schedule.db import get_member, get_members_by_plan
 from monthly_schedule.auth_days import get_authorized_weekdays
 from monthly_schedule.rules import get_rules_for_plan
 from monthly_schedule.rows import build_rows
@@ -86,44 +86,125 @@ def parse_args(argv):
     return parser.parse_args(argv)
 
 
-def main(argv=None):
-    args = parse_args(sys.argv[1:] if argv is None else argv)
-
-    try:
-        member = get_member(args.center_id, args.db_path)
-    except (FileNotFoundError, RuntimeError) as exc:
-        print(exc, file=sys.stderr)
-        return 1
-    if member is None:
-        print(
-            f"No member found with Center ID {args.center_id}",
-            file=sys.stderr,
-        )
-        return 2
-
+def process_member(member, year, month, out_dir, preview):
+    """Run the per-member pipeline. Returns (ok, stage, reason).
+    On success ok is True and stage/reason are None. On failure ok
+    is False, stage is 'generate' or 'write', reason is the
+    exception text."""
     authorized = get_authorized_weekdays(member["auth_days"])
     if not authorized:
         print(
             f"Warning: no authorized weekdays parsed from SADC "
-            f"{member['auth_days']!r}; all time cells will be blank.",
+            f"{member['auth_days']!r} for ID {member['center_id']}; "
+            f"all time cells will be blank.",
             file=sys.stderr,
         )
-
     rules = get_rules_for_plan(member["health_plan"])
     rng = random.Random()
-    rows = build_rows(args.year, args.month, authorized, rules, rng)
+    try:
+        rows = build_rows(year, month, authorized, rules, rng)
+    except Exception as exc:  # reported in the run summary
+        return (False, "generate", f"{type(exc).__name__} — {exc}")
 
-    if args.preview_data:
+    if preview:
+        print(
+            f"=== ID {member['center_id']} "
+            f"({member['last_name']}, {member['first_name']}) ==="
+        )
         for row in rows:
             print({**row, "date": str(row["date"])})
-        return 0
+        return (True, None, None)
 
-    output_path = args.output_path or (
-        f"./Schedule_{args.center_id}_"
-        f"{args.year:04d}-{args.month:02d}.xlsx"
+    path = os.path.join(
+        out_dir, schedule_filename(member["center_id"], year, month)
     )
-    build_workbook(member, rows, output_path)
-    print(f"Wrote {output_path}")
+    try:
+        build_workbook(member, rows, path)
+    except Exception as exc:  # reported in the run summary
+        return (False, "write", f"{type(exc).__name__} — {exc}")
+    print(f"Wrote {path}")
+    return (True, None, None)
+
+
+def main(argv=None):
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+
+    if args.center_id is not None:
+        plan_code = None
+        id_list = [args.center_id]
+    elif args.center_ids is not None:
+        plan_code = None
+        id_list = parse_center_ids(args.center_ids)
+        if not id_list:
+            print("No valid Center IDs provided", file=sys.stderr)
+            return 2
+    else:
+        plan_code = args.plan
+        id_list = None
+
+    members = []
+    failures = []
+    try:
+        if plan_code is not None:
+            members = get_members_by_plan(plan_code, args.db_path)
+        else:
+            for cid in id_list:
+                member = get_member(cid, args.db_path)
+                if member is None:
+                    failures.append(
+                        Failure(cid, "", "lookup",
+                                "not found in database")
+                    )
+                else:
+                    members.append(member)
+    except (FileNotFoundError, RuntimeError) as exc:
+        print(exc, file=sys.stderr)
+        return 1
+
+    period = f"{args.year:04d}-{args.month:02d}"
+    if plan_code is not None:
+        scope = f"plan {plan_code.upper()} {period}"
+        if not members:
+            print(
+                f"No members found for plan {plan_code.upper()}",
+                file=sys.stderr,
+            )
+            return 2
+    else:
+        scope = period
+
+    out_dir = resolve_output_dir(
+        args.output_path, plan_code, args.year, args.month
+    )
+    if not args.preview_data:
+        os.makedirs(out_dir, exist_ok=True)
+
+    success = 0
+    for member in members:
+        ok, stage, reason = process_member(
+            member, args.year, args.month, out_dir, args.preview_data
+        )
+        if ok:
+            success += 1
+        else:
+            failures.append(
+                Failure(
+                    member["center_id"],
+                    f"{member['last_name']}, {member['first_name']}",
+                    stage, reason,
+                )
+            )
+
+    total = success + len(failures)
+    verb = "Previewed" if args.preview_data else "Wrote"
+    summary_dir = None if args.preview_data else out_dir
+    print(
+        format_summary(verb, success, total, scope, summary_dir,
+                       failures),
+        file=sys.stderr,
+    )
+    if failures or total == 0:
+        return 2
     return 0
 
 
