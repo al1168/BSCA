@@ -1234,7 +1234,9 @@ def main(argv=None):
 
     if args.preview_data:
         for row in rows:
-            print(row)
+            # stringify the date so a 'date' value renders as
+            # 2026-05-01 rather than repr() datetime.date(2026, 5, 1)
+            print({**row, "date": str(row["date"])})
         return 0
 
     output_path = args.output_path or (
@@ -1255,7 +1257,10 @@ if __name__ == "__main__":
 Run: `python -m pytest tests/test_cli.py -v`
 Expected: PASS (4 tests)
 
-Note: `test_preview_data_returns_zero_and_prints` asserts `"2026-05-01"` appears because each printed row dict contains `'date': datetime.date(2026, 5, 1)` whose `str()` is `2026-05-01`.
+Note: the preview loop stringifies `row["date"]` before printing so the
+output contains `2026-05-01`. Printing the raw dict would emit
+`datetime.date(2026, 5, 1)` (dicts use `repr()` on values) and the
+`"2026-05-01" in out` assertion would fail.
 
 - [ ] **Step 5: Commit**
 
