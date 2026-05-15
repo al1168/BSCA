@@ -60,9 +60,19 @@ error (see Section 6).
 |--------------|----------------------------------------------|
 | `ID`         | `Center ID` (also the `--center-id` argument)|
 | `Name`       | `Last Name` + `, ` + `First Name`            |
-| `Auth Days`  | `SADC Auth` (raw string shown in header)      |
-| `MLTC`       | `Health Plan`                                |
+| `Auth Days`  | `SADC` (raw string e.g. `1.3.4.5`, shown in header) |
+| `MLTC`       | `Health Plan` code, expanded via plan-name map |
 | Company name | Fixed constant `Bowery Senior Care Inc`      |
+
+**Correction (verified against live data, member 24010):** the
+authorized-day codes (`1.3.4.5`) live in the `SADC` column, *not*
+`SADC Auth` (which holds an authorization number such as
+`A0001579839`). The member-record key is `auth_days`. `Health Plan`
+stores a code (e.g. `HOF`); a small extensible map in
+`monthly_schedule/health_plan.py` expands known codes
+(`HOF → "Elderplan Homefirst"`) and falls back to the raw code for
+unmapped values. Observed codes: HF, VCM, HOF, BCBS, ES, AE, HC,
+Anthem, Aetna, BCSB (only HOF currently mapped).
 
 ## 4. Time Generation & Day Eligibility
 
@@ -73,7 +83,7 @@ function, `is_day_eligible(date, authorized_weekdays, exclusions=None)`,
 consulted per date by the daily-schedule builder.
 
 - **Now:** a date is eligible ⟺ its weekday is in the authorized set parsed
-  from `SADC Auth`.
+  from `SADC`.
 - The `exclusions` parameter defaults to `None`/empty: a list of date ranges
   plus an optional termination date. With the empty default, behavior is
   identical to today.
