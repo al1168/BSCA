@@ -1,0 +1,52 @@
+import new_monthly_schedule as cli
+
+FAKE_MEMBER = {
+    "center_id": 24010,
+    "last_name": "Cheng",
+    "first_name": "Lizhu",
+    "health_plan": "Elderplan Homefirst",
+    "sadc_auth": "1.3.4.5",
+}
+
+
+def test_preview_data_returns_zero_and_prints(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
+    rc = cli.main(
+        ["--center-id", "24010", "--year", "2026", "--month", "5",
+         "--preview-data"]
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "2026-05-01" in out
+    assert out.count("\n") >= 31  # one line per day
+
+
+def test_no_member_returns_2(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "get_member", lambda cid, db: None)
+    rc = cli.main(
+        ["--center-id", "999", "--year", "2026", "--month", "5",
+         "--preview-data"]
+    )
+    assert rc == 2
+    assert "No member found" in capsys.readouterr().err
+
+
+def test_writes_workbook(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
+    out = tmp_path / "out.xlsx"
+    rc = cli.main(
+        ["--center-id", "24010", "--year", "2026", "--month", "5",
+         "--output-path", str(out)]
+    )
+    assert rc == 0
+    assert out.exists()
+
+
+def test_invalid_month_rejected(monkeypatch):
+    monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
+    import pytest
+    with pytest.raises(SystemExit):
+        cli.main(
+            ["--center-id", "24010", "--year", "2026", "--month", "13",
+             "--preview-data"]
+        )
