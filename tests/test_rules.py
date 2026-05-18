@@ -21,11 +21,16 @@ def test_format_minutes():
 
 def test_default_rules_present_and_shaped():
     d = SCHEDULE_RULES["Default"]
-    assert d["arrival_window"] == ("08:05", "08:25")
-    assert d["departure_window"] == ("12:05", "12:25")
-    assert d["min_session_hours"] == 3
-    assert d["max_session_hours"] == 6
+    assert d["arrival_window"] == ("08:00", "11:00")
+    assert d["session_span_min"] == (210, 245)
+    assert d["time_in_drift_min"] == (2, 2)
+    assert d["time_out_drift_min"] == (2, 2)
+    assert d["pickup_lead_min"] == (8, 12)
+    assert d["dropoff_trail_min"] == (8, 12)
     assert d["round_to_minutes"] == 1
+    assert "departure_window" not in d
+    assert "min_session_hours" not in d
+    assert "max_session_hours" not in d
 
 
 def test_get_rules_for_plan_falls_back_to_default():

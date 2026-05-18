@@ -33,23 +33,22 @@ def validate_schedule(pickup, arrival, time_in, time_out, departure, dropoff, ru
             f"End ordering violated: time_out={time_out} "
             f"departure={departure} dropoff={dropoff}"
         )
-    session_hours = (departure - arrival) / 60
-    lo = rules["min_session_hours"]
-    hi = rules["max_session_hours"]
-    if not (lo <= session_hours <= hi):
+    span = departure - arrival
+    lo, hi = rules["session_span_min"]
+    if not (lo <= span <= hi):
         raise ValueError(
-            f"Session length {session_hours}h outside [{lo}, {hi}]"
+            f"Session span {span} min outside [{lo}, {hi}]"
         )
 
 
 def build_daily_schedule(rules, rng):
     """Return a dict of 'HH:MM' strings for one eligible day's visit."""
     a_lo, a_hi = (parse_hhmm(x) for x in rules["arrival_window"])
-    d_lo, d_hi = (parse_hhmm(x) for x in rules["departure_window"])
     step = rules["round_to_minutes"]
 
     arrival = _round_to(rng.randint(a_lo, a_hi), step)
-    departure = _round_to(rng.randint(d_lo, d_hi), step)
+    span = rng.randint(*rules["session_span_min"])
+    departure = arrival + span
 
     pickup = arrival - rng.randint(*rules["pickup_lead_min"])
     dropoff = departure + rng.randint(*rules["dropoff_trail_min"])

@@ -6,15 +6,13 @@ clamp/validation line in daily_schedule.validate_schedule.
 
 SCHEDULE_RULES = {
     "Default": {
-        "arrival_window": ("08:05", "08:25"),
-        "departure_window": ("12:05", "12:25"),
-        "min_session_hours": 3,
-        "max_session_hours": 6,
-        "pickup_lead_min": (8, 12),     # minutes before Arrival
-        "dropoff_trail_min": (8, 12),   # minutes after Departure
-        "time_in_drift_min": (0, 3),    # Time-In after Arrival
-        "time_out_drift_min": (0, 3),   # Time-Out before Departure
-        "round_to_minutes": 1,          # 1 = no snap; 5 = snap to :05
+        "arrival_window": ("08:00", "11:00"),
+        "session_span_min": (210, 245),   # Departure = Arrival + span (min)
+        "pickup_lead_min": (8, 12),       # minutes before Arrival
+        "dropoff_trail_min": (8, 12),     # minutes after Departure
+        "time_in_drift_min": (2, 2),      # Time-In = Arrival + 2 min
+        "time_out_drift_min": (2, 2),     # Time-Out = Departure - 2 min
+        "round_to_minutes": 1,            # 1 = no snap; 5 = snap to :05
     },
 }
 
