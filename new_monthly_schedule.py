@@ -11,8 +11,17 @@ from monthly_schedule.auth_days import get_authorized_weekdays
 from monthly_schedule.rules import get_rules_for_plan
 from monthly_schedule.rows import build_rows
 from monthly_schedule.workbook import build_workbook
+from monthly_schedule.travel import (
+    load_api_key,
+    load_cache,
+    save_cache,
+    resolve_travel_minutes,
+    TravelError,
+)
 
 DEFAULT_DB = r"\\BOWERY3\Users\Shared\Access Member 5.5.26_copy.accdb"
+DEFAULT_GOOGLE_CONFIG = "google_maps.config"
+DEFAULT_GEO_CACHE = "geo_cache.json"
 
 
 def parse_center_ids(raw):
@@ -82,15 +91,21 @@ def parse_args(argv):
     )
     parser.add_argument("--db-path", default=DEFAULT_DB)
     parser.add_argument("--output-path", default=".")
+    parser.add_argument("--google-config", default=DEFAULT_GOOGLE_CONFIG)
+    parser.add_argument("--geo-cache", default=DEFAULT_GEO_CACHE)
     parser.add_argument("--preview-data", action="store_true")
     return parser.parse_args(argv)
 
 
-def process_member(member, year, month, out_dir, preview):
+def process_member(member, year, month, out_dir, preview,
+                   api_key, cache):
     """Run the per-member pipeline. Returns (ok, stage, reason).
-    On success ok is True and stage/reason are None. On failure ok
-    is False, stage is 'generate' or 'write', reason is the
-    exception text."""
+    On success ok is True and stage/reason are None. On failure
+    stage is 'geocode'/'route'/'generate'/'write' with the reason."""
+    try:
+        travel_minutes = resolve_travel_minutes(member, api_key, cache)
+    except TravelError as exc:
+        return (False, exc.stage, exc.reason)
     rng = random.Random()
     try:
         authorized = get_authorized_weekdays(member["auth_days"])
@@ -101,7 +116,9 @@ def process_member(member, year, month, out_dir, preview):
                 f"all time cells will be blank.",
                 file=sys.stderr,
             )
-        rules = get_rules_for_plan(member["health_plan"])
+        rules = dict(get_rules_for_plan(member["health_plan"]))
+        rules["pickup_lead_min"] = (travel_minutes, travel_minutes)
+        rules["dropoff_trail_min"] = (travel_minutes, travel_minutes)
         rows = build_rows(year, month, authorized, rules, rng)
     except Exception as exc:  # reported in the run summary
         return (False, "generate", f"{type(exc).__name__} — {exc}")
@@ -128,6 +145,13 @@ def process_member(member, year, month, out_dir, preview):
 
 def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
+
+    try:
+        api_key = load_api_key(args.google_config)
+    except RuntimeError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    cache = load_cache(args.geo_cache)
 
     if args.center_id is not None:
         plan_code = None
@@ -182,7 +206,8 @@ def main(argv=None):
     success = 0
     for member in members:
         ok, stage, reason = process_member(
-            member, args.year, args.month, out_dir, args.preview_data
+            member, args.year, args.month, out_dir,
+            args.preview_data, api_key, cache,
         )
         if ok:
             success += 1
@@ -195,6 +220,7 @@ def main(argv=None):
                 )
             )
 
+    save_cache(args.geo_cache, cache)
     total = success + len(failures)
     verb = "Previewed" if args.preview_data else "Wrote"
     summary_dir = None if args.preview_data else out_dir

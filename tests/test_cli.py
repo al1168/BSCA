@@ -6,6 +6,8 @@ FAKE_MEMBER = {
     "first_name": "Lizhu",
     "health_plan": "HOF",
     "auth_days": "1.3.4.5",
+    "address": "1 Main St, NY",
+    "long_lat": None,
 }
 
 FAKE_MEMBER_2 = {
@@ -14,7 +16,25 @@ FAKE_MEMBER_2 = {
     "first_name": "John",
     "health_plan": "HOF",
     "auth_days": "1.3.4.5",
+    "address": "2 Main St, NY",
+    "long_lat": None,
 }
+
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _stub_travel(monkeypatch):
+    """Neutralize travel for legacy tests: no key file, no network,
+    fixed 10-minute offset. Travel-specific tests re-monkeypatch."""
+    monkeypatch.setattr(cli, "load_api_key", lambda path: "K")
+    monkeypatch.setattr(cli, "load_cache", lambda path: {})
+    monkeypatch.setattr(cli, "save_cache", lambda path, cache: None)
+    monkeypatch.setattr(
+        cli, "resolve_travel_minutes",
+        lambda member, api_key, cache: 10,
+    )
 
 
 def test_preview_data_returns_zero_and_prints(monkeypatch, capsys):
@@ -90,9 +110,6 @@ def test_main_reads_sys_argv_when_argv_none(monkeypatch):
          "--year", "2026", "--month", "5", "--preview-data"],
     )
     assert cli.main() == 0
-
-
-import pytest
 
 
 def test_parse_center_ids_basic():
@@ -278,3 +295,69 @@ def test_write_failure_reported_in_summary(
     assert "Failures:" in err
     assert "ID 24010 (Cheng, Lizhu): write — PermissionError — denied" \
         in err
+
+
+def test_travel_minutes_applied_to_pickup_and_dropoff(
+        monkeypatch, capsys):
+    monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
+    monkeypatch.setattr(
+        cli, "resolve_travel_minutes",
+        lambda member, api_key, cache: 7,
+    )
+    rc = cli.main(
+        ["--center-id", "24010", "--year", "2026", "--month", "5",
+         "--preview-data"]
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+
+    def to_min(hhmm):
+        h, m = hhmm.split(":")
+        return int(h) * 60 + int(m)
+
+    seen = False
+    for line in out.splitlines():
+        if not line.startswith("{"):
+            continue
+        row = eval(line)  # printed dict literal
+        if row["arrival"] == "":
+            continue
+        assert to_min(row["arrival"]) - to_min(row["pickup"]) == 7
+        assert to_min(row["dropoff"]) - to_min(row["departure"]) == 7
+        seen = True
+    assert seen  # at least one eligible day was checked
+
+
+def test_travel_failure_skips_member_in_summary(
+        monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
+
+    def boom(member, api_key, cache):
+        raise cli.TravelError("geocode", "ZERO_RESULTS for 'x'")
+    monkeypatch.setattr(cli, "resolve_travel_minutes", boom)
+    rc = cli.main(
+        ["--center-id", "24010", "--year", "2026", "--month", "5",
+         "--output-path", str(tmp_path)]
+    )
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "Failures:" in err
+    assert ("ID 24010 (Cheng, Lizhu): geocode — "
+            "ZERO_RESULTS for 'x'") in err
+    assert not (tmp_path / "Schedule_24010_2026-05.xlsx").exists()
+
+
+def test_missing_api_key_config_aborts(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
+
+    def no_key(path):
+        raise RuntimeError(
+            "Google API key config not found: google_maps.config"
+        )
+    monkeypatch.setattr(cli, "load_api_key", no_key)
+    rc = cli.main(
+        ["--center-id", "24010", "--year", "2026", "--month", "5",
+         "--preview-data"]
+    )
+    assert rc == 1
+    assert "Google API key config not found" in capsys.readouterr().err

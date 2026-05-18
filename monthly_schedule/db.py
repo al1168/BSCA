@@ -9,7 +9,8 @@ import os
 
 MEMBER_QUERY = (
     "SELECT [Center ID], [Last Name], [First Name], [Health Plan], "
-    "[SADC] FROM [Contacts] WHERE [Center ID] = ?"
+    "[SADC], [Address], [Long Lat] FROM [Contacts] "
+    "WHERE [Center ID] = ?"
 )
 
 
@@ -29,6 +30,8 @@ def map_member_row(row):
         "first_name": row[2],
         "health_plan": row[3],
         "auth_days": row[4],
+        "address": row[5],
+        "long_lat": row[6],
     }
 
 
@@ -61,8 +64,8 @@ def get_member(center_id, db_path):
 
 MEMBERS_BY_PLAN_QUERY = (
     "SELECT [Center ID], [Last Name], [First Name], [Health Plan], "
-    "[SADC] FROM [Contacts] WHERE [Health Plan] = ? "
-    "ORDER BY [Center ID]"
+    "[SADC], [Address], [Long Lat] FROM [Contacts] "
+    "WHERE [Health Plan] = ? ORDER BY [Center ID]"
 )
 
 

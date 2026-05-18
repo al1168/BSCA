@@ -39,7 +39,20 @@ Options:
   and list modes write `DIR/Schedule_<id>_<YYYY-MM>.xlsx`; `--plan`
   writes into `DIR/<CODE>_<YYYY-MM>/`.
 - `--db-path PATH` — Access DB path (default the BOWERY3 share)
+- `--google-config PATH` — file containing the Google Maps API key
+  (default `google_maps.config`, gitignored). Required: Pick-Up/
+  Drop-Off use a Google Routes drive-time estimate.
+- `--geo-cache PATH` — local JSON cache of geocoded coords + route
+  minutes (default `geo_cache.json`, gitignored)
 - `--preview-data` — print computed rows per member, write nothing
+
+Pick-Up = Arrival − T and Drop-Off = Departure + T, where T is the
+estimated car-drive minutes from the member's address to a fixed
+default location. Coordinates come from the Contacts `Long Lat`
+column, else the local cache, else the Google Geocoding API. A
+member whose travel time cannot be resolved (no coords/address, or
+an API error) is skipped and listed in the run summary. See
+`docs/superpowers/specs/2026-05-18-travel-time-offsets-design.md`.
 
 A batch run continues past a member that fails and prints a summary
 to stderr (`Wrote N of M ... ; K failed.` plus an itemized
