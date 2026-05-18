@@ -57,3 +57,21 @@ def test_load_cache_non_dict_returns_empty(tmp_path):
     p = tmp_path / "c.json"
     p.write_text("[1, 2, 3]", encoding="utf-8")
     assert travel.load_cache(str(p)) == {}
+
+
+def test_load_api_key_reads_trimmed(tmp_path):
+    p = tmp_path / "k.config"
+    p.write_text("  my-secret-key\n", encoding="utf-8")
+    assert travel.load_api_key(str(p)) == "my-secret-key"
+
+
+def test_load_api_key_missing_raises(tmp_path):
+    with pytest.raises(RuntimeError):
+        travel.load_api_key(str(tmp_path / "absent.config"))
+
+
+def test_load_api_key_empty_raises(tmp_path):
+    p = tmp_path / "k.config"
+    p.write_text("   \n", encoding="utf-8")
+    with pytest.raises(RuntimeError):
+        travel.load_api_key(str(p))
