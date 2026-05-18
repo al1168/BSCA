@@ -33,6 +33,18 @@ Setup:
 python -m pip install -r requirements.txt
 ```
 
+Then provide a Google Maps API key (used for geocoding + Routes).
+Copy the template and replace the single line with your real key:
+
+```
+copy google_maps.config.example google_maps.config
+```
+
+`google_maps.config` is gitignored. The file's entire contents (the
+one line, trimmed) are used as the key — no comments. Point
+`--google-config PATH` elsewhere if you keep the key file at another
+location.
+
 Options:
 
 - `--output-path DIR` — base output directory (default `.`). Single
