@@ -11,3 +11,7 @@ Schedule_*.xlsx
 
 # Claude local config
 .claude/
+
+# Google API key + geo cache (local only)
+google_maps.config
+geo_cache.json
