@@ -151,3 +151,69 @@ def test_compute_route_minutes_http_error(monkeypatch):
     with pytest.raises(travel.TravelError) as ei:
         travel.compute_route_minutes((1, 2), (3, 4), "K")
     assert ei.value.stage == "route"
+
+
+def _no_geocode(monkeypatch):
+    def fail(*a, **k):
+        raise AssertionError("geocode_address should not be called")
+    monkeypatch.setattr(travel, "geocode_address", fail)
+
+
+def test_resolve_uses_db_long_lat_no_geocode(monkeypatch):
+    _no_geocode(monkeypatch)
+    monkeypatch.setattr(
+        travel, "compute_route_minutes",
+        lambda origin, dest, key: 9,
+    )
+    cache = {}
+    member = {"long_lat": "40.5,-73.5", "address": "ignored"}
+    assert travel.resolve_travel_minutes(member, "K", cache) == 9
+    assert cache["route"]["40.5,-73.5"] == 9
+
+
+def test_resolve_geocode_cache_hit_no_api(monkeypatch):
+    _no_geocode(monkeypatch)
+    monkeypatch.setattr(
+        travel, "compute_route_minutes",
+        lambda origin, dest, key: 4,
+    )
+    cache = {"geocode": {"1 main st": [40.5, -73.5]}}
+    member = {"long_lat": None, "address": " 1  Main  St "}
+    assert travel.resolve_travel_minutes(member, "K", cache) == 4
+
+
+def test_resolve_geocode_miss_calls_api_and_caches(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        travel, "geocode_address",
+        lambda addr, key: calls.append(addr) or (40.5, -73.5),
+    )
+    monkeypatch.setattr(
+        travel, "compute_route_minutes",
+        lambda origin, dest, key: 6,
+    )
+    cache = {}
+    member = {"long_lat": "", "address": "1 Main St"}
+    assert travel.resolve_travel_minutes(member, "K", cache) == 6
+    assert calls == ["1 Main St"]
+    assert cache["geocode"]["1 main st"] == [40.5, -73.5]
+    assert cache["route"]["40.5,-73.5"] == 6
+
+
+def test_resolve_route_cache_hit_no_route_call(monkeypatch):
+    _no_geocode(monkeypatch)
+
+    def fail_route(*a, **k):
+        raise AssertionError("compute_route_minutes should not run")
+    monkeypatch.setattr(travel, "compute_route_minutes", fail_route)
+    cache = {"route": {"40.5,-73.5": 11}}
+    member = {"long_lat": "40.5,-73.5", "address": None}
+    assert travel.resolve_travel_minutes(member, "K", cache) == 11
+
+
+def test_resolve_no_coords_no_address_raises(monkeypatch):
+    _no_geocode(monkeypatch)
+    member = {"long_lat": None, "address": "   "}
+    with pytest.raises(travel.TravelError) as ei:
+        travel.resolve_travel_minutes(member, "K", {})
+    assert ei.value.stage == "geocode"

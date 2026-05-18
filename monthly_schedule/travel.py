@@ -158,3 +158,34 @@ def compute_route_minutes(origin, dest, api_key):
     except (TypeError, ValueError):
         raise TravelError("route", f"bad duration {duration!r}")
     return max(1, round(seconds / 60))
+
+
+def resolve_travel_minutes(member, api_key, cache):
+    """Resolve drive-time minutes for `member`. Precedence: Contacts
+    `long_lat` -> cache -> Geocoding API. Mutates `cache` in place
+    (caller persists it). Raises TravelError(stage, reason) when
+    unresolved."""
+    coords = parse_long_lat(member.get("long_lat"))
+    if coords is None:
+        address = member.get("address")
+        if not address or not str(address).strip():
+            raise TravelError(
+                "geocode", "no Long Lat and no address"
+            )
+        norm = normalize_address(address)
+        geo = cache.setdefault("geocode", {})
+        if norm in geo:
+            coords = tuple(geo[norm])
+        else:
+            coords = geocode_address(address, api_key)
+            geo[norm] = [coords[0], coords[1]]
+    lat, lng = coords
+    key = f"{round(lat, 5)},{round(lng, 5)}"
+    route = cache.setdefault("route", {})
+    if key in route:
+        return route[key]
+    minutes = compute_route_minutes(
+        (lat, lng), DEFAULT_DESTINATION, api_key
+    )
+    route[key] = minutes
+    return minutes
