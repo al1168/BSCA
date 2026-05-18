@@ -80,3 +80,46 @@ def load_api_key(config_path):
             f"Google API key config is empty: {config_path}"
         )
     return key
+
+
+GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
+ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
+
+
+def _http_get_json(url, params):
+    """GET `url` with query `params`, return parsed JSON. Network is
+    isolated here (lazy `requests` import); tests stub this."""
+    import requests
+
+    resp = requests.get(url, params=params, timeout=20)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _http_post_json(url, body, headers):
+    """POST JSON `body` to `url`, return parsed JSON. Network is
+    isolated here (lazy `requests` import); tests stub this."""
+    import requests
+
+    resp = requests.post(url, json=body, headers=headers, timeout=20)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def geocode_address(address, api_key):
+    """Geocode `address` -> (lat, long). Raises
+    TravelError('geocode', ...) on error or no result."""
+    try:
+        data = _http_get_json(
+            GEOCODE_URL, {"address": address, "key": api_key}
+        )
+    except Exception as exc:
+        raise TravelError("geocode", f"request failed: {exc}")
+    status = data.get("status")
+    results = data.get("results") or []
+    if status != "OK" or not results:
+        raise TravelError(
+            "geocode", f"{status or 'NO_STATUS'} for {address!r}"
+        )
+    loc = results[0]["geometry"]["location"]
+    return (float(loc["lat"]), float(loc["lng"]))

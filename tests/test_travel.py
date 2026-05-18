@@ -75,3 +75,36 @@ def test_load_api_key_empty_raises(tmp_path):
     p.write_text("   \n", encoding="utf-8")
     with pytest.raises(RuntimeError):
         travel.load_api_key(str(p))
+
+
+def test_geocode_address_ok(monkeypatch):
+    def fake_get(url, params):
+        assert params["address"] == "1 Main St"
+        assert params["key"] == "K"
+        return {
+            "status": "OK",
+            "results": [
+                {"geometry": {"location": {"lat": 40.5, "lng": -73.5}}}
+            ],
+        }
+    monkeypatch.setattr(travel, "_http_get_json", fake_get)
+    assert travel.geocode_address("1 Main St", "K") == (40.5, -73.5)
+
+
+def test_geocode_address_zero_results(monkeypatch):
+    monkeypatch.setattr(
+        travel, "_http_get_json",
+        lambda url, params: {"status": "ZERO_RESULTS", "results": []},
+    )
+    with pytest.raises(travel.TravelError) as ei:
+        travel.geocode_address("nowhere", "K")
+    assert ei.value.stage == "geocode"
+
+
+def test_geocode_address_http_error(monkeypatch):
+    def boom(url, params):
+        raise RuntimeError("network down")
+    monkeypatch.setattr(travel, "_http_get_json", boom)
+    with pytest.raises(travel.TravelError) as ei:
+        travel.geocode_address("1 Main St", "K")
+    assert ei.value.stage == "geocode"
