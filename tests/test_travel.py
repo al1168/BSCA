@@ -108,3 +108,46 @@ def test_geocode_address_http_error(monkeypatch):
     with pytest.raises(travel.TravelError) as ei:
         travel.geocode_address("1 Main St", "K")
     assert ei.value.stage == "geocode"
+
+
+def test_compute_route_minutes_rounds(monkeypatch):
+    captured = {}
+
+    def fake_post(url, body, headers):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["body"] = body
+        return {"routes": [{"duration": "754s"}]}
+    monkeypatch.setattr(travel, "_http_post_json", fake_post)
+    assert travel.compute_route_minutes((40.5, -73.5),
+                                        (40.7, -73.9), "K") == 13
+    assert captured["headers"]["X-Goog-Api-Key"] == "K"
+    assert captured["headers"]["X-Goog-FieldMask"] == "routes.duration"
+    assert captured["body"]["travelMode"] == "DRIVE"
+
+
+def test_compute_route_minutes_min_one(monkeypatch):
+    monkeypatch.setattr(
+        travel, "_http_post_json",
+        lambda url, body, headers: {"routes": [{"duration": "20s"}]},
+    )
+    assert travel.compute_route_minutes((1, 2), (3, 4), "K") == 1
+
+
+def test_compute_route_minutes_no_routes(monkeypatch):
+    monkeypatch.setattr(
+        travel, "_http_post_json",
+        lambda url, body, headers: {"routes": []},
+    )
+    with pytest.raises(travel.TravelError) as ei:
+        travel.compute_route_minutes((1, 2), (3, 4), "K")
+    assert ei.value.stage == "route"
+
+
+def test_compute_route_minutes_http_error(monkeypatch):
+    def boom(url, body, headers):
+        raise RuntimeError("429")
+    monkeypatch.setattr(travel, "_http_post_json", boom)
+    with pytest.raises(travel.TravelError) as ei:
+        travel.compute_route_minutes((1, 2), (3, 4), "K")
+    assert ei.value.stage == "route"

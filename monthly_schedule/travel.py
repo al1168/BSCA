@@ -123,3 +123,38 @@ def geocode_address(address, api_key):
         )
     loc = results[0]["geometry"]["location"]
     return (float(loc["lat"]), float(loc["lng"]))
+
+
+def _lat_lng(point):
+    lat, lng = point
+    return {"location": {"latLng": {"latitude": lat,
+                                    "longitude": lng}}}
+
+
+def compute_route_minutes(origin, dest, api_key):
+    """Driving minutes origin -> dest via Google Routes. Raises
+    TravelError('route', ...) on error. Minutes = max(1,
+    round(seconds / 60))."""
+    body = {
+        "origin": _lat_lng(origin),
+        "destination": _lat_lng(dest),
+        "travelMode": "DRIVE",
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": api_key,
+        "X-Goog-FieldMask": "routes.duration",
+    }
+    try:
+        data = _http_post_json(ROUTES_URL, body, headers)
+    except Exception as exc:
+        raise TravelError("route", f"request failed: {exc}")
+    routes = data.get("routes") or []
+    if not routes:
+        raise TravelError("route", "no routes returned")
+    duration = routes[0].get("duration")
+    try:
+        seconds = int(str(duration).rstrip("s"))
+    except (TypeError, ValueError):
+        raise TravelError("route", f"bad duration {duration!r}")
+    return max(1, round(seconds / 60))
