@@ -39,3 +39,28 @@ def parse_long_lat(text):
 def normalize_address(text):
     """Lowercased, whitespace-collapsed address (cache key)."""
     return " ".join(str(text).split()).lower()
+
+
+def load_cache(path):
+    """Return the cache dict, or {} if the file is missing,
+    unreadable, or not a JSON object (warns on corrupt)."""
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if not isinstance(data, dict):
+            raise ValueError("cache root is not an object")
+        return data
+    except (OSError, ValueError) as exc:
+        print(
+            f"Warning: ignoring unreadable geo cache {path}: {exc}",
+            file=sys.stderr,
+        )
+        return {}
+
+
+def save_cache(path, cache):
+    """Write the cache dict as pretty JSON (UTF-8)."""
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(cache, fh, indent=2, sort_keys=True)

@@ -33,3 +33,27 @@ def test_parse_long_lat(text, expected):
 def test_normalize_address():
     assert travel.normalize_address("  123  Main   St ") == "123 main st"
     assert travel.normalize_address("A,B") == "a,b"
+
+
+def test_load_cache_missing_returns_empty(tmp_path):
+    assert travel.load_cache(str(tmp_path / "nope.json")) == {}
+
+
+def test_load_cache_corrupt_returns_empty_and_warns(tmp_path, capsys):
+    p = tmp_path / "c.json"
+    p.write_text("not json{", encoding="utf-8")
+    assert travel.load_cache(str(p)) == {}
+    assert "geo cache" in capsys.readouterr().err
+
+
+def test_cache_round_trip(tmp_path):
+    p = str(tmp_path / "c.json")
+    data = {"geocode": {"a": [1.0, 2.0]}, "route": {"1.0,2.0": 7}}
+    travel.save_cache(p, data)
+    assert travel.load_cache(p) == data
+
+
+def test_load_cache_non_dict_returns_empty(tmp_path):
+    p = tmp_path / "c.json"
+    p.write_text("[1, 2, 3]", encoding="utf-8")
+    assert travel.load_cache(str(p)) == {}
