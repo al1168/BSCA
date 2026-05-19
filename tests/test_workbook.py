@@ -45,7 +45,6 @@ def test_side_by_side_workbook_structure(tmp_path):
         assert "Name: Cheng, Lizhu" in v
         assert "Auth Days: 1.3.4.5" in v
 
-    # each header line merged across its block's columns
     merged = {str(rng) for rng in ws.merged_cells.ranges}
     for rng in ("A1:D1", "A2:D2", "A3:D3",
                 "F1:K1", "F2:K2", "F3:K3"):
@@ -83,9 +82,10 @@ def test_side_by_side_workbook_structure(tmp_path):
     assert list(ws.col_breaks.brk)[0].id == 5
     assert ws.row_breaks.count == 0
 
-    # print area spans to column K
+    # print area spans to column K, through the footer (row 9)
     assert ws.print_area is not None
     assert "K" in ws.print_area
+    assert "K9" in ws.print_area.replace("$", "")
 
     # spacer column fixed width; a wide label column wider than Day
     assert ws.column_dimensions["E"].width == 3
@@ -95,3 +95,28 @@ def test_side_by_side_workbook_structure(tmp_path):
     # page setup: not fit-to-width, fit each page to one page tall
     assert ws.page_setup.fitToWidth == 0
     assert ws.page_setup.fitToHeight == 1
+
+    # --- footer: bold caption merged per block ---
+    # ROWS has 2 entries -> last_data_row = 6, caption row 8, sig row 9
+    assert ws["A8"].value == "Attendance Sheet"
+    assert ws["F8"].value == "Transportation Sheet"
+    assert "A8:D8" in merged
+    assert "F8:K8" in merged
+
+    # --- signature/date row 9 with ruled (bottom-border) blanks ---
+    assert ws.cell(row=9, column=1).value == "Signature:"
+    assert ws.cell(row=9, column=3).value == "Date:"
+    assert ws.cell(row=9, column=2).border.bottom.style == "thin"
+    assert ws.cell(row=9, column=4).border.bottom.style == "thin"
+    assert ws.cell(row=9, column=6).value == "Signature:"
+    assert ws.cell(row=9, column=9).value == "Date:"
+    for c in (7, 8, 10, 11):
+        assert ws.cell(row=9, column=c).border.bottom.style == "thin"
+
+    # --- horizontal print centering on ---
+    assert ws.print_options.horizontalCentered is True
+
+    # --- footer text did NOT bloat a data column ---
+    # (autosize is bounded to the data region; "Transportation
+    # Sheet" ~24 if counted, but col F is the right Date col ~13.5)
+    assert ws.column_dimensions["F"].width < 20

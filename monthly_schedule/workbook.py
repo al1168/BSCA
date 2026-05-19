@@ -4,6 +4,8 @@ Both tables sit on one sheet so they display side by side when the
 file is opened; a manual column page break between them makes each
 print on its own page. Header lines are merged across each table's
 column span so long text shows fully without widening a data column.
+Each table has a bold caption and a ruled Signature/Date line below
+it, and is horizontally centered on its printed page.
 """
 
 from openpyxl import Workbook
@@ -17,6 +19,7 @@ COMPANY_NAME = "Bowery Senior Care Inc"
 
 _THIN = Side(style="thin")
 _BOX = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
+_RULE = Border(bottom=_THIN)
 _CENTER = Alignment(horizontal="center", vertical="center")
 _BOLD = Font(bold=True)
 
@@ -33,6 +36,8 @@ SPACER_COL = 5                          # E
 RIGHT_FIRST_COL = 6                     # F
 SPACER_WIDTH = 3
 HEADER_ROWS = 3                         # company / MLTC / ID-Name-Auth
+LEFT_CAPTION = "Attendance Sheet"
+RIGHT_CAPTION = "Transportation Sheet"
 _WIDTH_FACTOR = 1.15
 _WIDTH_PAD = 2
 _WIDTH_MIN = 4
@@ -94,10 +99,37 @@ def _write_table(ws, start_row, first_col, headers, keys, rows):
     return r
 
 
+def _write_footer(ws, data_last_row, first_col, last_col, caption,
+                  sig_label_col, sig_rule_cols,
+                  date_label_col, date_rule_cols):
+    """After a blank spacer row: a bold caption merged across
+    [first_col, last_col], then a Signature/Date row with
+    bottom-bordered blank rule cells. Row layout:
+      data_last_row + 1  -> blank spacer (nothing written)
+      data_last_row + 2  -> caption
+      data_last_row + 3  -> Signature/Date line
+    """
+    cap_row = data_last_row + 2
+    sig_row = data_last_row + 3
+    cap = ws.cell(row=cap_row, column=first_col, value=caption)
+    cap.font = _BOLD
+    ws.merge_cells(
+        start_row=cap_row, start_column=first_col,
+        end_row=cap_row, end_column=last_col,
+    )
+    ws.cell(row=sig_row, column=sig_label_col, value="Signature:")
+    for col in sig_rule_cols:
+        ws.cell(row=sig_row, column=col).border = _RULE
+    ws.cell(row=sig_row, column=date_label_col, value="Date:")
+    for col in date_rule_cols:
+        ws.cell(row=sig_row, column=col).border = _RULE
+
+
 def _autosize_columns(ws, table_header_row, last_row):
     """Width per data column = longest value/label in it (rows from
-    the table-header row down; merged header lines excluded) scaled
-    and clamped. Spacer column fixed."""
+    the table-header row down through `last_row`; merged header lines
+    and the footer are excluded by the caller's bound). Spacer column
+    fixed."""
     data_cols = (
         list(range(LEFT_FIRST_COL,
                     LEFT_FIRST_COL + len(TABLE1_HEADERS)))
@@ -138,20 +170,35 @@ def build_workbook(member, rows, output_path):
                             TABLE1_HEADERS, TABLE1_KEYS, rows)
     end_right = _write_table(ws, table_header_row, RIGHT_FIRST_COL,
                              TABLE2_HEADERS, TABLE2_KEYS, rows)
-    last_row = max(end_left, end_right) - 1
+    last_data_row = max(end_left, end_right) - 1
+
+    _write_footer(
+        ws, last_data_row, LEFT_FIRST_COL, left_last_col,
+        LEFT_CAPTION,
+        sig_label_col=1, sig_rule_cols=(2,),
+        date_label_col=3, date_rule_cols=(4,),
+    )
+    _write_footer(
+        ws, last_data_row, RIGHT_FIRST_COL, right_last_col,
+        RIGHT_CAPTION,
+        sig_label_col=6, sig_rule_cols=(7, 8),
+        date_label_col=9, date_rule_cols=(10, 11),
+    )
+    footer_last_row = last_data_row + 3
 
     # column page break after spacer col E -> Table 1 | Table 2 pages
     ws.col_breaks.append(Break(id=SPACER_COL))
 
     ws.print_area = (
-        f"A1:{get_column_letter(right_last_col)}{last_row}"
+        f"A1:{get_column_letter(right_last_col)}{footer_last_row}"
     )
+    ws.print_options.horizontalCentered = True
     ws.page_setup.orientation = "portrait"
     ws.page_setup.fitToWidth = 0
     ws.page_setup.fitToHeight = 1
     ws.sheet_properties.pageSetUpPr.fitToPage = True
 
-    _autosize_columns(ws, table_header_row, last_row)
+    _autosize_columns(ws, table_header_row, last_data_row)
 
     wb.save(output_path)
     return output_path
