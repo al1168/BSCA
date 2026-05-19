@@ -26,7 +26,7 @@ ROWS = [
 ]
 
 
-def test_workbook_structure(tmp_path):
+def test_side_by_side_workbook_structure(tmp_path):
     out = tmp_path / "sched.xlsx"
     build_workbook(MEMBER, ROWS, str(out))
     assert out.exists()
@@ -34,40 +34,64 @@ def test_workbook_structure(tmp_path):
     wb = load_workbook(str(out))
     ws = wb["Schedule"]
 
-    # header block
+    # per-block header: left block at col A, right block at col F
     assert ws["A1"].value == COMPANY_NAME
+    assert ws["F1"].value == COMPANY_NAME
     assert ws["A2"].value == "MLTC: Elderplan Homefirst"
-    assert ws["A3"].value == "ID: 24010"
-    assert ws["B3"].value == "Name: Cheng, Lizhu"
-    assert ws["D3"].value == "Auth Days: 1.3.4.5"
+    assert ws["F2"].value == "MLTC: Elderplan Homefirst"
+    for cell in ("A3", "F3"):
+        v = ws[cell].value
+        assert "ID: 24010" in v
+        assert "Name: Cheng, Lizhu" in v
+        assert "Auth Days: 1.3.4.5" in v
 
-    # table 1 header on row 4
-    assert [ws.cell(row=4, column=c).value for c in range(1, 5)] == [
+    # each header line merged across its block's columns
+    merged = {str(rng) for rng in ws.merged_cells.ranges}
+    for rng in ("A1:D1", "A2:D2", "A3:D3",
+                "F1:K1", "F2:K2", "F3:K3"):
+        assert rng in merged
+
+    # table-header row is row 4 for both blocks
+    assert [ws.cell(row=4, column=c).value
+            for c in range(1, 5)] == [
         "Date", "Day", "Time-In", "Time-Out"
     ]
-    # table 1 first data row
-    # openpyxl reads date serial cells back as datetime.datetime, not datetime.date
+    assert [ws.cell(row=4, column=c).value
+            for c in range(6, 12)] == [
+        "Date", "Day", "Pick-Up Time", "Arrival Time",
+        "Departure Time", "Drop-Off Time",
+    ]
+
+    # first data row (row 5), left and right blocks aligned
     assert ws.cell(row=5, column=1).value == datetime(2026, 5, 1)
     assert ws.cell(row=5, column=1).number_format == "m/d/yyyy"
-    assert ws.cell(row=5, column=3).value == "08:17"
-    assert ws.cell(row=5, column=4).value == "12:13"
-    # ineligible row blank
+    assert ws.cell(row=5, column=3).value == "08:17"   # Time-In
+    assert ws.cell(row=5, column=4).value == "12:13"   # Time-Out
+    assert ws.cell(row=5, column=6).value == datetime(2026, 5, 1)
+    assert ws.cell(row=5, column=6).number_format == "m/d/yyyy"
+    assert ws.cell(row=5, column=8).value == "08:05"   # Pick-Up
+    assert ws.cell(row=5, column=9).value == "08:15"   # Arrival
+    assert ws.cell(row=5, column=10).value == "12:15"  # Departure
+    assert ws.cell(row=5, column=11).value == "12:25"  # Drop-Off
+
+    # ineligible row (row 6) blank in both blocks
     assert ws.cell(row=6, column=3).value in (None, "")
+    assert ws.cell(row=6, column=8).value in (None, "")
 
-    # exactly one manual page break
-    assert ws.row_breaks.count == 1
+    # exactly one COLUMN break at column 5; no row breaks
+    assert ws.col_breaks.count == 1
+    assert list(ws.col_breaks.brk)[0].id == 5
+    assert ws.row_breaks.count == 0
 
-    # table 2 appears later with its own header block + 6-col header
-    found_t2 = False
-    for r in range(1, ws.max_row + 1):
-        if ws.cell(row=r, column=1).value == "Date" and ws.cell(
-            row=r, column=3
-        ).value == "Pick-Up Time":
-            assert ws.cell(row=r, column=6).value == "Drop-Off Time"
-            found_t2 = True
-            break
-    assert found_t2
-
-    # print area set and spans to column F
+    # print area spans to column K
     assert ws.print_area is not None
-    assert "F" in ws.print_area
+    assert "K" in ws.print_area
+
+    # spacer column fixed width; a wide label column wider than Day
+    assert ws.column_dimensions["E"].width == 3
+    assert (ws.column_dimensions["H"].width
+            > ws.column_dimensions["B"].width)
+
+    # page setup: not fit-to-width, fit each page to one page tall
+    assert ws.page_setup.fitToWidth == 0
+    assert ws.page_setup.fitToHeight == 1
