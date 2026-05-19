@@ -5,7 +5,10 @@ file is opened; a manual column page break between them makes each
 print on its own page. Header lines are merged across each table's
 column span so long text shows fully without widening a data column.
 Each table has a bold caption and a ruled Signature/Date line below
-it, and is horizontally centered on its printed page.
+it, and is horizontally centered on its printed page. The Attendance
+(left) columns have a generous minimum width so that table fills the
+page; the Signature/Date rule lines are guaranteed a minimum length
+in both footers.
 """
 
 from openpyxl import Workbook
@@ -42,6 +45,9 @@ _WIDTH_FACTOR = 1.15
 _WIDTH_PAD = 2
 _WIDTH_MIN = 4
 _WIDTH_MAX = 40
+_LEFT_MIN_WIDTH = 16                    # Attendance (left) column floor
+_SIG_LINE_MIN = 22                      # min total Signature rule width
+_DATE_LINE_MIN = 14                     # min total Date rule width
 
 
 def _member_name(member):
@@ -128,8 +134,9 @@ def _write_footer(ws, data_last_row, first_col, last_col, caption,
 def _autosize_columns(ws, table_header_row, last_row):
     """Width per data column = longest value/label in it (rows from
     the table-header row down through `last_row`; merged header lines
-    and the footer are excluded by the caller's bound). Spacer column
-    fixed."""
+    and the footer are excluded by the caller's bound). Left
+    (Attendance) columns get the `_LEFT_MIN_WIDTH` floor so that
+    table fills the page; the spacer column is fixed."""
     data_cols = (
         list(range(LEFT_FIRST_COL,
                     LEFT_FIRST_COL + len(TABLE1_HEADERS)))
@@ -143,12 +150,30 @@ def _autosize_columns(ws, table_header_row, last_row):
             if value is None:
                 continue
             longest = max(longest, len(str(value)))
+        floor = _LEFT_MIN_WIDTH if col < SPACER_COL else _WIDTH_MIN
         width = longest * _WIDTH_FACTOR + _WIDTH_PAD
-        width = max(_WIDTH_MIN, min(_WIDTH_MAX, width))
+        width = min(_WIDTH_MAX, max(floor, width))
         ws.column_dimensions[get_column_letter(col)].width = width
     ws.column_dimensions[
         get_column_letter(SPACER_COL)
     ].width = SPACER_WIDTH
+
+
+def _ensure_line_min(ws, rule_cols, line_min):
+    """Raise the given rule columns' widths (distributed evenly,
+    only increasing) until their combined width is at least
+    `line_min`. Columns already summing to >= line_min are
+    untouched."""
+    total = sum(
+        ws.column_dimensions[get_column_letter(c)].width
+        for c in rule_cols
+    )
+    if total >= line_min:
+        return
+    add = (line_min - total) / len(rule_cols)
+    for c in rule_cols:
+        letter = get_column_letter(c)
+        ws.column_dimensions[letter].width += add
 
 
 def build_workbook(member, rows, output_path):
@@ -199,6 +224,10 @@ def build_workbook(member, rows, output_path):
     ws.sheet_properties.pageSetUpPr.fitToPage = True
 
     _autosize_columns(ws, table_header_row, last_data_row)
+    _ensure_line_min(ws, (2,), _SIG_LINE_MIN)      # left signature (B)
+    _ensure_line_min(ws, (4,), _DATE_LINE_MIN)     # left date (D)
+    _ensure_line_min(ws, (7, 8), _SIG_LINE_MIN)    # right signature
+    _ensure_line_min(ws, (10, 11), _DATE_LINE_MIN)  # right date (J,K)
 
     wb.save(output_path)
     return output_path

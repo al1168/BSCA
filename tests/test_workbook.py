@@ -87,10 +87,8 @@ def test_side_by_side_workbook_structure(tmp_path):
     assert "K" in ws.print_area
     assert "K9" in ws.print_area.replace("$", "")
 
-    # spacer column fixed width; a wide label column wider than Day
+    # spacer column fixed width (unchanged)
     assert ws.column_dimensions["E"].width == 3
-    assert (ws.column_dimensions["H"].width
-            > ws.column_dimensions["B"].width)
 
     # page setup: not fit-to-width, fit each page to one page tall
     assert ws.page_setup.fitToWidth == 0
@@ -117,6 +115,21 @@ def test_side_by_side_workbook_structure(tmp_path):
     assert ws.print_options.horizontalCentered is True
 
     # --- footer text did NOT bloat a data column ---
-    # (autosize is bounded to the data region; "Transportation
-    # Sheet" ~24 if counted, but col F is the right Date col ~13.5)
+    # (autosize is bounded to the data region; col F is the right
+    # Date col ~13.5 and is not a rule column)
     assert ws.column_dimensions["F"].width < 20
+
+    # --- Attendance (left) column minimum: each left col >= 16 ---
+    for c in ("A", "B", "C", "D"):
+        assert ws.column_dimensions[c].width >= 16 - 1e-6
+
+    # --- guaranteed Signature/Date line lengths (both footers) ---
+    assert ws.column_dimensions["B"].width >= 22 - 1e-6   # left sig
+    assert ws.column_dimensions["D"].width >= 14 - 1e-6   # left date
+    assert (ws.column_dimensions["G"].width
+            + ws.column_dimensions["H"].width) >= 22 - 1e-6
+    assert (ws.column_dimensions["J"].width
+            + ws.column_dimensions["K"].width) >= 14 - 1e-6
+
+    # --- left 16-floor is NOT applied to the right block ---
+    assert ws.column_dimensions["G"].width < 16
