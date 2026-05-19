@@ -58,6 +58,26 @@ Options:
   minutes (default `geo_cache.json`, gitignored)
 - `--preview-data` — print computed rows per member, write nothing
 
+Full examples (run from the repo root, with `google_maps.config` in
+place):
+
+```
+# One member -> .\out\Schedule_24010_2026-05.xlsx
+python new_monthly_schedule.py --center-id 24010 --year 2026 --month 5 --output-path .\out
+
+# Several members by id, all into .\out
+python new_monthly_schedule.py --center-ids 24010,24011,24015 --year 2026 --month 5 --output-path .\out
+
+# Every member on a plan -> .\out\HOF_2026-05\Schedule_<id>_2026-05.xlsx
+python new_monthly_schedule.py --plan HOF --year 2026 --month 5 --output-path .\out
+
+# Dry run: print the computed rows for a plan, write nothing
+python new_monthly_schedule.py --plan HOF --year 2026 --month 5 --preview-data
+
+# Custom key + cache locations
+python new_monthly_schedule.py --center-id 24010 --year 2026 --month 5 --output-path .\out --google-config C:\keys\gmaps.config --geo-cache .\out\geo_cache.json
+```
+
 Pick-Up = Arrival − T and Drop-Off = Departure + T, where T is the
 estimated car-drive minutes from the member's address to a fixed
 default location. Coordinates come from the Contacts `Long Lat`
