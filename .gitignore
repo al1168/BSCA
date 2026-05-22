@@ -23,3 +23,7 @@ bsca_settings.json
 .env
 .venv/
 .vscode/
+
+# PyInstaller build artifacts
+build/
+dist/
