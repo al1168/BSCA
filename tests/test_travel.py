@@ -110,6 +110,30 @@ def test_geocode_address_http_error(monkeypatch):
     assert ei.value.stage == "geocode"
 
 
+def test_geocode_retries_on_over_query_limit_then_succeeds(monkeypatch):
+    monkeypatch.setattr(travel.time, "sleep", lambda s: None)
+    responses = [
+        {"status": "OVER_QUERY_LIMIT", "results": []},
+        {"status": "OK", "results": [
+            {"geometry": {"location": {"lat": 40.5, "lng": -73.5}}}
+        ]},
+    ]
+    monkeypatch.setattr(travel, "_http_get_json", lambda url, p: responses.pop(0))
+    assert travel.geocode_address("1 Main St", "K") == (40.5, -73.5)
+
+
+def test_geocode_raises_after_all_retries_exhausted(monkeypatch):
+    monkeypatch.setattr(travel.time, "sleep", lambda s: None)
+    monkeypatch.setattr(
+        travel, "_http_get_json",
+        lambda url, p: {"status": "OVER_QUERY_LIMIT", "results": []},
+    )
+    with pytest.raises(travel.TravelError) as ei:
+        travel.geocode_address("1 Main St", "K")
+    assert ei.value.stage == "geocode"
+    assert "OVER_QUERY_LIMIT" in ei.value.reason
+
+
 def test_compute_route_minutes_rounds(monkeypatch):
     captured = {}
 
