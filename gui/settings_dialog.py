@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
 
 from monthly_schedule.db import get_member
 from monthly_schedule.travel import load_api_key
+from gui.errors import friendly_db_error
 
 
 class _PathRow(QHBoxLayout):
@@ -112,6 +113,8 @@ class SettingsDialog(QDialog):
             try:
                 get_member(0, db_path)
                 lines.append("Database: Connected successfully.")
+            except RuntimeError as exc:
+                lines.append(f"Database: {friendly_db_error(str(exc))}")
             except Exception as exc:
                 lines.append(f"Database: Connection failed — {exc}")
 

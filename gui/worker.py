@@ -4,6 +4,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 from monthly_schedule.db import get_member, get_members_by_plan
 from monthly_schedule.travel import load_api_key, load_cache, save_cache
+from gui.errors import friendly_db_error
 from new_monthly_schedule import (
     Failure,
     format_summary,
@@ -84,8 +85,11 @@ class ScheduleWorker(QThread):
                         )
                     else:
                         members.append(member)
-        except (FileNotFoundError, RuntimeError) as exc:
+        except FileNotFoundError as exc:
             self.finished.emit(False, str(exc))
+            return
+        except RuntimeError as exc:
+            self.finished.emit(False, friendly_db_error(str(exc)))
             return
 
         if not self.preview:
