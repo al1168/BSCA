@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from monthly_schedule import travel
@@ -35,6 +37,40 @@ def test_normalize_address():
     assert travel.normalize_address("A,B") == "a,b"
 
 
+def test_purge_expired_removes_stale_entries():
+    now = 1_000_000
+    cache = {
+        "geocode": {"old addr": [1.0, 2.0], "new addr": [3.0, 4.0]},
+        "route": {"1.0,2.0": 5},
+        "ts": {
+            "geocode:old addr": now - travel._CACHE_TTL_SECONDS - 1,
+            "geocode:new addr": now - 60,
+            "route:1.0,2.0": now - travel._CACHE_TTL_SECONDS - 1,
+        },
+    }
+    travel._purge_expired(cache, now=now)
+    assert "old addr" not in cache["geocode"]
+    assert "new addr" in cache["geocode"]
+    assert "1.0,2.0" not in cache["route"]
+
+
+def test_purge_expired_keeps_fresh_entries():
+    now = 1_000_000
+    cache = {
+        "geocode": {"addr": [1.0, 2.0]},
+        "ts": {"geocode:addr": now - 60},
+    }
+    travel._purge_expired(cache, now=now)
+    assert "addr" in cache["geocode"]
+
+
+def test_purge_expired_no_ts_treats_all_as_expired():
+    cache = {"geocode": {"addr": [1.0, 2.0]}, "route": {"1,2": 5}}
+    travel._purge_expired(cache)
+    assert cache["geocode"] == {}
+    assert cache["route"] == {}
+
+
 def test_load_cache_missing_returns_empty(tmp_path):
     assert travel.load_cache(str(tmp_path / "nope.json")) == {}
 
@@ -48,7 +84,12 @@ def test_load_cache_corrupt_returns_empty_and_warns(tmp_path, capsys):
 
 def test_cache_round_trip(tmp_path):
     p = str(tmp_path / "c.json")
-    data = {"geocode": {"a": [1.0, 2.0]}, "route": {"1.0,2.0": 7}}
+    now = time.time()
+    data = {
+        "geocode": {"a": [1.0, 2.0]},
+        "route": {"1.0,2.0": 7},
+        "ts": {"geocode:a": now, "route:1.0,2.0": now},
+    }
     travel.save_cache(p, data)
     assert travel.load_cache(p) == data
 
@@ -233,6 +274,15 @@ def test_resolve_route_cache_hit_no_route_call(monkeypatch):
     cache = {"route": {"40.5,-73.5": 11}}
     member = {"long_lat": "40.5,-73.5", "address": None}
     assert travel.resolve_travel_minutes(member, "K", cache) == 11
+
+
+def test_resolve_writes_timestamp_on_geocode_cache_miss(monkeypatch):
+    monkeypatch.setattr(travel, "geocode_address", lambda addr, key: (40.5, -73.5))
+    monkeypatch.setattr(travel, "compute_route_minutes", lambda o, d, k: 6)
+    cache = {}
+    travel.resolve_travel_minutes({"long_lat": None, "address": "1 Main St"}, "K", cache)
+    assert "geocode:1 main st" in cache.get("ts", {})
+    assert "route:40.5,-73.5" in cache.get("ts", {})
 
 
 def test_resolve_no_coords_no_address_raises(monkeypatch):

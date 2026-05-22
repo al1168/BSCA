@@ -12,7 +12,8 @@ import os
 import sys
 import time
 
-_BACKOFF_SECONDS = [1, 2, 4]  # delays before each retry attempt (3 retries max)
+_BACKOFF_SECONDS = [1, 2, 4]        # delays before each retry attempt (3 retries max)
+_CACHE_TTL_SECONDS = 7 * 24 * 3600 # 1 week
 
 DEFAULT_DESTINATION = (40.7165774, -73.9954078)  # (latitude, longitude)
 
@@ -44,9 +45,32 @@ def normalize_address(text):
     return " ".join(str(text).split()).lower()
 
 
+def _purge_expired(cache, now=None):
+    """Remove geocode/route entries whose timestamp is missing or older
+    than _CACHE_TTL_SECONDS. Mutates cache in place."""
+    if now is None:
+        now = time.time()
+    cutoff = now - _CACHE_TTL_SECONDS
+    ts = cache.get("ts", {})
+    for section in ("geocode", "route"):
+        if section not in cache:
+            continue
+        expired = [
+            k for k in list(cache[section])
+            if ts.get(f"{section}:{k}", 0) < cutoff
+        ]
+        for k in expired:
+            del cache[section][k]
+            ts.pop(f"{section}:{k}", None)
+    if ts:
+        cache["ts"] = ts
+    elif "ts" in cache:
+        del cache["ts"]
+
+
 def load_cache(path):
-    """Return the cache dict, or {} if the file is missing,
-    unreadable, or not a JSON object (warns on corrupt)."""
+    """Return the cache dict with expired entries removed, or {} if the
+    file is missing, unreadable, or not a JSON object (warns on corrupt)."""
     if not os.path.exists(path):
         return {}
     try:
@@ -54,6 +78,7 @@ def load_cache(path):
             data = json.load(fh)
         if not isinstance(data, dict):
             raise ValueError("cache root is not an object")
+        _purge_expired(data)
         return data
     except (OSError, ValueError) as exc:
         print(
@@ -203,6 +228,7 @@ def resolve_travel_minutes(member, api_key, cache):
         else:
             coords = geocode_address(address, api_key)
             geo[norm] = [coords[0], coords[1]]
+            cache.setdefault("ts", {})[f"geocode:{norm}"] = time.time()
     lat, lng = coords
     key = f"{round(lat, 5)},{round(lng, 5)}"
     route = cache.setdefault("route", {})
@@ -212,4 +238,5 @@ def resolve_travel_minutes(member, api_key, cache):
         (lat, lng), DEFAULT_DESTINATION, api_key
     )
     route[key] = minutes
+    cache.setdefault("ts", {})[f"route:{key}"] = time.time()
     return minutes
