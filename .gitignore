@@ -15,3 +15,11 @@ Schedule_*.xlsx
 # Google API key + geo cache (local only)
 google_maps.config
 geo_cache.json
+
+# User-specific GUI settings
+bsca_settings.json
+
+# Environment / IDE
+.env
+.venv/
+.vscode/
