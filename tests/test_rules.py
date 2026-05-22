@@ -28,6 +28,8 @@ def test_default_rules_present_and_shaped():
     assert d["pickup_lead_min"] == (8, 12)
     assert d["dropoff_trail_min"] == (8, 12)
     assert d["round_to_minutes"] == 1
+    buf_lo, buf_hi = d["travel_buffer_min"]
+    assert 0 < buf_lo <= buf_hi
     assert "departure_window" not in d
     assert "min_session_hours" not in d
     assert "max_session_hours" not in d

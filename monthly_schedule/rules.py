@@ -13,6 +13,7 @@ SCHEDULE_RULES = {
         "time_in_drift_min": (2, 2),      # Time-In = Arrival + 2 min
         "time_out_drift_min": (2, 2),     # Time-Out = Departure - 2 min
         "round_to_minutes": 1,            # 1 = no snap; 5 = snap to :05
+        "travel_buffer_min": (5, 15),     # random buffer added to Google travel time
     },
 }
 

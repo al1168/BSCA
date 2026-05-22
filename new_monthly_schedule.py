@@ -117,8 +117,9 @@ def process_member(member, year, month, out_dir, preview,
                 file=sys.stderr,
             )
         rules = dict(get_rules_for_plan(member["health_plan"]))
-        rules["pickup_lead_min"] = (travel_minutes, travel_minutes)
-        rules["dropoff_trail_min"] = (travel_minutes, travel_minutes)
+        buf_lo, buf_hi = rules.get("travel_buffer_min", (5, 15))
+        rules["pickup_lead_min"] = (travel_minutes + buf_lo, travel_minutes + buf_hi)
+        rules["dropoff_trail_min"] = (travel_minutes + buf_lo, travel_minutes + buf_hi)
         rows = build_rows(year, month, authorized, rules, rng)
     except Exception as exc:  # reported in the run summary
         return (False, "generate", f"{type(exc).__name__} — {exc}")

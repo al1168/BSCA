@@ -315,6 +315,10 @@ def test_travel_minutes_applied_to_pickup_and_dropoff(
         h, m = hhmm.split(":")
         return int(h) * 60 + int(m)
 
+    from monthly_schedule.rules import SCHEDULE_RULES
+    buf_lo, buf_hi = SCHEDULE_RULES["Default"]["travel_buffer_min"]
+    travel_minutes = 7
+
     seen = False
     for line in out.splitlines():
         if not line.startswith("{"):
@@ -322,8 +326,10 @@ def test_travel_minutes_applied_to_pickup_and_dropoff(
         row = eval(line)  # printed dict literal
         if row["arrival"] == "":
             continue
-        assert to_min(row["arrival"]) - to_min(row["pickup"]) == 7
-        assert to_min(row["dropoff"]) - to_min(row["departure"]) == 7
+        lead = to_min(row["arrival"]) - to_min(row["pickup"])
+        trail = to_min(row["dropoff"]) - to_min(row["departure"])
+        assert travel_minutes + buf_lo <= lead <= travel_minutes + buf_hi
+        assert travel_minutes + buf_lo <= trail <= travel_minutes + buf_hi
         seen = True
     assert seen  # at least one eligible day was checked
 
