@@ -1,14 +1,17 @@
 import sys
 
-from PyQt6.QtWidgets import QApplication, QMessageBox
+from PyQt6.QtWidgets import QApplication
 
 from gui import app_settings
+from gui.i18n import LanguageManager
 from gui.main_window import MainWindow
 from gui.settings_dialog import SettingsDialog
 
 
+_SUPPORTED_LANGS = {"en", "zh"}
+
+
 def _run_first_time_setup(app: QApplication) -> bool:
-    """Show the initial setup dialog. Returns False if the user cancels."""
     settings = app_settings.load()
     dlg = SettingsDialog(settings, first_run=True)
     if not dlg.exec():
@@ -20,9 +23,18 @@ def _run_first_time_setup(app: QApplication) -> bool:
     return True
 
 
+def _seed_language():
+    settings = app_settings.load()
+    lang = settings.get("language", "en")
+    if lang not in _SUPPORTED_LANGS:
+        lang = "en"
+    LanguageManager.instance().set_language(lang)
+
+
 def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    _seed_language()
 
     if not app_settings.exists():
         if not _run_first_time_setup(app):
