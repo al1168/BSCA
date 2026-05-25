@@ -56,6 +56,8 @@ def resolve_output_dir(base, plan_code, year, month):
 
 Failure = namedtuple("Failure", "center_id name stage reason")
 
+REASON_NOT_FOUND = "not found in database"
+
 
 def format_summary(verb, success_count, total, scope, out_dir,
                    failures):
@@ -177,8 +179,7 @@ def main(argv=None):
                 member = get_member(cid, args.db_path)
                 if member is None:
                     failures.append(
-                        Failure(cid, "", "lookup",
-                                "not found in database")
+                        Failure(cid, "", "lookup", REASON_NOT_FOUND)
                     )
                 else:
                     members.append(member)

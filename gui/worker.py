@@ -8,6 +8,7 @@ from gui.errors import friendly_db_error
 from gui.i18n import tr
 from new_monthly_schedule import (
     Failure,
+    REASON_NOT_FOUND,
     parse_center_ids,
     process_member,
     resolve_output_dir,
@@ -84,7 +85,7 @@ class ScheduleWorker(QThread):
                     member = get_member(cid, self.db_path)
                     if member is None:
                         failures.append(
-                            Failure(cid, "", "lookup", "not found in database")
+                            Failure(cid, "", "lookup", REASON_NOT_FOUND)
                         )
                     else:
                         members.append(member)

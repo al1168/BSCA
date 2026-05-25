@@ -3,7 +3,7 @@ import sys
 from PyQt6.QtWidgets import QApplication
 
 from gui import app_settings
-from gui.i18n import LanguageManager
+from gui.i18n import LanguageManager, set_language
 from gui.main_window import MainWindow
 from gui.settings_dialog import SettingsDialog
 
@@ -25,10 +25,14 @@ def _run_first_time_setup(app: QApplication) -> bool:
 
 def _seed_language():
     settings = app_settings.load()
-    lang = settings.get("language", "en")
-    if lang not in _SUPPORTED_LANGS:
-        lang = "en"
-    LanguageManager.instance().set_language(lang)
+    raw = settings.get("language", "en")
+    if raw not in _SUPPORTED_LANGS:
+        # Heal the corrupt value on disk via the module-level setter,
+        # which bypasses LanguageManager's no-op guard.
+        set_language("en")
+    LanguageManager.instance().set_language(
+        raw if raw in _SUPPORTED_LANGS else "en"
+    )
 
 
 def main():

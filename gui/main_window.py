@@ -28,7 +28,7 @@ from gui import app_settings
 from gui.i18n import LanguageManager, tr
 from gui.settings_dialog import SettingsDialog
 from gui.worker import ScheduleWorker
-from new_monthly_schedule import parse_center_ids, resolve_output_dir
+from new_monthly_schedule import REASON_NOT_FOUND, parse_center_ids, resolve_output_dir
 
 PLAN_CODES = ["HOF"]
 
@@ -422,7 +422,7 @@ class MainWindow(QWidget):
             stage = tr(f"summary.stage.{f['stage']}")
             reason = (
                 tr("summary.reason.not_found")
-                if f["reason"] == "not found in database"
+                if f["reason"] == REASON_NOT_FOUND
                 else f["reason"]
             )
             row_key = (
