@@ -365,7 +365,6 @@ class MainWindow(QWidget):
             google_config=self._settings["google_config"],
             geo_cache=self._settings["geo_cache"],
         )
-        # Slots stay on the old (str / str) signal shapes — Task 7 swaps them.
         self._worker.progress.connect(self._on_progress)
         self._worker.log_line.connect(self._on_log_line)
         self._worker.finished.connect(self._on_finished)
@@ -375,10 +374,14 @@ class MainWindow(QWidget):
         self._progress.setRange(0, total)
         self._progress.setValue(done)
 
-    def _on_log_line(self, line: str):
-        self._log.appendPlainText(line)
+    def _on_log_line(self, key: str, args: dict):
+        self._log.appendPlainText(tr(key, **args))
 
-    def _on_finished(self, success: bool, summary: str):
+    def _on_finished(self, success: bool, payload: dict):
+        if "error_text" in payload:
+            summary = payload["error_text"]
+        else:
+            summary = self._build_summary(payload)
         self._log.appendPlainText("")
         self._log.appendPlainText(summary)
         self._generate_btn.setEnabled(True)
@@ -389,3 +392,49 @@ class MainWindow(QWidget):
             QMessageBox.warning(
                 self, tr("msg.completed_errors.title"), summary
             )
+
+    def _build_summary(self, data: dict) -> str:
+        scope = data["scope"]
+        period = f"{scope['year']:04d}-{scope['month']:02d}"
+        if scope["plan_code"] is not None:
+            scope_text = tr("scope.plan", code=scope["plan_code"], period=period)
+        else:
+            scope_text = tr("scope.period", period=period)
+
+        verb = tr(data["verb_key"])
+        head = tr(
+            "summary.headline",
+            verb=verb,
+            success=data["success"],
+            total=data["total"],
+            scope=scope_text,
+        )
+        if data["out_dir"] is not None:
+            head += tr("summary.into", dir=data["out_dir"])
+        if data["failures"]:
+            head += tr("summary.failed_tail", n=len(data["failures"]))
+
+        if not data["failures"]:
+            return head
+
+        lines = [head, tr("summary.failures_header")]
+        for f in data["failures"]:
+            stage = tr(f"summary.stage.{f['stage']}")
+            reason = (
+                tr("summary.reason.not_found")
+                if f["reason"] == "not found in database"
+                else f["reason"]
+            )
+            row_key = (
+                "summary.failure_row_named" if f["name"] else "summary.failure_row_unnamed"
+            )
+            lines.append(
+                tr(
+                    row_key,
+                    center_id=f["center_id"],
+                    name=f["name"],
+                    stage=stage,
+                    reason=reason,
+                )
+            )
+        return "\n".join(lines)
