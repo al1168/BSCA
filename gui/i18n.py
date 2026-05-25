@@ -295,3 +295,27 @@ def tr(key: str, **fmt) -> str:
     KeyError on purpose — that's a bug."""
     s = STRINGS.get(_current_lang, {}).get(key, key)
     return s.format(**fmt)
+
+
+from PyQt6.QtCore import QObject, pyqtSignal
+
+
+class LanguageManager(QObject):
+    """Singleton wrapper around module-level set_language() that emits
+    a Qt signal so widgets can retranslate themselves."""
+
+    languageChanged = pyqtSignal(str)
+
+    _instance: "LanguageManager | None" = None
+
+    @classmethod
+    def instance(cls) -> "LanguageManager":
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def set_language(self, lang: str) -> None:
+        if lang == get_language():
+            return
+        set_language(lang)
+        self.languageChanged.emit(lang)
