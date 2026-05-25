@@ -25,14 +25,10 @@ from PyQt6.QtWidgets import (
 )
 
 from gui import app_settings
+from gui.i18n import LanguageManager, tr
 from gui.settings_dialog import SettingsDialog
 from gui.worker import ScheduleWorker
 from new_monthly_schedule import parse_center_ids, resolve_output_dir
-
-MONTHS = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December",
-]
 
 PLAN_CODES = ["HOF"]
 
@@ -40,37 +36,36 @@ PLAN_CODES = ["HOF"]
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Monthly Schedule Generator")
         self.setMinimumWidth(560)
         self._settings = app_settings.load()
         self._worker = None
+        self._last_out_dir = None
 
         root = QVBoxLayout(self)
         root.setSpacing(12)
 
-        # ── Top bar ───────────────────────────────────────────────────────
+        # ── Top bar (language combo lands in Task 4) ───────────────
         top = QHBoxLayout()
-        title = QLabel("Monthly Schedule Generator")
+        self._title_label = QLabel()
         title_font = QFont()
         title_font.setPointSize(13)
         title_font.setBold(True)
-        title.setFont(title_font)
-        top.addWidget(title, 1)
-        settings_btn = QPushButton("⚙")
-        settings_btn.setFixedSize(32, 32)
-        settings_btn.setToolTip("Settings")
-        settings_btn.clicked.connect(self._open_settings)
-        top.addWidget(settings_btn)
+        self._title_label.setFont(title_font)
+        top.addWidget(self._title_label, 1)
+        self._settings_btn = QPushButton("⚙")
+        self._settings_btn.setFixedSize(32, 32)
+        self._settings_btn.clicked.connect(self._open_settings)
+        top.addWidget(self._settings_btn)
         root.addLayout(top)
 
-        # ── WHO ───────────────────────────────────────────────────────────
-        who_box = QGroupBox("Who")
-        who_layout = QVBoxLayout(who_box)
+        # ── WHO ────────────────────────────────────────────────────
+        self._who_box = QGroupBox()
+        who_layout = QVBoxLayout(self._who_box)
 
         radio_row = QHBoxLayout()
-        self._radio_single = QRadioButton("Single Member")
-        self._radio_multiple = QRadioButton("Multiple Members")
-        self._radio_plan = QRadioButton("Entire Plan")
+        self._radio_single = QRadioButton()
+        self._radio_multiple = QRadioButton()
+        self._radio_plan = QRadioButton()
         self._radio_single.setChecked(True)
         radio_row.addWidget(self._radio_single)
         radio_row.addWidget(self._radio_multiple)
@@ -85,31 +80,33 @@ class MainWindow(QWidget):
 
         self._who_stack = QStackedWidget()
 
-        # Panel 0 — single member
+        # Panel 0 — single
         p0 = QWidget()
         p0_layout = QHBoxLayout(p0)
         p0_layout.setContentsMargins(0, 0, 0, 0)
-        p0_layout.addWidget(QLabel("Member ID:"))
+        self._single_label = QLabel()
+        p0_layout.addWidget(self._single_label)
         self._single_id = QSpinBox()
         self._single_id.setRange(1, 999999)
         self._single_id.setFixedWidth(100)
         p0_layout.addWidget(self._single_id)
         p0_layout.addStretch()
 
-        # Panel 1 — multiple members
+        # Panel 1 — multiple
         p1 = QWidget()
         p1_layout = QHBoxLayout(p1)
         p1_layout.setContentsMargins(0, 0, 0, 0)
-        p1_layout.addWidget(QLabel("Member IDs:"))
+        self._multi_label = QLabel()
+        p1_layout.addWidget(self._multi_label)
         self._multi_ids = QLineEdit()
-        self._multi_ids.setPlaceholderText("e.g. 24010, 24011, 24015")
         p1_layout.addWidget(self._multi_ids, 1)
 
         # Panel 2 — plan
         p2 = QWidget()
         p2_layout = QHBoxLayout(p2)
         p2_layout.setContentsMargins(0, 0, 0, 0)
-        p2_layout.addWidget(QLabel("Plan:"))
+        self._plan_label_widget = QLabel()
+        p2_layout.addWidget(self._plan_label_widget)
         self._plan_combo = QComboBox()
         self._plan_combo.addItems(PLAN_CODES)
         self._plan_combo.setFixedWidth(120)
@@ -122,44 +119,47 @@ class MainWindow(QWidget):
 
         who_layout.addLayout(radio_row)
         who_layout.addWidget(self._who_stack)
-        root.addWidget(who_box)
+        root.addWidget(self._who_box)
 
-        # ── WHEN ──────────────────────────────────────────────────────────
-        when_box = QGroupBox("When")
-        when_layout = QHBoxLayout(when_box)
-        when_layout.addWidget(QLabel("Month:"))
+        # ── WHEN ───────────────────────────────────────────────────
+        self._when_box = QGroupBox()
+        when_layout = QHBoxLayout(self._when_box)
+        self._month_label_widget = QLabel()
+        when_layout.addWidget(self._month_label_widget)
         self._month_combo = QComboBox()
-        self._month_combo.addItems(MONTHS)
+        # Items are added in _retranslate() so they reflect the current language.
+        self._month_combo.addItems([""] * 12)
         self._month_combo.setCurrentIndex(datetime.date.today().month - 1)
         when_layout.addWidget(self._month_combo)
         when_layout.addSpacing(16)
-        when_layout.addWidget(QLabel("Year:"))
+        self._year_label_widget = QLabel()
+        when_layout.addWidget(self._year_label_widget)
         self._year_spin = QSpinBox()
         self._year_spin.setRange(2020, 2040)
         self._year_spin.setValue(datetime.date.today().year)
         self._year_spin.setFixedWidth(80)
         when_layout.addWidget(self._year_spin)
         when_layout.addStretch()
-        root.addWidget(when_box)
+        root.addWidget(self._when_box)
 
-        # ── SAVE TO ───────────────────────────────────────────────────────
-        save_box = QGroupBox("Save To")
-        save_layout = QHBoxLayout(save_box)
+        # ── SAVE TO ────────────────────────────────────────────────
+        self._save_box = QGroupBox()
+        save_layout = QHBoxLayout(self._save_box)
         self._out_label = QLabel(self._settings.get("output_path", "."))
         self._out_label.setWordWrap(True)
         save_layout.addWidget(self._out_label, 1)
-        change_btn = QPushButton("Change…")
-        change_btn.setFixedWidth(80)
-        change_btn.clicked.connect(self._open_settings)
-        save_layout.addWidget(change_btn)
-        root.addWidget(save_box)
+        self._change_btn = QPushButton()
+        self._change_btn.setFixedWidth(80)
+        self._change_btn.clicked.connect(self._open_settings)
+        save_layout.addWidget(self._change_btn)
+        root.addWidget(self._save_box)
 
-        # ── Options ───────────────────────────────────────────────────────
-        self._preview_check = QCheckBox("Preview only (don't save files)")
+        # ── Options ────────────────────────────────────────────────
+        self._preview_check = QCheckBox()
         root.addWidget(self._preview_check)
 
-        # ── Generate button ───────────────────────────────────────────────
-        self._generate_btn = QPushButton("Generate Schedule")
+        # ── Generate ───────────────────────────────────────────────
+        self._generate_btn = QPushButton()
         self._generate_btn.setFixedHeight(40)
         gen_font = QFont()
         gen_font.setPointSize(11)
@@ -168,7 +168,7 @@ class MainWindow(QWidget):
         self._generate_btn.clicked.connect(self._run)
         root.addWidget(self._generate_btn)
 
-        # ── Progress + Log ────────────────────────────────────────────────
+        # ── Progress + Log ─────────────────────────────────────────
         self._progress = QProgressBar()
         self._progress.setVisible(False)
         root.addWidget(self._progress)
@@ -181,14 +181,45 @@ class MainWindow(QWidget):
         self._log.setMinimumHeight(120)
         root.addWidget(self._log)
 
-        self._open_folder_btn = QPushButton("Open Output Folder")
+        self._open_folder_btn = QPushButton()
         self._open_folder_btn.setVisible(False)
         self._open_folder_btn.clicked.connect(self._open_output_folder)
         root.addWidget(self._open_folder_btn)
 
-        self._last_out_dir = None
+        # Wire up live retranslation and apply once.
+        LanguageManager.instance().languageChanged.connect(self._retranslate)
+        self._retranslate()
 
-    # ── Slots ─────────────────────────────────────────────────────────────
+    # ── Retranslate ───────────────────────────────────────────────
+
+    def _retranslate(self):
+        self.setWindowTitle(tr("app.main_title"))
+        self._title_label.setText(tr("top.title"))
+        self._settings_btn.setToolTip(tr("top.settings_tooltip"))
+
+        self._who_box.setTitle(tr("who.title"))
+        self._radio_single.setText(tr("who.single"))
+        self._radio_multiple.setText(tr("who.multiple"))
+        self._radio_plan.setText(tr("who.plan"))
+        self._single_label.setText(tr("who.member_id_label"))
+        self._multi_label.setText(tr("who.member_ids_label"))
+        self._multi_ids.setPlaceholderText(tr("who.placeholder"))
+        self._plan_label_widget.setText(tr("who.plan_label"))
+
+        self._when_box.setTitle(tr("when.title"))
+        self._month_label_widget.setText(tr("when.month_label"))
+        self._year_label_widget.setText(tr("when.year_label"))
+        for i in range(12):
+            self._month_combo.setItemText(i, tr(f"when.month.{i + 1}"))
+
+        self._save_box.setTitle(tr("save.title"))
+        self._change_btn.setText(tr("save.change"))
+
+        self._preview_check.setText(tr("opts.preview"))
+        self._generate_btn.setText(tr("opts.generate"))
+        self._open_folder_btn.setText(tr("opts.open_folder"))
+
+    # ── Slots ─────────────────────────────────────────────────────
 
     def _on_who_changed(self, btn_id: int, checked: bool):
         if checked:
@@ -215,13 +246,21 @@ class MainWindow(QWidget):
 
         if mode == 0:
             if self._single_id.value() < 1:
-                QMessageBox.warning(self, "Missing Info", "Please enter a Member ID.")
+                QMessageBox.warning(
+                    self,
+                    tr("msg.missing_info.title"),
+                    tr("msg.missing_info.member_id"),
+                )
                 return False
 
         elif mode == 1:
             raw = self._multi_ids.text().strip()
             if not raw:
-                QMessageBox.warning(self, "Missing Info", "Please enter at least one Member ID.")
+                QMessageBox.warning(
+                    self,
+                    tr("msg.missing_info.title"),
+                    tr("msg.missing_info.member_ids"),
+                )
                 return False
             try:
                 ids = parse_center_ids(raw)
@@ -229,30 +268,30 @@ class MainWindow(QWidget):
                     raise ValueError
             except (ValueError, Exception):
                 QMessageBox.warning(
-                    self, "Invalid IDs",
-                    "Member IDs must be numbers separated by commas.\n"
-                    f"Could not read: {raw!r}"
+                    self,
+                    tr("msg.invalid_ids.title"),
+                    tr("msg.invalid_ids.body", raw=repr(raw)),
                 )
                 return False
 
         elif mode == 2:
-            pass  # combo always has a value
+            pass
 
         db_path = self._settings.get("db_path", "")
         if not os.path.isfile(db_path):
             QMessageBox.warning(
-                self, "Database Not Found",
-                f"The database file could not be found:\n{db_path}\n\n"
-                "Open Settings to fix the path."
+                self,
+                tr("msg.db_not_found.title"),
+                tr("msg.db_not_found.body", path=db_path),
             )
             return False
 
         gc_path = self._settings.get("google_config", "")
         if not os.path.isfile(gc_path):
             QMessageBox.warning(
-                self, "Google Config Not Found",
-                f"The Google Maps config file could not be found:\n{gc_path}\n\n"
-                "Open Settings to fix the path."
+                self,
+                tr("msg.gc_not_found.title"),
+                tr("msg.gc_not_found.body", path=gc_path),
             )
             return False
 
@@ -260,8 +299,9 @@ class MainWindow(QWidget):
             out = self._settings.get("output_path", "").strip()
             if not out:
                 QMessageBox.warning(
-                    self, "Missing Info",
-                    "Please set an output folder in Settings (⚙)."
+                    self,
+                    tr("msg.missing_info.title"),
+                    tr("msg.missing_info.output_folder"),
                 )
                 return False
 
@@ -307,6 +347,7 @@ class MainWindow(QWidget):
             google_config=self._settings["google_config"],
             geo_cache=self._settings["geo_cache"],
         )
+        # Slots stay on the old (str / str) signal shapes — Task 7 swaps them.
         self._worker.progress.connect(self._on_progress)
         self._worker.log_line.connect(self._on_log_line)
         self._worker.finished.connect(self._on_finished)
@@ -327,4 +368,6 @@ class MainWindow(QWidget):
         if success and not preview:
             self._open_folder_btn.setVisible(True)
         if not success:
-            QMessageBox.warning(self, "Completed with errors", summary)
+            QMessageBox.warning(
+                self, tr("msg.completed_errors.title"), summary
+            )
