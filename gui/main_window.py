@@ -4,7 +4,7 @@ import subprocess
 import sys
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QIntValidator
 from PyQt6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -99,9 +99,10 @@ class MainWindow(QWidget):
         p0_layout.setContentsMargins(0, 0, 0, 0)
         self._single_label = QLabel()
         p0_layout.addWidget(self._single_label)
-        self._single_id = QSpinBox()
-        self._single_id.setRange(1, 999999)
-        self._single_id.setFixedWidth(100)
+        self._single_id = QLineEdit()
+        self._single_id.setMaxLength(10)
+        self._single_id.setValidator(QIntValidator(1, 2147483647))
+        self._single_id.setFixedWidth(120)
         p0_layout.addWidget(self._single_id)
         p0_layout.addStretch()
 
@@ -263,7 +264,8 @@ class MainWindow(QWidget):
         mode = self._who_group.checkedId()
 
         if mode == 0:
-            if self._single_id.value() < 1:
+            raw = self._single_id.text().strip()
+            if not raw or int(raw) < 1:
                 QMessageBox.warning(
                     self,
                     tr("msg.missing_info.title"),
@@ -335,7 +337,7 @@ class MainWindow(QWidget):
         month = self._month_combo.currentIndex() + 1
         preview = self._preview_check.isChecked()
 
-        center_id = self._single_id.value() if mode == "single" else None
+        center_id = int(self._single_id.text()) if mode == "single" else None
         center_ids = (
             parse_center_ids(self._multi_ids.text()) if mode == "multiple" else None
         )
