@@ -44,7 +44,7 @@ class MainWindow(QWidget):
         root = QVBoxLayout(self)
         root.setSpacing(12)
 
-        # ── Top bar (language combo lands in Task 4) ───────────────
+        # ── Top bar ────────────────────────────────────────────────
         top = QHBoxLayout()
         self._title_label = QLabel()
         title_font = QFont()
@@ -52,6 +52,19 @@ class MainWindow(QWidget):
         title_font.setBold(True)
         self._title_label.setFont(title_font)
         top.addWidget(self._title_label, 1)
+
+        self._lang_combo = QComboBox()
+        self._lang_combo.addItem("English", "en")
+        self._lang_combo.addItem("中文", "zh")
+        self._lang_combo.setFixedWidth(90)
+        # Reflect the current language without firing a switch.
+        current_lang = self._settings.get("language", "en")
+        idx = self._lang_combo.findData(current_lang)
+        if idx >= 0:
+            self._lang_combo.setCurrentIndex(idx)
+        self._lang_combo.currentIndexChanged.connect(self._on_language_changed)
+        top.addWidget(self._lang_combo)
+
         self._settings_btn = QPushButton("⚙")
         self._settings_btn.setFixedSize(32, 32)
         self._settings_btn.clicked.connect(self._open_settings)
@@ -224,6 +237,11 @@ class MainWindow(QWidget):
     def _on_who_changed(self, btn_id: int, checked: bool):
         if checked:
             self._who_stack.setCurrentIndex(btn_id)
+
+    def _on_language_changed(self, index: int):
+        lang = self._lang_combo.itemData(index)
+        if lang:
+            LanguageManager.instance().set_language(lang)
 
     def _open_settings(self):
         dlg = SettingsDialog(self._settings, self)
