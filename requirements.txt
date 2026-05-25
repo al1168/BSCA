@@ -3,3 +3,4 @@ openpyxl==3.1.5
 pytest==8.3.3
 requests==2.32.3
 PyQt6>=6.6.0
+pyinstaller>=6.0.0
