@@ -18,11 +18,11 @@ from PyQt6.QtWidgets import (
 from monthly_schedule.db import get_member
 from monthly_schedule.travel import load_api_key
 from gui.errors import friendly_db_error
+from gui.i18n import LanguageManager, tr
 
 _GOOGLE_CONFIG_PLACEHOLDER = "PASTE_YOUR_GOOGLE_MAPS_API_KEY_HERE\n"
 
-# Default location for a newly created config file: same folder as the
-# running exe (PyInstaller) or the project root (script mode).
+
 def _default_config_dir() -> str:
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
@@ -36,18 +36,26 @@ class _PathRow(QHBoxLayout):
         self._pick_dir = pick_dir
         self.edit = QLineEdit(default_path)
         self.edit.setMinimumWidth(320)
-        browse = QPushButton("Browse…")
-        browse.setFixedWidth(80)
-        browse.clicked.connect(self._browse)
+        self.browse_btn = QPushButton()
+        self.browse_btn.setFixedWidth(80)
+        self.browse_btn.clicked.connect(self._browse)
         self.addWidget(self.edit, 1)
-        self.addWidget(browse)
+        self.addWidget(self.browse_btn)
+
+    def retranslate(self):
+        self.browse_btn.setText(tr("settings.browse"))
 
     def _browse(self):
         if self._pick_dir:
-            path = QFileDialog.getExistingDirectory(None, "Select Folder", self.edit.text())
+            path = QFileDialog.getExistingDirectory(
+                None, tr("settings.file_dialog.folder"), self.edit.text()
+            )
         else:
             path, _ = QFileDialog.getOpenFileName(
-                None, "Select File", self.edit.text(), self._filter
+                None,
+                tr("settings.file_dialog.file"),
+                self.edit.text(),
+                self._filter,
             )
         if path:
             self.edit.setText(path)
@@ -60,26 +68,31 @@ class _PathRow(QHBoxLayout):
 
 
 class _GoogleConfigRow(QHBoxLayout):
-    """Path row for the Google Maps config file with a Create & Open button."""
-
     def __init__(self, default_path: str):
         super().__init__()
         self.edit = QLineEdit(default_path)
         self.edit.setMinimumWidth(260)
-        browse = QPushButton("Browse…")
-        browse.setFixedWidth(80)
-        browse.clicked.connect(self._browse)
-        create_btn = QPushButton("Create & Open")
-        create_btn.setFixedWidth(105)
-        create_btn.setToolTip("Create a new config file and open it in Notepad to paste your API key")
-        create_btn.clicked.connect(self._create_and_open)
+        self.browse_btn = QPushButton()
+        self.browse_btn.setFixedWidth(80)
+        self.browse_btn.clicked.connect(self._browse)
+        self.create_btn = QPushButton()
+        self.create_btn.setFixedWidth(105)
+        self.create_btn.clicked.connect(self._create_and_open)
         self.addWidget(self.edit, 1)
-        self.addWidget(browse)
-        self.addWidget(create_btn)
+        self.addWidget(self.browse_btn)
+        self.addWidget(self.create_btn)
+
+    def retranslate(self):
+        self.browse_btn.setText(tr("settings.browse"))
+        self.create_btn.setText(tr("settings.create_open"))
+        self.create_btn.setToolTip(tr("settings.create_open_tooltip"))
 
     def _browse(self):
         path, _ = QFileDialog.getOpenFileName(
-            None, "Select Google Maps Config File", self.edit.text(), "Config files (*)"
+            None,
+            tr("settings.file_dialog.google"),
+            self.edit.text(),
+            "Config files (*)",
         )
         if path:
             self.edit.setText(path)
@@ -94,8 +107,8 @@ class _GoogleConfigRow(QHBoxLayout):
         if os.path.isfile(target):
             reply = QMessageBox.question(
                 None,
-                "File Already Exists",
-                f"A config file already exists at:\n{target}\n\nOpen it for editing?",
+                tr("settings.file_exists_title"),
+                tr("settings.file_exists_body", path=target),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply != QMessageBox.StandardButton.Yes:
@@ -105,7 +118,9 @@ class _GoogleConfigRow(QHBoxLayout):
                 with open(target, "w", encoding="utf-8") as f:
                     f.write(_GOOGLE_CONFIG_PLACEHOLDER)
             except OSError as exc:
-                QMessageBox.warning(None, "Could Not Create File", str(exc))
+                QMessageBox.warning(
+                    None, tr("settings.create_fail_title"), str(exc)
+                )
                 return
 
         self.edit.setText(target)
@@ -124,20 +139,18 @@ class _GoogleConfigRow(QHBoxLayout):
 class SettingsDialog(QDialog):
     def __init__(self, settings: dict, parent=None, first_run: bool = False):
         super().__init__(parent)
-        self.setWindowTitle("Welcome — Initial Setup" if first_run else "Settings")
         self.setMinimumWidth(560)
+        self._first_run = first_run
         self._result: dict | None = None
 
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
 
+        self._welcome = None
         if first_run:
-            welcome = QLabel(
-                "Before you get started, please locate the three files below.\n"
-                "You can change these at any time using the ⚙ Settings button."
-            )
-            welcome.setWordWrap(True)
-            layout.addWidget(welcome)
+            self._welcome = QLabel()
+            self._welcome.setWordWrap(True)
+            layout.addWidget(self._welcome)
 
         form = QFormLayout()
         form.setFieldGrowthPolicy(
@@ -151,18 +164,26 @@ class SettingsDialog(QDialog):
         )
         self._out_row = _PathRow(settings.get("output_path", ""), pick_dir=True)
         self._gc_row = _GoogleConfigRow(settings.get("google_config", ""))
-        self._cache_row = _PathRow(settings.get("geo_cache", ""), "JSON files (*.json)")
+        self._cache_row = _PathRow(
+            settings.get("geo_cache", ""), "JSON files (*.json)"
+        )
 
-        form.addRow(QLabel("Database File"), self._db_row)
-        form.addRow(QLabel("Output Folder"), self._out_row)
-        form.addRow(QLabel("Google Maps Config File"), self._gc_row)
-        form.addRow(QLabel("Travel Cache File"), self._cache_row)
+        self._db_label = QLabel()
+        self._out_label = QLabel()
+        self._gc_label = QLabel()
+        self._cache_label = QLabel()
+
+        form.addRow(self._db_label, self._db_row)
+        form.addRow(self._out_label, self._out_row)
+        form.addRow(self._gc_label, self._gc_row)
+        form.addRow(self._cache_label, self._cache_row)
         layout.addLayout(form)
 
+        self._test_btn = None
         if not first_run:
-            test_btn = QPushButton("Test Connection")
-            test_btn.clicked.connect(self._test_connection)
-            layout.addWidget(test_btn)
+            self._test_btn = QPushButton()
+            self._test_btn.clicked.connect(self._test_connection)
+            layout.addWidget(self._test_btn)
 
         button_mask = (
             QDialogButtonBox.StandardButton.Ok
@@ -175,32 +196,56 @@ class SettingsDialog(QDialog):
             buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
+        LanguageManager.instance().languageChanged.connect(self._retranslate)
+        self._retranslate()
+
+    def _retranslate(self):
+        self.setWindowTitle(
+            tr("app.first_run_title") if self._first_run else tr("app.settings_title")
+        )
+        if self._welcome is not None:
+            self._welcome.setText(tr("settings.welcome"))
+        self._db_label.setText(tr("settings.db_label"))
+        self._out_label.setText(tr("settings.output_label"))
+        self._gc_label.setText(tr("settings.google_label"))
+        self._cache_label.setText(tr("settings.cache_label"))
+        self._db_row.retranslate()
+        self._out_row.retranslate()
+        self._gc_row.retranslate()
+        self._cache_row.retranslate()
+        if self._test_btn is not None:
+            self._test_btn.setText(tr("settings.test_connection"))
+
     def _test_connection(self):
         db_path = self._db_row.value()
         gc_path = self._gc_row.value()
         lines = []
 
         if not os.path.isfile(db_path):
-            lines.append(f"Database: File not found — {db_path}")
+            lines.append(tr("settings.test.db_not_found", path=db_path))
         else:
             try:
                 get_member(0, db_path)
-                lines.append("Database: Connected successfully.")
+                lines.append(tr("settings.test.db_ok"))
             except RuntimeError as exc:
-                lines.append(f"Database: {friendly_db_error(str(exc))}")
+                lines.append(
+                    tr("settings.test.db_fail", error=friendly_db_error(str(exc)))
+                )
             except Exception as exc:
-                lines.append(f"Database: Connection failed — {exc}")
+                lines.append(tr("settings.test.db_fail", error=str(exc)))
 
         if not os.path.isfile(gc_path):
-            lines.append(f"Google Config: File not found — {gc_path}")
+            lines.append(tr("settings.test.gc_not_found", path=gc_path))
         else:
             try:
                 load_api_key(gc_path)
-                lines.append("Google Config: API key loaded successfully.")
+                lines.append(tr("settings.test.gc_ok"))
             except RuntimeError as exc:
-                lines.append(f"Google Config: {exc}")
+                lines.append(tr("settings.test.gc_fail", error=str(exc)))
 
-        QMessageBox.information(self, "Connection Test", "\n".join(lines))
+        QMessageBox.information(
+            self, tr("settings.test_result_title"), "\n".join(lines)
+        )
 
     def _save(self):
         self._result = {
@@ -212,5 +257,4 @@ class SettingsDialog(QDialog):
         self.accept()
 
     def get_settings(self) -> dict | None:
-        """Returns the saved settings dict, or None if cancelled."""
         return self._result
