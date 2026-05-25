@@ -12,6 +12,7 @@ def _isolate_settings(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "gui.app_settings._SETTINGS_FILE", str(settings_file)
     )
+    monkeypatch.setattr("gui.i18n._current_lang", "en")
     return settings_file
 
 
