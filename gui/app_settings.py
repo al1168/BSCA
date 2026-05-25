@@ -8,6 +8,7 @@ DEFAULTS = {
     "google_config": "google_maps.config",
     "geo_cache": "geo_cache.json",
     "output_path": ".",
+    "language": "en",
 }
 
 
