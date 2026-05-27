@@ -100,7 +100,8 @@ def test_availability_window_honored():
     )
     rows = build_rows(2026, 5, ctx, PLAN_RULES, random.Random(0))
     mon = next(r for r in rows if r["date"] == date(2026, 5, 4))
-    # Arrival should fall within the narrowed 10:00–10:30 window
+    # Plan default arrival is 08:00–11:00; member is available 10:00 onwards,
+    # so the effective arrival window narrows to 10:00–11:00 (600–660 min).
     h, m = mon["arrival"].split(":")
     arrival_min = int(h) * 60 + int(m)
     assert 600 <= arrival_min <= 660

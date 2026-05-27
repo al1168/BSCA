@@ -1,4 +1,4 @@
-"""CLI: generate a monthly schedule workbook for one SADC member."""
+"""CLI: generate monthly schedule workbooks from the four-table Access data model."""
 
 import argparse
 import os
