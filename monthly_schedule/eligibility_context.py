@@ -42,6 +42,10 @@ class MemberContext:
         return False
 
     def availability_for(self, day: date):
+        """Return the most relevant Availability row for `day`'s weekday
+        whose effective-date window includes `day`. effective_end_date
+        is nullable (NULL = ongoing). Tie-break: latest
+        effective_start_date, then largest `id`."""
         weekday = day.isoweekday()
         candidates = []
         for row in self._availabilities:

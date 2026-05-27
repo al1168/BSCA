@@ -154,8 +154,11 @@ def test_map_absence_row():
 
 
 def test_map_availability_row():
-    from datetime import date
-    row = (3, 24010.0, date(2026, 1, 1), None, 2, "10:00", "15:00")
+    from datetime import date, datetime
+    # Access returns avail_start/avail_end as DATETIME with a placeholder
+    # 1899-12-30 date; the mapper extracts the time portion as 'HH:MM'.
+    row = (3, 24010.0, date(2026, 1, 1), None, 2,
+           datetime(1899, 12, 30, 10, 0), datetime(1899, 12, 30, 15, 0))
     assert map_availability_row(row) == {
         "id": 3,
         "center_id": 24010,
@@ -165,6 +168,25 @@ def test_map_availability_row():
         "avail_start": "10:00",
         "avail_end": "15:00",
     }
+
+
+def test_map_availability_row_handles_null_times():
+    from monthly_schedule.db import map_availability_row
+    from datetime import date
+    row = (3, 24010.0, date(2026, 1, 1), None, 2, None, None)
+    assert map_availability_row(row)["avail_start"] is None
+    assert map_availability_row(row)["avail_end"] is None
+
+
+def test_map_authorization_row_nullable_effective_dates():
+    from datetime import date
+    from monthly_schedule.db import map_authorization_row
+    # effective_start / effective_end NULL → fall back to auth_start / auth_end
+    row = (5, 24010.0, date(2026, 1, 1), date(2026, 12, 31),
+           None, None, "1,3,5")
+    result = map_authorization_row(row)
+    assert result["effective_start"] == date(2026, 1, 1)
+    assert result["effective_end"] == date(2026, 12, 31)
 
 
 def test_get_enrollments_missing_db_raises(tmp_path):

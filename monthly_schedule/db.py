@@ -101,12 +101,23 @@ ENROLLMENTS_QUERY = (
 )
 
 
+def _to_date(value):
+    """Access Date/Time fields come back as datetime.datetime via pyodbc.
+    Normalize to datetime.date so comparisons against month_dates work.
+    NULL pass-through."""
+    if value is None:
+        return None
+    if hasattr(value, "date"):
+        return value.date()
+    return value
+
+
 def map_enrollment_row(row):
     return {
         "id": int(row[0]),
         "center_id": int(row[1]),
-        "start_date": row[2],
-        "end_date": row[3],
+        "start_date": _to_date(row[2]),
+        "end_date": _to_date(row[3]),
     }
 
 
@@ -124,13 +135,20 @@ AUTHORIZATIONS_QUERY = (
 
 
 def map_authorization_row(row):
+    """Map a raw Authorization row. If `effective_start` / `effective_end`
+    is NULL in Access, fall back to `auth_start` / `auth_end` — the
+    document period acts as the implicit effective window."""
+    auth_start = _to_date(row[2])
+    auth_end = _to_date(row[3])
+    effective_start = _to_date(row[4])
+    effective_end = _to_date(row[5])
     return {
         "id": int(row[0]),
         "center_id": int(row[1]),
-        "auth_start": row[2],
-        "auth_end": row[3],
-        "effective_start": row[4],
-        "effective_end": row[5],
+        "auth_start": auth_start,
+        "auth_end": auth_end,
+        "effective_start": effective_start if effective_start is not None else auth_start,
+        "effective_end": effective_end if effective_end is not None else auth_end,
         "auth_days": row[6],
     }
 
@@ -153,8 +171,8 @@ def map_absence_row(row):
         "id": int(row[0]),
         "center_id": int(row[1]),
         "leave_type": row[2],
-        "start_date": row[3],
-        "end_date": row[4],
+        "start_date": _to_date(row[3]),
+        "end_date": _to_date(row[4]),
     }
 
 
@@ -171,15 +189,29 @@ AVAILABILITY_QUERY = (
 )
 
 
+def _datetime_to_hhmm(value):
+    """Access stores time-only fields as DATETIME with a fixed 1899
+    placeholder date. Extract the time as 'HH:MM' so downstream code
+    (parse_hhmm) can use it. NULL passes through unchanged."""
+    if value is None:
+        return None
+    if hasattr(value, "strftime"):
+        return value.strftime("%H:%M")
+    return value
+
+
 def map_availability_row(row):
+    """Map a raw Availability row. avail_start/avail_end are stored as
+    DATETIME in Access (with a 1899-12-30 placeholder date); the mapper
+    extracts the time as 'HH:MM'. `effective_end_date` is nullable."""
     return {
         "id": int(row[0]),
         "center_id": int(row[1]),
-        "effective_start_date": row[2],
-        "effective_end_date": row[3],
+        "effective_start_date": _to_date(row[2]),
+        "effective_end_date": _to_date(row[3]),
         "day_of_week": int(row[4]),
-        "avail_start": row[5],
-        "avail_end": row[6],
+        "avail_start": _datetime_to_hhmm(row[5]),
+        "avail_end": _datetime_to_hhmm(row[6]),
     }
 
 
