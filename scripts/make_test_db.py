@@ -169,7 +169,9 @@ def main(argv=None) -> int:
                 file=sys.stderr,
             )
             return 2
-        os.makedirs(os.path.dirname(target), exist_ok=True)
+        target_dir = os.path.dirname(target)
+        if target_dir:
+            os.makedirs(target_dir, exist_ok=True)
         shutil.copy2(args.source, target)
         print(f"Copied {args.source} -> {target}")
 
