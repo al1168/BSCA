@@ -276,7 +276,102 @@ def seed_plan_full(conn, today: date) -> None:
 
 
 def seed_populate_real_members(conn, today: date) -> None:
-    pass  # Implemented in Task 2.
+    """Seed the four supporting tables against the real Contacts IDs.
+
+    Iterates every Contacts row (sorted by Center ID ascending) and
+    inserts a happy-path setup. Every 30-cycle rotates through three
+    deliberate failure shapes (positions 9, 19, 29 within each cycle)
+    so the run-summary failures block is also exercised.
+    """
+    m1, m15, mlast, mnext_last = _month_bounds(today)
+    enrolled_since = date(today.year - 1, today.month, 1)
+    cur = conn.cursor()
+
+    # Closures so each insert helper sees the date constants without
+    # threading them through every call.
+
+    def _enroll(cid: int) -> None:
+        cur.execute(
+            "INSERT INTO [Enrollment] ([Center ID], [start_date], "
+            "[end_date]) VALUES (?, ?, NULL)",
+            cid, _dt(enrolled_since),
+        )
+
+    def _authorize(cid: int) -> None:
+        cur.execute(
+            "INSERT INTO [Authorization] ([Center ID], [auth_start], "
+            "[auth_end], [effective_start], [effective_end], [auth_days]) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            str(cid), _dt(m1), _dt(mnext_last),
+            _dt(m1), _dt(mnext_last), "1,2,3,4,5",
+        )
+
+    def _make_available(cid: int) -> None:
+        for day_of_week in range(1, 6):  # Mon … Fri
+            cur.execute(
+                "INSERT INTO [Availability] ([Center ID], "
+                "[effective_start_date], [effective_end_date], "
+                "[Day Of Week], [avail_start], [avail_end]) "
+                "VALUES (?, ?, NULL, ?, ?, ?)",
+                str(cid), _dt(enrolled_since), day_of_week,
+                _hhmm(8, 0), _hhmm(16, 0),
+            )
+
+    def _mark_absent_month(cid: int) -> None:
+        cur.execute(
+            "INSERT INTO [Absences] ([Center ID], [Leave Type], "
+            "[Start_Date], [End_Date]) VALUES (?, ?, ?, ?)",
+            str(cid), "Vacation", _dt(m1), _dt(mlast),
+        )
+
+    cur.execute("SELECT [Center ID] FROM [Contacts] ORDER BY [Center ID]")
+    raw_ids = [row[0] for row in cur.fetchall()]
+
+    skipped_null = 0
+    counts = {"happy": 0, "no_auth": 0, "absent": 0, "no_enrollment": 0}
+
+    for idx, raw_id in enumerate(raw_ids):
+        if raw_id is None:
+            skipped_null += 1
+            continue
+        cid = int(raw_id)
+        variant = idx % 30
+        if variant == 9:
+            # No Authorization
+            _enroll(cid)
+            _make_available(cid)
+            counts["no_auth"] += 1
+        elif variant == 19:
+            # Absent entire month
+            _enroll(cid)
+            _authorize(cid)
+            _make_available(cid)
+            _mark_absent_month(cid)
+            counts["absent"] += 1
+        elif variant == 29:
+            # No Enrollment
+            _authorize(cid)
+            _make_available(cid)
+            counts["no_enrollment"] += 1
+        else:
+            # Happy path
+            _enroll(cid)
+            _authorize(cid)
+            _make_available(cid)
+            counts["happy"] += 1
+
+    conn.commit()
+
+    total = sum(counts.values())
+    print(
+        f"Seeded populate_real_members: {counts['happy']} happy / "
+        f"{counts['no_auth']} no-auth / {counts['absent']} absent / "
+        f"{counts['no_enrollment']} no-enrollment ({total} members total)"
+    )
+    if skipped_null:
+        print(
+            f"  (skipped {skipped_null} Contacts row(s) with NULL Center ID)"
+        )
 
 
 SCENARIOS: dict[str, Callable] = {
