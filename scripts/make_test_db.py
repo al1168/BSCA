@@ -22,8 +22,14 @@ DEFAULT_SOURCE = r"\\BOWERY3\Users\Shared\Access Member 5.5.26_copy.accdb"
 
 # Deletion order: children first, parents last. Access FK constraints
 # may or may not enforce; deleting in this order is safe regardless.
-DATA_TABLES = ("Availability", "Absences", "Authorization",
-               "Enrollment", "Contacts")
+SUPPORTING_TABLES = ("Availability", "Absences", "Authorization",
+                     "Enrollment")
+DATA_TABLES = SUPPORTING_TABLES + ("Contacts",)
+
+# Scenarios that should preserve the real Contacts table and only
+# truncate the four supporting tables. Used by main() to decide which
+# list to hand _truncate().
+SCENARIOS_KEEP_CONTACTS = {"populate_real_members"}
 
 
 # ── Date math ─────────────────────────────────────────────────────────
@@ -60,10 +66,11 @@ def _build_connection_string(path: str) -> str:
     return f"DRIVER={{Microsoft Access Driver (*.mdb, *.accdb)}};DBQ={path};"
 
 
-def _truncate_all(conn) -> None:
-    """`DELETE FROM` each data table. Children first, then parents."""
+def _truncate(conn, tables) -> None:
+    """`DELETE FROM` each table in `tables`. Caller supplies the order
+    (children first, parents last)."""
     cur = conn.cursor()
-    for table in DATA_TABLES:
+    for table in tables:
         try:
             cur.execute(f"DELETE FROM [{table}]")
         except Exception as exc:
@@ -268,11 +275,16 @@ def seed_plan_full(conn, today: date) -> None:
     conn.commit()
 
 
+def seed_populate_real_members(conn, today: date) -> None:
+    pass  # Implemented in Task 2.
+
+
 SCENARIOS: dict[str, Callable] = {
     "happy_path": seed_happy_path,
     "missing_data": seed_missing_data,
     "mid_period_change": seed_mid_period_change,
     "plan_full": seed_plan_full,
+    "populate_real_members": seed_populate_real_members,
 }
 
 
@@ -347,7 +359,12 @@ def main(argv=None) -> int:
         return 1
 
     try:
-        _truncate_all(conn)
+        truncate_tables = (
+            SUPPORTING_TABLES
+            if args.scenario in SCENARIOS_KEEP_CONTACTS
+            else DATA_TABLES
+        )
+        _truncate(conn, truncate_tables)
         SCENARIOS[args.scenario](conn, date.today())
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
