@@ -94,7 +94,34 @@ def _seed_member(conn, center_id: int, last: str, first: str,
 # tables are empty.
 
 def seed_happy_path(conn, today: date) -> None:
-    pass  # Implemented in Task 2.
+    """Center 99001 'Test, Happy' — full happy-path setup."""
+    m1, m15, mlast, mnext_last = _month_bounds(today)
+    enrolled_since = date(today.year - 1, today.month, 1)
+    cur = conn.cursor()
+
+    _seed_member(conn, 99001, "Test", "Happy")
+    cur.execute(
+        "INSERT INTO [Enrollment] ([Center ID], [start_date], [end_date]) "
+        "VALUES (?, ?, NULL)",
+        99001, _dt(enrolled_since),
+    )
+    cur.execute(
+        "INSERT INTO [Authorization] ([Center ID], [auth_start], "
+        "[auth_end], [effective_start], [effective_end], [auth_days]) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        "99001", _dt(m1), _dt(mnext_last),
+        _dt(m1), _dt(mnext_last), "1,2,3,4,5",
+    )
+    for day_of_week in range(1, 6):  # Mon (1) … Fri (5)
+        cur.execute(
+            "INSERT INTO [Availability] ([Center ID], "
+            "[effective_start_date], [effective_end_date], "
+            "[Day Of Week], [avail_start], [avail_end]) "
+            "VALUES (?, ?, NULL, ?, ?, ?)",
+            "99001", _dt(enrolled_since), day_of_week,
+            _hhmm(8, 0), _hhmm(16, 0),
+        )
+    conn.commit()
 
 
 def seed_missing_data(conn, today: date) -> None:
