@@ -2,7 +2,11 @@ import os
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from monthly_schedule.db import get_member, get_members_by_plan
+from monthly_schedule.db import (
+    get_member, get_members_by_plan,
+    get_enrollments, get_authorizations, get_absences, get_availability,
+)
+from monthly_schedule.eligibility_context import MemberContext
 from monthly_schedule.travel import load_api_key, load_cache, save_cache
 from gui.errors import friendly_db_error
 from gui.i18n import tr
@@ -109,14 +113,16 @@ class ScheduleWorker(QThread):
         success = 0
 
         for i, member in enumerate(members):
+            ctx = MemberContext(
+                enrollments=get_enrollments(member["center_id"], self.db_path),
+                authorizations=get_authorizations(member["center_id"], self.db_path),
+                absences=get_absences(member["center_id"], self.db_path),
+                availabilities=get_availability(member["center_id"], self.db_path),
+            )
             ok, stage, reason = process_member(
-                member,
-                self.year,
-                self.month,
-                self.out_dir,
-                self.preview,
-                api_key,
-                cache,
+                member, ctx,
+                self.year, self.month, self.out_dir,
+                self.preview, api_key, cache,
             )
             if ok:
                 success += 1
