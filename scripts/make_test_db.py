@@ -365,4 +365,8 @@ def main(argv=None) -> int:
 
 
 if __name__ == "__main__":
+    # When run as `python scripts/make_test_db.py`, Python only puts
+    # the script's own dir on sys.path. Add the project root so the
+    # lazy `from gui import app_settings` inside --use works.
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.exit(main())
