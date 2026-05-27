@@ -9,7 +9,7 @@ import os
 
 MEMBER_QUERY = (
     "SELECT [Center ID], [Last Name], [First Name], [Health Plan], "
-    "[SADC], [Address], [Long Lat] FROM [Contacts] "
+    "[Address], [Long Lat] FROM [Contacts] "
     "WHERE [Center ID] = ?"
 )
 
@@ -23,15 +23,13 @@ def build_connection_string(db_path):
 
 def map_member_row(row):
     return {
-        # Access returns [Center ID] as a float; normalize to int so
-        # the header reads "ID: 24010", not "ID: 24010.0".
+        # Access returns [Center ID] as a float; normalize to int.
         "center_id": int(row[0]),
         "last_name": row[1],
         "first_name": row[2],
         "health_plan": row[3],
-        "auth_days": row[4],
-        "address": row[5],
-        "long_lat": row[6],
+        "address": row[4],
+        "long_lat": row[5],
     }
 
 
@@ -64,7 +62,7 @@ def get_member(center_id, db_path):
 
 MEMBERS_BY_PLAN_QUERY = (
     "SELECT [Center ID], [Last Name], [First Name], [Health Plan], "
-    "[SADC], [Address], [Long Lat] FROM [Contacts] "
+    "[Address], [Long Lat] FROM [Contacts] "
     "WHERE [Health Plan] = ? ORDER BY [Center ID]"
 )
 
