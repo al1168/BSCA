@@ -6,8 +6,12 @@ import random
 import sys
 from collections import namedtuple
 
-from monthly_schedule.db import get_member, get_members_by_plan
-from monthly_schedule.auth_days import get_authorized_weekdays
+from monthly_schedule.db import (
+    get_member, get_members_by_plan,
+    get_enrollments, get_authorizations, get_absences, get_availability,
+)
+from monthly_schedule.eligibility_context import MemberContext
+from monthly_schedule.per_day import compute_month_failure
 from monthly_schedule.rules import get_rules_for_plan
 from monthly_schedule.rows import build_rows
 from monthly_schedule.workbook import build_workbook
@@ -99,30 +103,30 @@ def parse_args(argv):
     return parser.parse_args(argv)
 
 
-def process_member(member, year, month, out_dir, preview,
+def process_member(member, ctx, year, month, out_dir, preview,
                    api_key, cache):
     """Run the per-member pipeline. Returns (ok, stage, reason).
     On success ok is True and stage/reason are None. On failure
-    stage is 'geocode'/'route'/'generate'/'write' with the reason."""
+    stage is one of 'eligibility'/'geocode'/'route'/'generate'/'write'
+    with the reason."""
+    failure = compute_month_failure(year, month, ctx)
+    if failure is not None:
+        return (False, "eligibility", failure)
+
     try:
         travel_minutes = resolve_travel_minutes(member, api_key, cache)
     except TravelError as exc:
         return (False, exc.stage, exc.reason)
+
     rng = random.Random()
     try:
-        authorized = get_authorized_weekdays(member["auth_days"])
-        if not authorized:
-            print(
-                f"Warning: no authorized weekdays parsed from SADC "
-                f"{member['auth_days']!r} for ID {member['center_id']}; "
-                f"all time cells will be blank.",
-                file=sys.stderr,
-            )
         rules = dict(get_rules_for_plan(member["health_plan"]))
         buf_lo, buf_hi = rules.get("travel_buffer_min", (5, 15))
-        rules["pickup_lead_min"] = (travel_minutes + buf_lo, travel_minutes + buf_hi)
-        rules["dropoff_trail_min"] = (travel_minutes + buf_lo, travel_minutes + buf_hi)
-        rows = build_rows(year, month, authorized, rules, rng)
+        rules["pickup_lead_min"] = (travel_minutes + buf_lo,
+                                    travel_minutes + buf_hi)
+        rules["dropoff_trail_min"] = (travel_minutes + buf_lo,
+                                      travel_minutes + buf_hi)
+        rows = build_rows(year, month, ctx, rules, rng)
     except Exception as exc:  # reported in the run summary
         return (False, "generate", f"{type(exc).__name__} — {exc}")
 
@@ -207,8 +211,14 @@ def main(argv=None):
 
     success = 0
     for member in members:
+        ctx = MemberContext(
+            enrollments=get_enrollments(member["center_id"], args.db_path),
+            authorizations=get_authorizations(member["center_id"], args.db_path),
+            absences=get_absences(member["center_id"], args.db_path),
+            availabilities=get_availability(member["center_id"], args.db_path),
+        )
         ok, stage, reason = process_member(
-            member, args.year, args.month, out_dir,
+            member, ctx, args.year, args.month, out_dir,
             args.preview_data, api_key, cache,
         )
         if ok:

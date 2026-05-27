@@ -9,7 +9,6 @@ MEMBER = {
     "last_name": "Cheng",
     "first_name": "Lizhu",
     "health_plan": "HOF",
-    "auth_days": "1.3.4.5",
 }
 
 ROWS = [
@@ -43,7 +42,6 @@ def test_side_by_side_workbook_structure(tmp_path):
         v = ws[cell].value
         assert "ID: 24010" in v
         assert "Name: Cheng, Lizhu" in v
-        assert "Auth Days: 1.3.4.5" in v
 
     merged = {str(rng) for rng in ws.merged_cells.ranges}
     for rng in ("A1:D1", "A2:D2", "A3:D3",

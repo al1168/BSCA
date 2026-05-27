@@ -62,8 +62,7 @@ def _write_header_block(ws, start_row, first_col, last_col, member):
         f"MLTC: {display_plan(member['health_plan'])}",
         (
             f"ID: {member['center_id']}   "
-            f"Name: {_member_name(member)}   "
-            f"Auth Days: {member['auth_days']}"
+            f"Name: {_member_name(member)}"
         ),
     )
     for offset, text in enumerate(lines):
