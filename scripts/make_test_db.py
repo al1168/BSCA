@@ -222,7 +222,50 @@ def seed_mid_period_change(conn, today: date) -> None:
 
 
 def seed_plan_full(conn, today: date) -> None:
-    pass  # Implemented in Task 5.
+    """Five HOF members: three happy, one missing auth, one with a
+    tight Tuesday window that should leave Tuesdays blank."""
+    m1, m15, mlast, mnext_last = _month_bounds(today)
+    enrolled_since = date(today.year - 1, today.month, 1)
+    cur = conn.cursor()
+
+    def _happy(center_id: int, last: str, first: str) -> None:
+        _seed_member(conn, center_id, last, first)
+        cur.execute(
+            "INSERT INTO [Enrollment] ([Center ID], [start_date], "
+            "[end_date]) VALUES (?, ?, NULL)",
+            center_id, _dt(enrolled_since),
+        )
+        cur.execute(
+            "INSERT INTO [Authorization] ([Center ID], [auth_start], "
+            "[auth_end], [effective_start], [effective_end], [auth_days]) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            str(center_id), _dt(m1), _dt(mnext_last),
+            _dt(m1), _dt(mnext_last), "1,2,3,4,5",
+        )
+
+    _happy(99010, "Plan", "Alice")
+    _happy(99011, "Plan", "Bob")
+    _happy(99012, "Plan", "Carol")
+
+    # 99013 — Contacts + Enrollment, no Authorization.
+    _seed_member(conn, 99013, "Plan", "Dave")
+    cur.execute(
+        "INSERT INTO [Enrollment] ([Center ID], [start_date], [end_date]) "
+        "VALUES (?, ?, NULL)",
+        99013, _dt(enrolled_since),
+    )
+
+    # 99014 — happy + a Tuesday availability rule too tight for the
+    # plan's 3.5-hour session minimum, so Tuesdays come back blank.
+    _happy(99014, "Plan", "Eve")
+    cur.execute(
+        "INSERT INTO [Availability] ([Center ID], "
+        "[effective_start_date], [effective_end_date], "
+        "[Day Of Week], [avail_start], [avail_end]) "
+        "VALUES (?, ?, NULL, ?, ?, ?)",
+        "99014", _dt(enrolled_since), 2, _hhmm(12, 0), _hhmm(14, 0),
+    )
+    conn.commit()
 
 
 SCENARIOS: dict[str, Callable] = {
