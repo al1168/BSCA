@@ -120,7 +120,11 @@ STRINGS: dict[str, dict[str, str]] = {
         "summary.stage.generate": "generate",
         "summary.stage.write": "write",
         "summary.stage.lookup": "lookup",
+        "summary.stage.eligibility": "eligibility",
         "summary.reason.not_found": "not found in database",
+        "summary.reason.not_enrolled": "not enrolled during this month",
+        "summary.reason.no_auth": "no active authorization for this month",
+        "summary.reason.absent_month": "absent for the entire month",
         # scope (used by GUI summary builder)
         "scope.plan": "plan {code} {period}",
         "scope.period": "{period}",
@@ -251,7 +255,11 @@ STRINGS: dict[str, dict[str, str]] = {
         "summary.stage.generate": "生成",
         "summary.stage.write": "写入",
         "summary.stage.lookup": "查找",
+        "summary.stage.eligibility": "资格",
         "summary.reason.not_found": "数据库中未找到",
+        "summary.reason.not_enrolled": "本月未入册",
+        "summary.reason.no_auth": "本月无有效授权",
+        "summary.reason.absent_month": "整月缺席",
         # scope
         "scope.plan": "计划 {code} {period}",
         "scope.period": "{period}",

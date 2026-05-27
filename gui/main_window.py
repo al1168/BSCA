@@ -29,8 +29,21 @@ from gui.i18n import LanguageManager, tr
 from gui.settings_dialog import SettingsDialog
 from gui.worker import ScheduleWorker
 from new_monthly_schedule import REASON_NOT_FOUND, parse_center_ids, resolve_output_dir
+from monthly_schedule.per_day import REASON_NOT_ENROLLED, REASON_NO_AUTH, REASON_ABSENT_MONTH
 
 PLAN_CODES = ["HOF"]
+
+
+def _translate_reason(reason: str) -> str:
+    if reason == REASON_NOT_FOUND:
+        return tr("summary.reason.not_found")
+    if reason == REASON_NOT_ENROLLED:
+        return tr("summary.reason.not_enrolled")
+    if reason == REASON_NO_AUTH:
+        return tr("summary.reason.no_auth")
+    if reason == REASON_ABSENT_MONTH:
+        return tr("summary.reason.absent_month")
+    return reason
 
 
 class MainWindow(QWidget):
@@ -422,11 +435,7 @@ class MainWindow(QWidget):
         lines = [head, tr("summary.failures_header")]
         for f in data["failures"]:
             stage = tr(f"summary.stage.{f['stage']}")
-            reason = (
-                tr("summary.reason.not_found")
-                if f["reason"] == REASON_NOT_FOUND
-                else f["reason"]
-            )
+            reason = _translate_reason(f["reason"])
             row_key = (
                 "summary.failure_row_named" if f["name"] else "summary.failure_row_unnamed"
             )
