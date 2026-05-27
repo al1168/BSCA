@@ -94,3 +94,123 @@ def get_members_by_plan(plan_code, db_path):
         return [map_member_row(row) for row in cursor.fetchall()]
     finally:
         conn.close()
+
+
+ENROLLMENTS_QUERY = (
+    "SELECT [ID], [Center ID], [start_date], [end_date] "
+    "FROM [Enrollment] "
+    "WHERE [Center ID] = ?"
+)
+
+
+def map_enrollment_row(row):
+    return {
+        "id": int(row[0]),
+        "center_id": int(row[1]),
+        "start_date": row[2],
+        "end_date": row[3],
+    }
+
+
+def get_enrollments(center_id, db_path):
+    """Return all Enrollment rows for `center_id` as a list of dicts."""
+    return _fetch_all(ENROLLMENTS_QUERY, center_id, db_path, map_enrollment_row)
+
+
+AUTHORIZATIONS_QUERY = (
+    "SELECT [ID], [Center ID], [auth_start], [auth_end], "
+    "[effective_start], [effective_end], [auth_days] "
+    "FROM [Authorization] "
+    "WHERE [Center ID] = ?"
+)
+
+
+def map_authorization_row(row):
+    return {
+        "id": int(row[0]),
+        "center_id": int(row[1]),
+        "auth_start": row[2],
+        "auth_end": row[3],
+        "effective_start": row[4],
+        "effective_end": row[5],
+        "auth_days": row[6],
+    }
+
+
+def get_authorizations(center_id, db_path):
+    """Return all Authorization rows for `center_id` as a list of dicts."""
+    return _fetch_all(AUTHORIZATIONS_QUERY, center_id, db_path,
+                      map_authorization_row)
+
+
+ABSENCES_QUERY = (
+    "SELECT [ID], [Center ID], [Leave Type], [Start_Date], [End_Date] "
+    "FROM [Absences] "
+    "WHERE [Center ID] = ?"
+)
+
+
+def map_absence_row(row):
+    return {
+        "id": int(row[0]),
+        "center_id": int(row[1]),
+        "leave_type": row[2],
+        "start_date": row[3],
+        "end_date": row[4],
+    }
+
+
+def get_absences(center_id, db_path):
+    """Return all Absences rows for `center_id` as a list of dicts."""
+    return _fetch_all(ABSENCES_QUERY, center_id, db_path, map_absence_row)
+
+
+AVAILABILITY_QUERY = (
+    "SELECT [ID], [Center ID], [effective_start_date], "
+    "[effective_end_date], [Day Of Week], [avail_start], [avail_end] "
+    "FROM [Availability] "
+    "WHERE [Center ID] = ?"
+)
+
+
+def map_availability_row(row):
+    return {
+        "id": int(row[0]),
+        "center_id": int(row[1]),
+        "effective_start_date": row[2],
+        "effective_end_date": row[3],
+        "day_of_week": int(row[4]),
+        "avail_start": row[5],
+        "avail_end": row[6],
+    }
+
+
+def get_availability(center_id, db_path):
+    """Return all Availability rows for `center_id` as a list of dicts."""
+    return _fetch_all(AVAILABILITY_QUERY, center_id, db_path,
+                      map_availability_row)
+
+
+def _fetch_all(query, center_id, db_path, mapper):
+    """Run a parameterized SELECT and map each row. Shared by the 4 new
+    fetchers."""
+    if not os.path.exists(db_path):
+        raise FileNotFoundError(f"Database not found: {db_path}")
+
+    import pyodbc
+
+    try:
+        conn = pyodbc.connect(build_connection_string(db_path))
+    except pyodbc.Error as exc:
+        raise RuntimeError(
+            "Could not open the Access database. Verify the Microsoft "
+            "Access ODBC driver is installed and its bitness matches "
+            "this Python interpreter (spec section 8). "
+            f"Original error: {exc}"
+        )
+    try:
+        cursor = conn.cursor()
+        cursor.execute(query, center_id)
+        return [mapper(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
