@@ -125,7 +125,68 @@ def seed_happy_path(conn, today: date) -> None:
 
 
 def seed_missing_data(conn, today: date) -> None:
-    pass  # Implemented in Task 3.
+    """Three members each missing one prerequisite, to exercise the
+    three eligibility-stage failure reasons."""
+    m1, m15, mlast, mnext_last = _month_bounds(today)
+    enrolled_since = date(today.year - 1, today.month, 1)
+    cur = conn.cursor()
+
+    # 99002 NoEnroll, Bob — Contacts + Auth + Availability, no Enrollment.
+    _seed_member(conn, 99002, "NoEnroll", "Bob")
+    cur.execute(
+        "INSERT INTO [Authorization] ([Center ID], [auth_start], "
+        "[auth_end], [effective_start], [effective_end], [auth_days]) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        "99002", _dt(m1), _dt(mnext_last),
+        _dt(m1), _dt(mnext_last), "1,2,3,4,5",
+    )
+    for day_of_week in range(1, 6):
+        cur.execute(
+            "INSERT INTO [Availability] ([Center ID], "
+            "[effective_start_date], [effective_end_date], "
+            "[Day Of Week], [avail_start], [avail_end]) "
+            "VALUES (?, ?, NULL, ?, ?, ?)",
+            "99002", _dt(enrolled_since), day_of_week,
+            _hhmm(8, 0), _hhmm(16, 0),
+        )
+
+    # 99003 NoAuth, Carol — Contacts + Enrollment + Availability, no Auth.
+    _seed_member(conn, 99003, "NoAuth", "Carol")
+    cur.execute(
+        "INSERT INTO [Enrollment] ([Center ID], [start_date], [end_date]) "
+        "VALUES (?, ?, NULL)",
+        99003, _dt(enrolled_since),
+    )
+    for day_of_week in range(1, 6):
+        cur.execute(
+            "INSERT INTO [Availability] ([Center ID], "
+            "[effective_start_date], [effective_end_date], "
+            "[Day Of Week], [avail_start], [avail_end]) "
+            "VALUES (?, ?, NULL, ?, ?, ?)",
+            "99003", _dt(enrolled_since), day_of_week,
+            _hhmm(8, 0), _hhmm(16, 0),
+        )
+
+    # 99004 Absent, Dave — full setup PLUS one Absence covering the whole month.
+    _seed_member(conn, 99004, "Absent", "Dave")
+    cur.execute(
+        "INSERT INTO [Enrollment] ([Center ID], [start_date], [end_date]) "
+        "VALUES (?, ?, NULL)",
+        99004, _dt(enrolled_since),
+    )
+    cur.execute(
+        "INSERT INTO [Authorization] ([Center ID], [auth_start], "
+        "[auth_end], [effective_start], [effective_end], [auth_days]) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        "99004", _dt(m1), _dt(mnext_last),
+        _dt(m1), _dt(mnext_last), "1,2,3,4,5",
+    )
+    cur.execute(
+        "INSERT INTO [Absences] ([Center ID], [Leave Type], "
+        "[Start_Date], [End_Date]) VALUES (?, ?, ?, ?)",
+        "99004", "Vacation", _dt(m1), _dt(mlast),
+    )
+    conn.commit()
 
 
 def seed_mid_period_change(conn, today: date) -> None:
