@@ -190,7 +190,35 @@ def seed_missing_data(conn, today: date) -> None:
 
 
 def seed_mid_period_change(conn, today: date) -> None:
-    pass  # Implemented in Task 4.
+    """Center 99005 'Switch, Eve' — two Auth rows carving up the month."""
+    m1, m15, mlast, mnext_last = _month_bounds(today)
+    m15_plus_1 = m15 + timedelta(days=1)
+    enrolled_since = date(today.year - 1, today.month, 1)
+    cur = conn.cursor()
+
+    _seed_member(conn, 99005, "Switch", "Eve")
+    cur.execute(
+        "INSERT INTO [Enrollment] ([Center ID], [start_date], [end_date]) "
+        "VALUES (?, ?, NULL)",
+        99005, _dt(enrolled_since),
+    )
+    # Row 1: effective M1 → M15, M/W/F
+    cur.execute(
+        "INSERT INTO [Authorization] ([Center ID], [auth_start], "
+        "[auth_end], [effective_start], [effective_end], [auth_days]) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        "99005", _dt(m1), _dt(mlast),
+        _dt(m1), _dt(m15), "1,3,5",
+    )
+    # Row 2: effective M15+1 → MLAST, T/Th
+    cur.execute(
+        "INSERT INTO [Authorization] ([Center ID], [auth_start], "
+        "[auth_end], [effective_start], [effective_end], [auth_days]) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        "99005", _dt(m1), _dt(mlast),
+        _dt(m15_plus_1), _dt(mlast), "2,4",
+    )
+    conn.commit()
 
 
 def seed_plan_full(conn, today: date) -> None:
