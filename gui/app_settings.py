@@ -4,7 +4,7 @@ import os
 _SETTINGS_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "bsca_settings.json")
 
 DEFAULTS = {
-    "db_path": r"C:\Users\luald\OneDrive\Desktop\Access Member 5.5.26_copy.accdb",
+    "db_path": r".",
     "google_config": "google_maps.config",
     "geo_cache": "geo_cache.json",
     "output_path": ".",

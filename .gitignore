@@ -27,3 +27,6 @@ bsca_settings.json
 # PyInstaller build artifacts
 build/
 dist/
+
+# Test databases (local only)
+test_dbs/

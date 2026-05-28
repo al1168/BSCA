@@ -9,7 +9,7 @@ import os
 
 MEMBER_QUERY = (
     "SELECT [Center ID], [Last Name], [First Name], [Health Plan], "
-    "[SADC], [Address], [Long Lat] FROM [Contacts] "
+    "[Address], [Long Lat] FROM [Contacts] "
     "WHERE [Center ID] = ?"
 )
 
@@ -23,15 +23,13 @@ def build_connection_string(db_path):
 
 def map_member_row(row):
     return {
-        # Access returns [Center ID] as a float; normalize to int so
-        # the header reads "ID: 24010", not "ID: 24010.0".
+        # Access returns [Center ID] as a float; normalize to int.
         "center_id": int(row[0]),
         "last_name": row[1],
         "first_name": row[2],
         "health_plan": row[3],
-        "auth_days": row[4],
-        "address": row[5],
-        "long_lat": row[6],
+        "address": row[4],
+        "long_lat": row[5],
     }
 
 
@@ -64,7 +62,7 @@ def get_member(center_id, db_path):
 
 MEMBERS_BY_PLAN_QUERY = (
     "SELECT [Center ID], [Last Name], [First Name], [Health Plan], "
-    "[SADC], [Address], [Long Lat] FROM [Contacts] "
+    "[Address], [Long Lat] FROM [Contacts] "
     "WHERE [Health Plan] = ? ORDER BY [Center ID]"
 )
 
@@ -92,5 +90,157 @@ def get_members_by_plan(plan_code, db_path):
         cursor = conn.cursor()
         cursor.execute(MEMBERS_BY_PLAN_QUERY, plan_code)
         return [map_member_row(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+ENROLLMENTS_QUERY = (
+    "SELECT [ID], [Center ID], [start_date], [end_date] "
+    "FROM [Enrollment] "
+    "WHERE [Center ID] = ?"
+)
+
+
+def _to_date(value):
+    """Access Date/Time fields come back as datetime.datetime via pyodbc.
+    Normalize to datetime.date so comparisons against month_dates work.
+    NULL pass-through."""
+    if value is None:
+        return None
+    if hasattr(value, "date"):
+        return value.date()
+    return value
+
+
+def map_enrollment_row(row):
+    return {
+        "id": int(row[0]),
+        "center_id": int(row[1]),
+        "start_date": _to_date(row[2]),
+        "end_date": _to_date(row[3]),
+    }
+
+
+def get_enrollments(center_id, db_path):
+    """Return all Enrollment rows for `center_id` as a list of dicts."""
+    return _fetch_all(ENROLLMENTS_QUERY, center_id, db_path, map_enrollment_row)
+
+
+AUTHORIZATIONS_QUERY = (
+    "SELECT [ID], [Center ID], [auth_start], [auth_end], "
+    "[effective_start], [effective_end], [auth_days] "
+    "FROM [Authorization] "
+    "WHERE [Center ID] = ?"
+)
+
+
+def map_authorization_row(row):
+    """Map a raw Authorization row. If `effective_start` / `effective_end`
+    is NULL in Access, fall back to `auth_start` / `auth_end` — the
+    document period acts as the implicit effective window."""
+    auth_start = _to_date(row[2])
+    auth_end = _to_date(row[3])
+    effective_start = _to_date(row[4])
+    effective_end = _to_date(row[5])
+    return {
+        "id": int(row[0]),
+        "center_id": int(row[1]),
+        "auth_start": auth_start,
+        "auth_end": auth_end,
+        "effective_start": effective_start if effective_start is not None else auth_start,
+        "effective_end": effective_end if effective_end is not None else auth_end,
+        "auth_days": row[6],
+    }
+
+
+def get_authorizations(center_id, db_path):
+    """Return all Authorization rows for `center_id` as a list of dicts."""
+    return _fetch_all(AUTHORIZATIONS_QUERY, center_id, db_path,
+                      map_authorization_row)
+
+
+ABSENCES_QUERY = (
+    "SELECT [ID], [Center ID], [Leave Type], [Start_Date], [End_Date] "
+    "FROM [Absences] "
+    "WHERE [Center ID] = ?"
+)
+
+
+def map_absence_row(row):
+    return {
+        "id": int(row[0]),
+        "center_id": int(row[1]),
+        "leave_type": row[2],
+        "start_date": _to_date(row[3]),
+        "end_date": _to_date(row[4]),
+    }
+
+
+def get_absences(center_id, db_path):
+    """Return all Absences rows for `center_id` as a list of dicts."""
+    return _fetch_all(ABSENCES_QUERY, center_id, db_path, map_absence_row)
+
+
+AVAILABILITY_QUERY = (
+    "SELECT [ID], [Center ID], [effective_start_date], "
+    "[effective_end_date], [Day Of Week], [avail_start], [avail_end] "
+    "FROM [Availability] "
+    "WHERE [Center ID] = ?"
+)
+
+
+def _datetime_to_hhmm(value):
+    """Access stores time-only fields as DATETIME with a fixed 1899
+    placeholder date. Extract the time as 'HH:MM' so downstream code
+    (parse_hhmm) can use it. NULL passes through unchanged."""
+    if value is None:
+        return None
+    if hasattr(value, "strftime"):
+        return value.strftime("%H:%M")
+    return value
+
+
+def map_availability_row(row):
+    """Map a raw Availability row. avail_start/avail_end are stored as
+    DATETIME in Access (with a 1899-12-30 placeholder date); the mapper
+    extracts the time as 'HH:MM'. `effective_end_date` is nullable."""
+    return {
+        "id": int(row[0]),
+        "center_id": int(row[1]),
+        "effective_start_date": _to_date(row[2]),
+        "effective_end_date": _to_date(row[3]),
+        "day_of_week": int(row[4]),
+        "avail_start": _datetime_to_hhmm(row[5]),
+        "avail_end": _datetime_to_hhmm(row[6]),
+    }
+
+
+def get_availability(center_id, db_path):
+    """Return all Availability rows for `center_id` as a list of dicts."""
+    return _fetch_all(AVAILABILITY_QUERY, center_id, db_path,
+                      map_availability_row)
+
+
+def _fetch_all(query, center_id, db_path, mapper):
+    """Run a parameterized SELECT and map each row. Shared by the 4 new
+    fetchers."""
+    if not os.path.exists(db_path):
+        raise FileNotFoundError(f"Database not found: {db_path}")
+
+    import pyodbc
+
+    try:
+        conn = pyodbc.connect(build_connection_string(db_path))
+    except pyodbc.Error as exc:
+        raise RuntimeError(
+            "Could not open the Access database. Verify the Microsoft "
+            "Access ODBC driver is installed and its bitness matches "
+            "this Python interpreter (spec section 8). "
+            f"Original error: {exc}"
+        )
+    try:
+        cursor = conn.cursor()
+        cursor.execute(query, center_id)
+        return [mapper(row) for row in cursor.fetchall()]
     finally:
         conn.close()

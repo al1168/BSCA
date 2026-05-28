@@ -77,3 +77,24 @@ def test_validate_schedule_raises_on_time_in_after_time_out():
     with pytest.raises(ValueError):
         # valid ends individually, but time_in (600) > time_out (590)
         validate_schedule(470, 480, 600, 590, 700, 710, rules)
+
+
+def test_build_daily_schedule_honors_arrival_window_override():
+    import random
+    from monthly_schedule.daily_schedule import build_daily_schedule
+    rules = {
+        "arrival_window": ("08:00", "11:00"),
+        "session_span_min": (210, 245),
+        "pickup_lead_min": (8, 12),
+        "dropoff_trail_min": (8, 12),
+        "time_in_drift_min": (2, 2),
+        "time_out_drift_min": (2, 2),
+        "round_to_minutes": 1,
+        "travel_buffer_min": (1, 5),
+    }
+    # Force the schedule to fall inside a narrow 10:00–10:30 window.
+    result = build_daily_schedule(rules, random.Random(0),
+                                  arrival_window=(600, 630))
+    h, m = result["arrival"].split(":")
+    arrival_min = int(h) * 60 + int(m)
+    assert 600 <= arrival_min <= 630

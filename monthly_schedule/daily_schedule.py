@@ -41,9 +41,16 @@ def validate_schedule(pickup, arrival, time_in, time_out, departure, dropoff, ru
         )
 
 
-def build_daily_schedule(rules, rng):
-    """Return a dict of 'HH:MM' strings for one eligible day's visit."""
-    a_lo, a_hi = (parse_hhmm(x) for x in rules["arrival_window"])
+def build_daily_schedule(rules, rng, arrival_window=None):
+    """Return a dict of 'HH:MM' strings for one eligible day's visit.
+
+    `arrival_window` (optional) is a (lo_minutes, hi_minutes) tuple that
+    overrides the plan's default arrival_window. Used by the per-day
+    eligibility flow to honor Availability rules."""
+    if arrival_window is None:
+        a_lo, a_hi = (parse_hhmm(x) for x in rules["arrival_window"])
+    else:
+        a_lo, a_hi = arrival_window
     step = rules["round_to_minutes"]
 
     arrival = _round_to(rng.randint(a_lo, a_hi), step)

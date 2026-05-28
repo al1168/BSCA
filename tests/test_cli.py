@@ -1,11 +1,27 @@
 import new_monthly_schedule as cli
 
+from datetime import date
+
+
+def _fake_enrollments(cid=24010):
+    return [{"id": 1, "center_id": cid,
+             "start_date": date(2026, 1, 1), "end_date": None}]
+
+
+def _fake_authorizations(cid=24010, auth_days="1.3.4.5"):
+    return [{"id": 1, "center_id": cid,
+             "auth_start": date(2026, 1, 1),
+             "auth_end": date(2026, 12, 31),
+             "effective_start": date(2026, 1, 1),
+             "effective_end": date(2026, 12, 31),
+             "auth_days": auth_days}]
+
+
 FAKE_MEMBER = {
     "center_id": 24010,
     "last_name": "Cheng",
     "first_name": "Lizhu",
     "health_plan": "HOF",
-    "auth_days": "1.3.4.5",
     "address": "1 Main St, NY",
     "long_lat": None,
 }
@@ -15,7 +31,6 @@ FAKE_MEMBER_2 = {
     "last_name": "Smith",
     "first_name": "John",
     "health_plan": "HOF",
-    "auth_days": "1.3.4.5",
     "address": "2 Main St, NY",
     "long_lat": None,
 }
@@ -26,8 +41,7 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _stub_travel(monkeypatch):
-    """Neutralize travel for legacy tests: no key file, no network,
-    fixed 10-minute offset. Travel-specific tests re-monkeypatch."""
+    """Neutralize travel + new DB lookups for legacy tests."""
     monkeypatch.setattr(cli, "load_api_key", lambda path: "K")
     monkeypatch.setattr(cli, "load_cache", lambda path: {})
     monkeypatch.setattr(cli, "save_cache", lambda path, cache: None)
@@ -35,6 +49,16 @@ def _stub_travel(monkeypatch):
         cli, "resolve_travel_minutes",
         lambda member, api_key, cache: 10,
     )
+    monkeypatch.setattr(
+        cli, "get_enrollments",
+        lambda cid, db: _fake_enrollments(cid),
+    )
+    monkeypatch.setattr(
+        cli, "get_authorizations",
+        lambda cid, db: _fake_authorizations(cid),
+    )
+    monkeypatch.setattr(cli, "get_absences", lambda cid, db: [])
+    monkeypatch.setattr(cli, "get_availability", lambda cid, db: [])
 
 
 def test_preview_data_returns_zero_and_prints(monkeypatch, capsys):
@@ -367,3 +391,27 @@ def test_missing_api_key_config_aborts(monkeypatch, capsys):
     )
     assert rc == 1
     assert "Google API key config not found" in capsys.readouterr().err
+
+
+def test_no_enrollment_yields_failure(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
+    monkeypatch.setattr(cli, "get_enrollments", lambda cid, db: [])
+    rc = cli.main(
+        ["--center-id", "24010", "--year", "2026", "--month", "5",
+         "--output-path", str(tmp_path)]
+    )
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "eligibility — not enrolled during this month" in err
+
+
+def test_no_authorization_yields_failure(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
+    monkeypatch.setattr(cli, "get_authorizations", lambda cid, db: [])
+    rc = cli.main(
+        ["--center-id", "24010", "--year", "2026", "--month", "5",
+         "--output-path", str(tmp_path)]
+    )
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "eligibility — no active authorization for this month" in err
