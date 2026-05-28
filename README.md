@@ -1,20 +1,47 @@
 # BSCA
 
-Tools for Bowery Senior Care Inc member data.
+Tools for Bowery Senior Care Inc member data: a Qt6 desktop GUI and a
+Python CLI for generating printable monthly schedule workbooks, plus a
+PowerShell lookup script.
 
-## Get-Contact.ps1
+## Run the GUI
 
-Interactive PowerShell lookup of a member by Center ID:
+Easiest: launch the pre-built Windows executable.
 
 ```
-pwsh ./Get-Contact.ps1 -CenterID 24010
+dist\MonthlyScheduleGenerator.exe
 ```
 
-## new_monthly_schedule.py
+Or from source. On Windows this batch file sets up the venv on first
+run, then launches the GUI:
 
-Generates printable monthly schedule workbooks (attendance +
-transportation tables). Select members one of three ways (exactly
-one required):
+```
+run.bat
+```
+
+Manual launch (assumes `.venv` exists and `requirements.txt` is
+installed):
+
+```
+.venv\Scripts\python.exe gui.py
+```
+
+First launch shows a Settings dialog asking for paths to the Access
+DB, output folder, Google Maps config, and travel-cache JSON. Change
+them later via the ⚙ button. A combo in the top bar toggles between
+English and 简体中文.
+
+A run produces one workbook per member into the configured output
+folder. The summary at the bottom of the window lists any failures —
+members who couldn't be scheduled either because they lack the
+required supporting-table rows (no Enrollment, no active
+Authorization, or are absent for the whole month) or because schedule
+generation hit an error (travel-time resolution, file write, etc.).
+
+## CLI: `new_monthly_schedule.py`
+
+Generates the same workbooks the GUI does. Select members one of three
+ways (exactly one required):
 
 ```
 # single member
@@ -27,36 +54,18 @@ python new_monthly_schedule.py --center-ids 24010,24011 --year 2026 --month 5
 python new_monthly_schedule.py --plan HOF --year 2026 --month 5
 ```
 
-Setup:
-
-```
-python -m pip install -r requirements.txt
-```
-
-Then provide a Google Maps API key (used for geocoding + Routes).
-Copy the template and replace the single line with your real key:
-
-```
-copy google_maps.config.example google_maps.config
-```
-
-`google_maps.config` is gitignored. The file's entire contents (the
-one line, trimmed) are used as the key — no comments. Point
-`--google-config PATH` elsewhere if you keep the key file at another
-location.
-
 Options:
 
 - `--output-path DIR` — base output directory (default `.`). Single
   and list modes write `DIR/Schedule_<id>_<YYYY-MM>.xlsx`; `--plan`
   writes into `DIR/<CODE>_<YYYY-MM>/`.
-- `--db-path PATH` — Access DB path (default the BOWERY3 share)
+- `--db-path PATH` — Access DB path (default the BOWERY3 share).
 - `--google-config PATH` — file containing the Google Maps API key
-  (default `google_maps.config`, gitignored). Required: Pick-Up/
+  (default `google_maps.config`, gitignored). Required: Pick-Up /
   Drop-Off use a Google Routes drive-time estimate.
 - `--geo-cache PATH` — local JSON cache of geocoded coords + route
-  minutes (default `geo_cache.json`, gitignored)
-- `--preview-data` — print computed rows per member, write nothing
+  minutes (default `geo_cache.json`, gitignored).
+- `--preview-data` — print computed rows per member, write nothing.
 
 Full examples (run from the repo root, with `google_maps.config` in
 place):
@@ -86,16 +95,103 @@ member whose travel time cannot be resolved (no coords/address, or
 an API error) is skipped and listed in the run summary. See
 `docs/superpowers/specs/2026-05-18-travel-time-offsets-design.md`.
 
-A batch run continues past a member that fails and prints a summary
-to stderr (`Wrote N of M ... ; K failed.` plus an itemized
-`Failures:` block). Exit code is `0` on full success, `2` if any
-member failed or a plan matched nobody, `1` on a DB/driver error.
+A batch run continues past a failing member and prints a summary to
+stderr (`Wrote N of M ... ; K failed.` plus an itemized `Failures:`
+block). Exit code is `0` on full success, `2` if any member failed or
+a plan matched nobody, `1` on a DB / driver error.
 
-Times are placeholder values (see
-`docs/superpowers/specs/2026-05-15-monthly-schedule-design.md`,
-section 4; batch design in
-`docs/superpowers/specs/2026-05-15-batch-member-selection-design.md`).
 The Microsoft Access ODBC driver must match the Python interpreter's
 bitness.
 
-Run tests: `python -m pytest`
+## Database schema
+
+The scheduler reads from five Access tables: `Contacts` plus the four
+supporting tables `Enrollment`, `Authorization`, `Absences`, and
+`Availability`. A member gets scheduled when an Enrollment row covers
+the month, an Authorization row's effective window covers the target
+date and lists the right weekday, no Absence row blocks that day, and
+any Availability rule for that weekday leaves a wide-enough arrival
+window. See [`docs/database.md`](docs/database.md) for the full schema
+reference and per-day eligibility flow.
+
+## Testing the GUI safely
+
+`scripts\make_test_db.py` creates or resets an Access test DB so you
+can exercise the GUI without touching production data. Each scenario
+gets its own gitignored `test_dbs/<scenario>.accdb`. Re-running the
+same command resets the DB back to its seeded state.
+
+```
+# happy_path: one fully set-up member, every weekday filled
+python scripts\make_test_db.py --scenario happy_path --use
+
+# missing_data: three members, one each missing Enrollment, Authorization,
+# or with an absence covering the whole month — exercises all three
+# eligibility-stage failure reasons
+python scripts\make_test_db.py --scenario missing_data --use
+
+# mid_period_change: one member, two Authorization rows carving up
+# the month with different auth_days each half
+python scripts\make_test_db.py --scenario mid_period_change --use
+
+# plan_full: five HOF members — three happy, one missing auth, one
+# with a Tuesday availability window too tight for the session minimum
+python scripts\make_test_db.py --scenario plan_full --use
+
+# populate_real_members: keep the real Contacts intact, seed the four
+# supporting tables against every real Center ID — ~90% happy,
+# ~10% deliberate failures spread across all three failure reasons
+python scripts\make_test_db.py --scenario populate_real_members --use
+```
+
+`--use` flips `bsca_settings.json` so the GUI immediately picks up the
+test DB on next launch. Drop `--use` if you just want to create the
+file without changing the GUI's pointer.
+
+To switch back to production, edit the DB path via the GUI's Settings
+dialog (⚙ button) or by editing `bsca_settings.json` directly. Full
+design in
+[`docs/superpowers/specs/2026-05-27-test-db-script-design.md`](docs/superpowers/specs/2026-05-27-test-db-script-design.md).
+
+## Build the standalone `.exe`
+
+```
+.venv\Scripts\pyinstaller.exe MonthlyScheduleGenerator.spec --noconfirm
+```
+
+Produces `dist\MonthlyScheduleGenerator.exe`.
+
+## `Get-Contact.ps1`
+
+Interactive PowerShell lookup of a member by Center ID:
+
+```
+pwsh ./Get-Contact.ps1 -CenterID 24010
+```
+
+## Setup
+
+```
+python -m pip install -r requirements.txt
+```
+
+Then provide a Google Maps API key (used for geocoding + Routes).
+Copy the template and replace the single line with your real key:
+
+```
+copy google_maps.config.example google_maps.config
+```
+
+`google_maps.config` is gitignored. The file's entire contents (the
+one line, trimmed) are used as the key — no comments. Point
+`--google-config PATH` elsewhere if you keep the key file at another
+location.
+
+## Run tests
+
+```
+.venv\Scripts\pytest -v
+```
+
+Design docs and specs live under [`docs/superpowers/specs/`](docs/superpowers/specs/);
+implementation plans under [`docs/superpowers/plans/`](docs/superpowers/plans/).
