@@ -94,6 +94,37 @@ def get_members_by_plan(plan_code, db_path):
         conn.close()
 
 
+ALL_MEMBERS_QUERY = (
+    "SELECT [Center ID], [Last Name], [First Name], [Health Plan], "
+    "[Address], [Long Lat] FROM [Contacts] ORDER BY [Center ID]"
+)
+
+
+def get_all_members(db_path):
+    """Return every Contacts row as a list of member dicts. Same dict
+    shape as get_member and get_members_by_plan."""
+    if not os.path.exists(db_path):
+        raise FileNotFoundError(f"Database not found: {db_path}")
+
+    import pyodbc
+
+    try:
+        conn = pyodbc.connect(build_connection_string(db_path))
+    except pyodbc.Error as exc:
+        raise RuntimeError(
+            "Could not open the Access database. Verify the Microsoft "
+            "Access ODBC driver is installed and its bitness matches "
+            "this Python interpreter (spec section 8). "
+            f"Original error: {exc}"
+        )
+    try:
+        cursor = conn.cursor()
+        cursor.execute(ALL_MEMBERS_QUERY)
+        return [map_member_row(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
 ENROLLMENTS_QUERY = (
     "SELECT [ID], [Center ID], [start_date], [end_date] "
     "FROM [Enrollment] "

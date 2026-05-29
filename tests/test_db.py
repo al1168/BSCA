@@ -211,3 +211,21 @@ def test_get_availability_missing_db_raises(tmp_path):
     missing = tmp_path / "nope.accdb"
     with pytest.raises(FileNotFoundError):
         get_availability(24010, str(missing))
+
+
+def test_all_members_query_columns_and_no_filter():
+    from monthly_schedule.db import ALL_MEMBERS_QUERY
+    for col in ("[Center ID]", "[Last Name]", "[First Name]",
+                "[Health Plan]", "[Address]", "[Long Lat]"):
+        assert col in ALL_MEMBERS_QUERY
+    assert "FROM [Contacts]" in ALL_MEMBERS_QUERY
+    assert "ORDER BY [Center ID]" in ALL_MEMBERS_QUERY
+    # No WHERE clause — fetches every row.
+    assert "WHERE" not in ALL_MEMBERS_QUERY
+
+
+def test_get_all_members_missing_db_raises(tmp_path):
+    from monthly_schedule.db import get_all_members
+    missing = tmp_path / "nope.accdb"
+    with pytest.raises(FileNotFoundError):
+        get_all_members(str(missing))
