@@ -102,7 +102,11 @@ ALL_MEMBERS_QUERY = (
 
 def get_all_members(db_path):
     """Return every Contacts row as a list of member dicts. Same dict
-    shape as get_member and get_members_by_plan."""
+    shape as get_member and get_members_by_plan.
+
+    Rows with a NULL Center ID are silently skipped — they can't be
+    scheduled (the Center ID is the FK every supporting table joins on)
+    and would otherwise crash map_member_row's int() cast."""
     if not os.path.exists(db_path):
         raise FileNotFoundError(f"Database not found: {db_path}")
 
@@ -120,7 +124,11 @@ def get_all_members(db_path):
     try:
         cursor = conn.cursor()
         cursor.execute(ALL_MEMBERS_QUERY)
-        return [map_member_row(row) for row in cursor.fetchall()]
+        return [
+            map_member_row(row)
+            for row in cursor.fetchall()
+            if row[0] is not None
+        ]
     finally:
         conn.close()
 
