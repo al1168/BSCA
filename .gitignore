@@ -30,3 +30,6 @@ dist/
 
 # Test databases (local only)
 test_dbs/
+_bench_all.prof
+_bench_all.txt
+_bench_all.py
