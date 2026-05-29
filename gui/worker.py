@@ -7,6 +7,8 @@ from monthly_schedule.db import (
     get_member, get_members_by_plan,
     get_enrollments, get_authorizations, get_absences, get_availability,
     get_all_members,
+    get_all_enrollments, get_all_authorizations,
+    get_all_absences, get_all_availability,
 )
 from monthly_schedule.eligibility_context import MemberContext
 from monthly_schedule.travel import load_api_key, load_cache, save_cache
@@ -130,13 +132,23 @@ class ScheduleWorker(QThread):
         total = len(members) + len(failures)
         success = 0
 
+        # Eager-fetch all four supporting tables once and index by
+        # center_id. Replaces 4×N ODBC connections (the per-member
+        # pattern) with 4 — see docs/performance/2026-05-29-all-members-
+        # baseline.md for why this matters.
+        enroll_idx = get_all_enrollments(self.db_path)
+        auth_idx = get_all_authorizations(self.db_path)
+        absence_idx = get_all_absences(self.db_path)
+        avail_idx = get_all_availability(self.db_path)
+
         for i, member in enumerate(members):
             try:
+                cid = member["center_id"]
                 ctx = MemberContext(
-                    enrollments=get_enrollments(member["center_id"], self.db_path),
-                    authorizations=get_authorizations(member["center_id"], self.db_path),
-                    absences=get_absences(member["center_id"], self.db_path),
-                    availabilities=get_availability(member["center_id"], self.db_path),
+                    enrollments=enroll_idx.get(cid, []),
+                    authorizations=auth_idx.get(cid, []),
+                    absences=absence_idx.get(cid, []),
+                    availabilities=avail_idx.get(cid, []),
                 )
                 if self.mode == "all":
                     raw_plan = member.get("health_plan")
