@@ -229,3 +229,67 @@ def test_get_all_members_missing_db_raises(tmp_path):
     missing = tmp_path / "nope.accdb"
     with pytest.raises(FileNotFoundError):
         get_all_members(str(missing))
+
+
+def test_all_enrollments_query_columns_and_no_filter():
+    from monthly_schedule.db import ALL_ENROLLMENTS_QUERY
+    for col in ("[ID]", "[Center ID]", "[start_date]", "[end_date]"):
+        assert col in ALL_ENROLLMENTS_QUERY
+    assert "FROM [Enrollment]" in ALL_ENROLLMENTS_QUERY
+    assert "WHERE" not in ALL_ENROLLMENTS_QUERY
+
+
+def test_all_authorizations_query_columns_and_no_filter():
+    from monthly_schedule.db import ALL_AUTHORIZATIONS_QUERY
+    for col in ("[ID]", "[Center ID]", "[auth_start]", "[auth_end]",
+                "[effective_start]", "[effective_end]", "[auth_days]"):
+        assert col in ALL_AUTHORIZATIONS_QUERY
+    assert "FROM [Authorization]" in ALL_AUTHORIZATIONS_QUERY
+    assert "WHERE" not in ALL_AUTHORIZATIONS_QUERY
+
+
+def test_all_absences_query_columns_and_no_filter():
+    from monthly_schedule.db import ALL_ABSENCES_QUERY
+    for col in ("[ID]", "[Center ID]", "[Leave Type]",
+                "[Start_Date]", "[End_Date]"):
+        assert col in ALL_ABSENCES_QUERY
+    assert "FROM [Absences]" in ALL_ABSENCES_QUERY
+    assert "WHERE" not in ALL_ABSENCES_QUERY
+
+
+def test_all_availability_query_columns_and_no_filter():
+    from monthly_schedule.db import ALL_AVAILABILITY_QUERY
+    for col in ("[ID]", "[Center ID]", "[effective_start_date]",
+                "[effective_end_date]", "[Day Of Week]",
+                "[avail_start]", "[avail_end]"):
+        assert col in ALL_AVAILABILITY_QUERY
+    assert "FROM [Availability]" in ALL_AVAILABILITY_QUERY
+    assert "WHERE" not in ALL_AVAILABILITY_QUERY
+
+
+def test_get_all_enrollments_missing_db_raises(tmp_path):
+    from monthly_schedule.db import get_all_enrollments
+    missing = tmp_path / "nope.accdb"
+    with pytest.raises(FileNotFoundError):
+        get_all_enrollments(str(missing))
+
+
+def test_get_all_authorizations_missing_db_raises(tmp_path):
+    from monthly_schedule.db import get_all_authorizations
+    missing = tmp_path / "nope.accdb"
+    with pytest.raises(FileNotFoundError):
+        get_all_authorizations(str(missing))
+
+
+def test_get_all_absences_missing_db_raises(tmp_path):
+    from monthly_schedule.db import get_all_absences
+    missing = tmp_path / "nope.accdb"
+    with pytest.raises(FileNotFoundError):
+        get_all_absences(str(missing))
+
+
+def test_get_all_availability_missing_db_raises(tmp_path):
+    from monthly_schedule.db import get_all_availability
+    missing = tmp_path / "nope.accdb"
+    with pytest.raises(FileNotFoundError):
+        get_all_availability(str(missing))

@@ -260,6 +260,93 @@ def get_availability(center_id, db_path):
                       map_availability_row)
 
 
+ALL_ENROLLMENTS_QUERY = (
+    "SELECT [ID], [Center ID], [start_date], [end_date] "
+    "FROM [Enrollment]"
+)
+
+
+def get_all_enrollments(db_path: str) -> dict:
+    """Return {center_id: [enrollment dicts]} for every Enrollment row.
+    One ODBC round-trip vs N when used by the batch worker modes."""
+    rows = _fetch_all_unfiltered(ALL_ENROLLMENTS_QUERY, db_path, map_enrollment_row)
+    return _index_by_center_id(rows)
+
+
+ALL_AUTHORIZATIONS_QUERY = (
+    "SELECT [ID], [Center ID], [auth_start], [auth_end], "
+    "[effective_start], [effective_end], [auth_days] "
+    "FROM [Authorization]"
+)
+
+
+def get_all_authorizations(db_path: str) -> dict:
+    """Return {center_id: [authorization dicts]} for every Authorization row."""
+    rows = _fetch_all_unfiltered(ALL_AUTHORIZATIONS_QUERY, db_path,
+                                  map_authorization_row)
+    return _index_by_center_id(rows)
+
+
+ALL_ABSENCES_QUERY = (
+    "SELECT [ID], [Center ID], [Leave Type], [Start_Date], [End_Date] "
+    "FROM [Absences]"
+)
+
+
+def get_all_absences(db_path: str) -> dict:
+    """Return {center_id: [absence dicts]} for every Absences row."""
+    rows = _fetch_all_unfiltered(ALL_ABSENCES_QUERY, db_path, map_absence_row)
+    return _index_by_center_id(rows)
+
+
+ALL_AVAILABILITY_QUERY = (
+    "SELECT [ID], [Center ID], [effective_start_date], "
+    "[effective_end_date], [Day Of Week], [avail_start], [avail_end] "
+    "FROM [Availability]"
+)
+
+
+def get_all_availability(db_path: str) -> dict:
+    """Return {center_id: [availability dicts]} for every Availability row."""
+    rows = _fetch_all_unfiltered(ALL_AVAILABILITY_QUERY, db_path,
+                                  map_availability_row)
+    return _index_by_center_id(rows)
+
+
+def _index_by_center_id(rows):
+    """Group a flat list of row-dicts into {center_id: [rows]}."""
+    out: dict[int, list] = {}
+    for row in rows:
+        out.setdefault(row["center_id"], []).append(row)
+    return out
+
+
+def _fetch_all_unfiltered(query: str, db_path: str, mapper):
+    """Open one connection, run an unfiltered SELECT, map each row.
+    Used by the four `get_all_<table>` batch fetchers so a whole-table
+    load is one ODBC round-trip instead of N."""
+    if not os.path.exists(db_path):
+        raise FileNotFoundError(f"Database not found: {db_path}")
+
+    import pyodbc
+
+    try:
+        conn = pyodbc.connect(build_connection_string(db_path))
+    except pyodbc.Error as exc:
+        raise RuntimeError(
+            "Could not open the Access database. Verify the Microsoft "
+            "Access ODBC driver is installed and its bitness matches "
+            "this Python interpreter (spec section 8). "
+            f"Original error: {exc}"
+        )
+    try:
+        cursor = conn.cursor()
+        cursor.execute(query)
+        return [mapper(row) for row in cursor.fetchall() if row[1] is not None]
+    finally:
+        conn.close()
+
+
 def _fetch_all(query, center_id, db_path, mapper):
     """Run a parameterized SELECT and map each row. Shared by the 4 new
     fetchers."""
