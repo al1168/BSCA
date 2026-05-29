@@ -322,7 +322,10 @@ class MainWindow(QWidget):
                 return False
 
         elif mode == 2:
-            pass
+            pass  # Plan — combo always has a value
+
+        elif mode == 3:
+            pass  # All Members — no input to validate
 
         db_path = self._settings.get("db_path", "")
         if not os.path.isfile(db_path):
