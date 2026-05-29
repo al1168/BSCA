@@ -5,6 +5,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from monthly_schedule.db import (
     get_member, get_members_by_plan,
     get_enrollments, get_authorizations, get_absences, get_availability,
+    get_all_members,
 )
 from monthly_schedule.eligibility_context import MemberContext
 from monthly_schedule.travel import load_api_key, load_cache, save_cache
@@ -79,6 +80,11 @@ class ScheduleWorker(QThread):
                         )
                     )
                     return
+            elif self.mode == "all":
+                members = get_all_members(self.db_path)
+                if not members:
+                    self._emit_error(tr("worker.no_members"))
+                    return
             else:
                 id_list = (
                     [self.center_id]
@@ -119,9 +125,18 @@ class ScheduleWorker(QThread):
                 absences=get_absences(member["center_id"], self.db_path),
                 availabilities=get_availability(member["center_id"], self.db_path),
             )
+            if self.mode == "all":
+                plan = (member.get("health_plan") or "").strip().upper() or "_NoPlan"
+                member_out_dir = os.path.join(
+                    self.out_dir, f"{plan}_{self.year:04d}-{self.month:02d}"
+                )
+                if not self.preview:
+                    os.makedirs(member_out_dir, exist_ok=True)
+            else:
+                member_out_dir = self.out_dir
             ok, stage, reason = process_member(
                 member, ctx,
-                self.year, self.month, self.out_dir,
+                self.year, self.month, member_out_dir,
                 self.preview, api_key, cache,
             )
             if ok:
@@ -158,6 +173,7 @@ class ScheduleWorker(QThread):
             "success": success,
             "total": total,
             "scope": {
+                "mode": self.mode,
                 "plan_code": self.plan_code.upper() if self.mode == "plan" else None,
                 "year": self.year,
                 "month": self.month,
