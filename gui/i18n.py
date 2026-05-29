@@ -18,10 +18,12 @@ STRINGS: dict[str, dict[str, str]] = {
         "who.single": "Single Member",
         "who.multiple": "Multiple Members",
         "who.plan": "Entire Plan",
+        "who.all": "All Members",
         "who.member_id_label": "Member ID:",
         "who.member_ids_label": "Member IDs:",
         "who.plan_label": "Plan:",
         "who.placeholder": "e.g. 24010, 24011, 24015",
+        "who.all_hint": "All members in the database will be scheduled. Per-plan folders are created under your output path.",
         # when
         "when.title": "When",
         "when.month_label": "Month:",
@@ -104,6 +106,7 @@ STRINGS: dict[str, dict[str, str]] = {
         # worker log lines
         "worker.preview": "Preview: {id} ({last}, {first})",
         "worker.wrote": "Wrote {filename}",
+        "worker.no_members": "No members found in the database.",
         "worker.no_members_for_plan": "No members found for plan {plan}.",
         "worker.cannot_create_folder": "Cannot create output folder: {error}",
         # run summary
@@ -127,6 +130,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "summary.reason.absent_month": "absent for the entire month",
         # scope (used by GUI summary builder)
         "scope.plan": "plan {code} {period}",
+        "scope.all": "all members {period}",
         "scope.period": "{period}",
         # errors
         "errors.driver_missing": (
@@ -155,10 +159,12 @@ STRINGS: dict[str, dict[str, str]] = {
         "who.single": "单个成员",
         "who.multiple": "多个成员",
         "who.plan": "整个计划",
+        "who.all": "全部成员",
         "who.member_id_label": "成员编号：",
         "who.member_ids_label": "成员编号列表：",
         "who.plan_label": "计划：",
         "who.placeholder": "例如 24010, 24011, 24015",
+        "who.all_hint": "数据库中所有成员将被排班。将在输出路径下按计划创建子文件夹。",
         # when
         "when.title": "时间",
         "when.month_label": "月份：",
@@ -239,6 +245,7 @@ STRINGS: dict[str, dict[str, str]] = {
         # worker log lines
         "worker.preview": "预览：{id}（{last}，{first}）",
         "worker.wrote": "已写入 {filename}",
+        "worker.no_members": "数据库中找不到成员。",
         "worker.no_members_for_plan": "计划 {plan} 中找不到成员。",
         "worker.cannot_create_folder": "无法创建输出文件夹：{error}",
         # run summary
@@ -262,6 +269,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "summary.reason.absent_month": "整月缺席",
         # scope
         "scope.plan": "计划 {code} {period}",
+        "scope.all": "所有成员 {period}",
         "scope.period": "{period}",
         # errors
         "errors.driver_missing": (
