@@ -136,6 +136,15 @@ class ScheduleWorker(QThread):
         # center_id. Replaces 4×N ODBC connections (the per-member
         # pattern) with 4 — see docs/performance/2026-05-29-all-members-
         # baseline.md for why this matters.
+        #
+        # Note: we eager-fetch unconditionally even for single/multiple
+        # modes (where N is small). The spec called those out as
+        # "not worth restructuring", but the connection cost is the
+        # same per query regardless of WHERE filter (~400 ms each), so
+        # 4 unfiltered queries is roughly break-even at N=1 and a clear
+        # win at N≥2. The simpler code path is worth the trivial memory
+        # bump (~few MB at current table sizes). Revisit if Enrollment/
+        # Authorization/Absences/Availability ever grow beyond ~100k rows.
         enroll_idx = get_all_enrollments(self.db_path)
         auth_idx = get_all_authorizations(self.db_path)
         absence_idx = get_all_absences(self.db_path)
