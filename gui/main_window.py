@@ -92,16 +92,19 @@ class MainWindow(QWidget):
         self._radio_single = QRadioButton()
         self._radio_multiple = QRadioButton()
         self._radio_plan = QRadioButton()
+        self._radio_all = QRadioButton()
         self._radio_single.setChecked(True)
         radio_row.addWidget(self._radio_single)
         radio_row.addWidget(self._radio_multiple)
         radio_row.addWidget(self._radio_plan)
+        radio_row.addWidget(self._radio_all)
         radio_row.addStretch()
 
         self._who_group = QButtonGroup(self)
         self._who_group.addButton(self._radio_single, 0)
         self._who_group.addButton(self._radio_multiple, 1)
         self._who_group.addButton(self._radio_plan, 2)
+        self._who_group.addButton(self._radio_all, 3)
         self._who_group.idToggled.connect(self._on_who_changed)
 
         self._who_stack = QStackedWidget()
@@ -140,9 +143,18 @@ class MainWindow(QWidget):
         p2_layout.addWidget(self._plan_combo)
         p2_layout.addStretch()
 
+        # Panel 3 — all members (informational only, no input)
+        p3 = QWidget()
+        p3_layout = QHBoxLayout(p3)
+        p3_layout.setContentsMargins(0, 0, 0, 0)
+        self._all_hint_label = QLabel()
+        self._all_hint_label.setWordWrap(True)
+        p3_layout.addWidget(self._all_hint_label, 1)
+
         self._who_stack.addWidget(p0)
         self._who_stack.addWidget(p1)
         self._who_stack.addWidget(p2)
+        self._who_stack.addWidget(p3)
 
         who_layout.addLayout(radio_row)
         who_layout.addWidget(self._who_stack)
@@ -228,10 +240,12 @@ class MainWindow(QWidget):
         self._radio_single.setText(tr("who.single"))
         self._radio_multiple.setText(tr("who.multiple"))
         self._radio_plan.setText(tr("who.plan"))
+        self._radio_all.setText(tr("who.all"))
         self._single_label.setText(tr("who.member_id_label"))
         self._multi_label.setText(tr("who.member_ids_label"))
         self._multi_ids.setPlaceholderText(tr("who.placeholder"))
         self._plan_label_widget.setText(tr("who.plan_label"))
+        self._all_hint_label.setText(tr("who.all_hint"))
 
         self._when_box.setTitle(tr("when.title"))
         self._month_label_widget.setText(tr("when.month_label"))
@@ -345,7 +359,7 @@ class MainWindow(QWidget):
             return
 
         mode_id = self._who_group.checkedId()
-        mode = ["single", "multiple", "plan"][mode_id]
+        mode = ["single", "multiple", "plan", "all"][mode_id]
         year = self._year_spin.value()
         month = self._month_combo.currentIndex() + 1
         preview = self._preview_check.isChecked()
@@ -411,8 +425,11 @@ class MainWindow(QWidget):
     def _build_summary(self, data: dict) -> str:
         scope = data["scope"]
         period = f"{scope['year']:04d}-{scope['month']:02d}"
-        if scope["plan_code"] is not None:
+        mode = scope.get("mode")
+        if mode == "plan":
             scope_text = tr("scope.plan", code=scope["plan_code"], period=period)
+        elif mode == "all":
+            scope_text = tr("scope.all", period=period)
         else:
             scope_text = tr("scope.period", period=period)
 
