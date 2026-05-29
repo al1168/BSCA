@@ -1,4 +1,5 @@
 import os
+import traceback
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -58,6 +59,17 @@ class ScheduleWorker(QThread):
         self.finished.emit(False, {"error_text": text})
 
     def run(self):
+        try:
+            self._run_inner()
+        except Exception:
+            # Last-resort guard so an uncaught exception in any helper
+            # surfaces as a visible error instead of silently aborting
+            # the QThread (and potentially the whole process).
+            self._emit_error(
+                "Unhandled error in worker:\n" + traceback.format_exc()
+            )
+
+    def _run_inner(self):
         try:
             api_key = load_api_key(self.google_config)
         except RuntimeError as exc:
@@ -119,26 +131,32 @@ class ScheduleWorker(QThread):
         success = 0
 
         for i, member in enumerate(members):
-            ctx = MemberContext(
-                enrollments=get_enrollments(member["center_id"], self.db_path),
-                authorizations=get_authorizations(member["center_id"], self.db_path),
-                absences=get_absences(member["center_id"], self.db_path),
-                availabilities=get_availability(member["center_id"], self.db_path),
-            )
-            if self.mode == "all":
-                plan = (member.get("health_plan") or "").strip().upper() or "_NoPlan"
-                member_out_dir = os.path.join(
-                    self.out_dir, f"{plan}_{self.year:04d}-{self.month:02d}"
+            try:
+                ctx = MemberContext(
+                    enrollments=get_enrollments(member["center_id"], self.db_path),
+                    authorizations=get_authorizations(member["center_id"], self.db_path),
+                    absences=get_absences(member["center_id"], self.db_path),
+                    availabilities=get_availability(member["center_id"], self.db_path),
                 )
-                if not self.preview:
-                    os.makedirs(member_out_dir, exist_ok=True)
-            else:
-                member_out_dir = self.out_dir
-            ok, stage, reason = process_member(
-                member, ctx,
-                self.year, self.month, member_out_dir,
-                self.preview, api_key, cache,
-            )
+                if self.mode == "all":
+                    raw_plan = member.get("health_plan")
+                    plan = (str(raw_plan).strip().upper() if raw_plan else "") or "_NoPlan"
+                    member_out_dir = os.path.join(
+                        self.out_dir, f"{plan}_{self.year:04d}-{self.month:02d}"
+                    )
+                    if not self.preview:
+                        os.makedirs(member_out_dir, exist_ok=True)
+                else:
+                    member_out_dir = self.out_dir
+                ok, stage, reason = process_member(
+                    member, ctx,
+                    self.year, self.month, member_out_dir,
+                    self.preview, api_key, cache,
+                )
+            except Exception as exc:  # noqa: BLE001 - surface in summary, never kill run
+                ok = False
+                stage = "worker"
+                reason = f"{type(exc).__name__}: {exc}"
             if ok:
                 success += 1
                 if self.preview:
