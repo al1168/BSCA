@@ -30,6 +30,10 @@ dist/
 
 # Test databases (local only)
 test_dbs/
+
+# Local-only dev tools (benchmark + diagnostic scripts)
 _bench_all.prof
 _bench_all.txt
 _bench_all.py
+_diag_*.py
+geo_cache.backup-*.json
