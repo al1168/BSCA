@@ -125,6 +125,35 @@ def _parse_time_block(text):
     return (start, end)
 
 
+# Match either a "N-M" range or a single digit N in 1..7.
+_DAY_TOKEN = re.compile(r"(\d)\s*-\s*(\d)|(\d)")
+
+
+def _parse_days(text):
+    """Extract day-of-week ints (1..7) from a string fragment.
+
+    Accepts dot-, comma-, or hyphen-separated digits, including ranges
+    like '1-5'. Returns a set. Out-of-range digits (0, 8, 9) are
+    dropped silently — they're not valid weekdays in this convention
+    (1=Mon..7=Sun).
+    """
+    if not text:
+        return set()
+    out = set()
+    for m in _DAY_TOKEN.finditer(text):
+        if m.group(1) and m.group(2):
+            lo, hi = int(m.group(1)), int(m.group(2))
+            if lo <= hi:
+                for d in range(lo, hi + 1):
+                    if 1 <= d <= 7:
+                        out.add(d)
+        elif m.group(3):
+            d = int(m.group(3))
+            if 1 <= d <= 7:
+                out.add(d)
+    return out
+
+
 def _empty_result():
     return {
         "clauses": [],

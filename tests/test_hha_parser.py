@@ -7,7 +7,7 @@ ignored (no time content at all). See
 docs/superpowers/specs/2026-06-01-hha-availability-backfill-design.md
 """
 import pytest
-from monthly_schedule.hha_parser import _parse_time_block, parse_hha_row
+from monthly_schedule.hha_parser import _parse_days, _parse_time_block, parse_hha_row
 
 
 def test_empty_string_is_ignored():
@@ -98,3 +98,32 @@ def test_parse_time_block_accepts_real_formats(text, expected):
 ])
 def test_parse_time_block_returns_none_for_unparseable(text):
     assert _parse_time_block(text) is None
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("1.2.3", {1, 2, 3}),
+    ("1,2,3", {1, 2, 3}),
+    ("4.5.6", {4, 5, 6}),
+    ("1-5", {1, 2, 3, 4, 5}),
+    ("1-7", {1, 2, 3, 4, 5, 6, 7}),
+    ("4-7", {4, 5, 6, 7}),
+    # Mixed dot+range (real sample: "1-5.6.7" doesn't appear but
+    # "1-5(...) 6.7(...)" does; per-clause this could be "1-5" alone)
+    ("2.4.7", {2, 4, 7}),
+    # Single day
+    ("4", {4}),
+    # Whitespace tolerance
+    (" 1 . 2 . 3 ", {1, 2, 3}),
+])
+def test_parse_days_accepts_real_formats(text, expected):
+    assert _parse_days(text) == expected
+
+
+@pytest.mark.parametrize("text", [
+    "",
+    "abc",
+    "8",          # out of 1-7 range
+    "0",          # out of 1-7 range
+])
+def test_parse_days_returns_empty_set_when_no_valid_days(text):
+    assert _parse_days(text) == set()
