@@ -55,3 +55,44 @@ def test_phone_dash_digits_alone_is_ignored():
     # Phone "390-5496" looks dash-y but has no time marker.
     result = parse_hha_row("Always Home Care 390-5496")
     assert result["ignored"] is True
+
+
+import pytest
+from monthly_schedule.hha_parser import _parse_time_block
+
+
+@pytest.mark.parametrize("text,expected", [
+    # Trailing pm applies to both sides
+    ("2:30-7pm", ("14:30", "19:00")),
+    ("2pm-8pm", ("14:00", "20:00")),
+    # Trailing am applies to both
+    ("7am-11am", ("07:00", "11:00")),
+    # Start has am, end has pm (cross noon)
+    ("8am-12pm", ("08:00", "12:00")),
+    # End only has pm, start < end -> start is am
+    ("8-12am", ("08:00", "12:00")),
+    # End only has pm, start < end numerically with pm context
+    ("3-7pm", ("15:00", "19:00")),
+    # Half-time via dot ("5.45pm" -> 5:45 pm)
+    ("12-5.45pm", ("12:00", "17:45")),
+    # Both sides full
+    ("8:30-11:30PM", ("20:30", "23:30")),
+    # Unicode en-dash and whitespace
+    ("2 – 7 pm", ("14:00", "19:00")),
+    # Space in colon position ("8: 30PM")
+    ("3:30-8: 30PM", ("15:30", "20:30")),
+    # 12am edge: 12am = 00:00, but rare in HHA data; keep strict
+    ("12am-1am", ("00:00", "01:00")),
+])
+def test_parse_time_block_accepts_real_formats(text, expected):
+    assert _parse_time_block(text) == expected
+
+
+@pytest.mark.parametrize("text", [
+    "garbage",
+    "after 1p.m.",         # only one side, no dash
+    "3-",                  # truncated (real sample: "5.6.7(2:45pm-")
+    "",
+])
+def test_parse_time_block_returns_none_for_unparseable(text):
+    assert _parse_time_block(text) is None
