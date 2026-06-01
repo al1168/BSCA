@@ -112,12 +112,16 @@ def _parse_time_block(text):
     # when that produces an illogical backwards range (e.g. "8-12am"
     # -> 08:00 to 00:00) treat the 12 as noon (12:00) instead. This
     # matches real-world HHA data where "12am" in a daytime range
-    # means midday. The explicit "12am-1am" case (both sides am) is
-    # not backwards so it keeps 00:00 correctly.
-    if end <= start and right[0] == "12" and right[2] == "am":
+    # means midday.
+    #
+    # The heuristic fires only when left has NO explicit am/pm suffix
+    # (it inherited the suffix via fallback from right). When left has
+    # an explicit suffix — whether am ("1am-12am") or pm ("11pm-12am")
+    # — "12am" genuinely means midnight and we leave end as 00:00.
+    left_explicit = _parse_one_side(left_raw, None)
+    left_has_explicit_suffix = left_explicit is not None and left_explicit[2] is not None
+    if not left_has_explicit_suffix and end <= start and right[0] == "12" and right[2] == "am":
         end = f"12:{right[1]}"
-    if start is None or end is None:
-        return None
     return (start, end)
 
 

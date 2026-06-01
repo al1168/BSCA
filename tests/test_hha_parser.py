@@ -6,7 +6,8 @@ skipped (had time but all clauses fell after center close), or
 ignored (no time content at all). See
 docs/superpowers/specs/2026-06-01-hha-availability-backfill-design.md
 """
-from monthly_schedule.hha_parser import parse_hha_row
+import pytest
+from monthly_schedule.hha_parser import _parse_time_block, parse_hha_row
 
 
 def test_empty_string_is_ignored():
@@ -57,10 +58,6 @@ def test_phone_dash_digits_alone_is_ignored():
     assert result["ignored"] is True
 
 
-import pytest
-from monthly_schedule.hha_parser import _parse_time_block
-
-
 @pytest.mark.parametrize("text,expected", [
     # Trailing pm applies to both sides
     ("2:30-7pm", ("14:30", "19:00")),
@@ -69,7 +66,7 @@ from monthly_schedule.hha_parser import _parse_time_block
     ("7am-11am", ("07:00", "11:00")),
     # Start has am, end has pm (cross noon)
     ("8am-12pm", ("08:00", "12:00")),
-    # End only has pm, start < end -> start is am
+    # 12am in a daytime context is treated as noon
     ("8-12am", ("08:00", "12:00")),
     # End only has pm, start < end numerically with pm context
     ("3-7pm", ("15:00", "19:00")),
@@ -83,6 +80,11 @@ from monthly_schedule.hha_parser import _parse_time_block
     ("3:30-8: 30PM", ("15:30", "20:30")),
     # 12am edge: 12am = 00:00, but rare in HHA data; keep strict
     ("12am-1am", ("00:00", "01:00")),
+    # Overnight: left is PM, so "12am" really means midnight
+    ("11pm-12am", ("23:00", "00:00")),
+    ("8pm-12am", ("20:00", "00:00")),
+    # Already-AM left: "1am-12am" is unusual but valid; 12am stays midnight
+    ("1am-12am", ("01:00", "00:00")),
 ])
 def test_parse_time_block_accepts_real_formats(text, expected):
     assert _parse_time_block(text) == expected
