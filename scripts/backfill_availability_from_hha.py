@@ -55,7 +55,7 @@ def _apply_clause_to_db(cur, center_id, day, avail_end_hhmm, today,
     """One upsert: find the currently-open Availability row for
     (Center ID, Day Of Week). UPDATE if it exists with a different
     avail_end; INSERT if it doesn't. Tracks earliest-time-wins for
-    repeat (day) within one row via the `proposed_ends` map carried
+    repeat (day) within one row via the `by_day` map carried
     by the caller (see _apply_row)."""
     new_end_time = _hhmm_to_time(avail_end_hhmm)
     cur.execute(_AVAIL_OPEN_QUERY, str(center_id), day)
@@ -96,6 +96,31 @@ def _apply_row(cur, center_id, parsed, today, stats):
                 by_day[d] = end_hhmm
     for d, end_hhmm in by_day.items():
         _apply_clause_to_db(cur, center_id, d, end_hhmm, today, stats)
+
+
+_CSV_COLUMNS = [
+    "center_id", "last_name", "first_name",
+    "raw_hha", "reason", "attempted_parse",
+]
+
+
+def _write_ambiguous_csv(rows, out_dir, today):
+    """Write the ambiguous-rows CSV to
+    `<out_dir>/hha_backfill_ambiguous_<YYYY-MM-DD>.csv`. Returns the
+    path written. Writes the header even if `rows` is empty so the
+    file's presence still signals 'a backfill ran on this date'.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(
+        out_dir,
+        f"hha_backfill_ambiguous_{today.isoformat()}.csv",
+    )
+    with open(path, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=_CSV_COLUMNS)
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+    return path
 
 
 def _build_connection_string(db_path):
@@ -210,9 +235,35 @@ def main(argv=None):
             conn.commit()
             mode = "APPLIED"
 
-        # CSV + summary are added in Tasks 12 and 13.
-        print(f"Mode: {mode}")
-        print(f"Stats so far: {stats}")
+        csv_path = _write_ambiguous_csv(
+            ambiguous_rows, args.csv_out, today,
+        )
+        stats["csv_path"] = csv_path
+
+        non_empty = stats["scanned"]
+        print()
+        print("HHA backfill summary")
+        print(f"  Contacts scanned (with non-empty HHA): {non_empty}")
+        print(f"  Rows ignored (no time):                {stats['ignored']}")
+        print(f"  Rows skipped (HHA fully after close):  {stats['skipped_row']}")
+        print(
+            f"  Rows applied:                          {stats['applied']}"
+            f"    (of which {stats['applied_with_ambig_clause']} had "
+            "at least one ambiguous clause)"
+        )
+        print(f"  Rows fully or partially ambiguous:     {stats['ambiguous']}")
+        print(f"  Availability rows updated:             {stats['updated']}")
+        print(f"  Availability rows inserted:            {stats['inserted']}")
+        print(
+            f"  Clauses skipped (HHA_start >= 16:00):  "
+            f"{stats['clauses_after_close']}"
+        )
+        print(
+            f"  Multi-clause same-day collisions:      "
+            f"{stats['multi_clause_same_day']}"
+        )
+        print(f"  Ambiguous CSV: {stats['csv_path']}")
+        print(f"  Mode: {mode}")
     finally:
         conn.close()
     return 0
