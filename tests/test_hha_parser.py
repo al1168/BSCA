@@ -7,7 +7,7 @@ ignored (no time content at all). See
 docs/superpowers/specs/2026-06-01-hha-availability-backfill-design.md
 """
 import pytest
-from monthly_schedule.hha_parser import _parse_days, _parse_time_block, parse_hha_row
+from monthly_schedule.hha_parser import _normalize, _parse_days, _parse_time_block, parse_hha_row
 
 
 def test_empty_string_is_ignored():
@@ -199,3 +199,40 @@ def test_hha_starting_exactly_at_open_is_ambiguous():
     result = parse_hha_row("1.2.3.4.5.6.7 (8am-12am)")
     assert result["ambiguous"] is True
     assert result["ambiguous_reason"] == "morning_or_pre_open"
+
+
+def test_normalize_replaces_unicode_punctuation():
+    # Real sample: "25026.0|万友: 5.6.7 ( 3:30-8: 30PM)" already has
+    # ASCII but Chinese rows can have full-width punctuation.
+    assert _normalize("（4.5.6）2:30-7pm") == "(4.5.6) 2:30-7pm"
+
+
+def test_normalize_strips_agency_prefix():
+    # "PPL:" is agency name + colon. No digits before the colon =>
+    # strip it. (We keep "(212) 226-1353" etc. because the digits
+    # come before the colon there.)
+    assert _normalize("PPL: (4.5.6) 2:30-7pm") == "(4.5.6) 2:30-7pm"
+
+
+def test_normalize_does_not_strip_when_digit_precedes_colon():
+    # "2:30" is a time, not an agency prefix. Don't strip past it.
+    text = _normalize("(4.5.6) 2:30-7pm")
+    assert text == "(4.5.6) 2:30-7pm"
+
+
+def test_normalize_strips_chinese_agency_prefix():
+    # Real sample: "万有: (6.7) 12pm-6pm" — CJK agency name.
+    out = _normalize("万有: (6.7) 12pm-6pm")
+    assert out == "(6.7) 12pm-6pm"
+
+
+def test_normalize_lowercases_am_pm():
+    assert "PM" not in _normalize("2:30-7PM")
+
+
+def test_user_example_still_works_after_normalize_wiring():
+    # Defensive — make sure Task 4's behavior didn't regress.
+    result = parse_hha_row("PPL: (4.5.6) 2:30-7pm")
+    assert _apply_clauses(result) == [
+        (4, "14:30"), (5, "14:30"), (6, "14:30"),
+    ]

@@ -49,6 +49,37 @@ _TIME_BLOCK = re.compile(
 )
 
 
+_UNICODE_PUNCT_MAP = str.maketrans({
+    "（": "(",   # full-width (
+    "）": ") ",  # full-width ) — trailing space so adjacent text separates
+    "：": ":",   # full-width :
+    "，": ",",   # full-width ,
+    "　": " ",   # ideographic space
+})
+
+
+def _normalize(text):
+    """Lowercase, normalize Unicode punctuation, strip a leading
+    agency prefix, and collapse whitespace.
+
+    Agency prefix = anything before the first ':' provided no digit
+    appears before that ':'. This preserves time substrings like
+    '2:30' (digit precedes ':') and phone numbers like '(212) 390-5496'
+    (digits precede ':').
+    """
+    if not text:
+        return ""
+    s = text.translate(_UNICODE_PUNCT_MAP).lower()
+    # Strip leading agency: find first ':' and check if any digit
+    # appears before it.
+    colon = s.find(":")
+    if colon != -1 and not any(ch.isdigit() for ch in s[:colon]):
+        s = s[colon + 1:]
+    # Collapse internal whitespace, trim ends.
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
 def _parse_one_side(side_text, fallback_suffix):
     """Parse one side of a time block to ('HH', 'MM', 'am'|'pm'|None).
     fallback_suffix is used when the side has no explicit am/pm but the
@@ -291,16 +322,17 @@ def _has_time_pattern(text):
 def parse_hha_row(text):
     if text is None or not text.strip():
         return {**_empty_result(), "ignored": True}
-    if not _has_time_pattern(text):
+    normalized = _normalize(text)
+    if not _has_time_pattern(normalized):
         return {**_empty_result(), "ignored": True}
-    pairs = _split_clauses(text)
+    pairs = _split_clauses(normalized)
     if not pairs:
         # Time-looking substring exists but the stricter _TIME_BLOCK
         # regex couldn't lock onto a clause. Flag for review.
         return _aggregate_row(
             [{"days": set(), "avail_end": None,
               "status": "ambiguous", "reason": "clause_split_failed"}],
-            attempted_parse=f"raw={text!r}",
+            attempted_parse=f"raw={normalized!r}",
         )
     # Collect row-wide days so a clause missing its own days can fall
     # back to "all days mentioned elsewhere in the row".
