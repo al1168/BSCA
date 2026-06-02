@@ -165,3 +165,37 @@ def test_single_clause_day_range():
     result = parse_hha_row("1-7(2-6pm)")
     assert result["applied"] is True
     assert _apply_clauses(result) == [(d, "14:00") for d in range(1, 8)]
+
+
+def test_evening_only_hha_is_skipped_row_outcome():
+    # Real sample: "(1.4.6.7) 5-10pm" — HHA at 17:00, after center
+    # closes at 16:00. No DB write, no CSV row.
+    result = parse_hha_row("(1.4.6.7) 5-10pm")
+    assert result["applied"] is False
+    assert result["ambiguous"] is False
+    assert result["skipped"] is True
+    assert result["ignored"] is False
+
+
+def test_hha_starting_exactly_at_close_is_skipped():
+    # Edge case: HHA_start == 16:00. Per spec >= 16:00 is skip.
+    result = parse_hha_row("1.2.3 4-8pm")
+    assert result["skipped"] is True
+    assert result["applied"] is False
+
+
+def test_morning_hha_is_ambiguous():
+    # Real sample: "1.2.3(7AM-10AM)" — HHA_start = 07:00 < 08:00.
+    # Per spec we don't try to push avail_start later; flag it.
+    result = parse_hha_row("1.2.3(7AM-10AM)")
+    assert result["ambiguous"] is True
+    assert result["ambiguous_reason"] == "morning_or_pre_open"
+    assert result["applied"] is False
+
+
+def test_hha_starting_exactly_at_open_is_ambiguous():
+    # Edge: HHA_start == 08:00 means the whole center day is blocked.
+    # Per spec <= 08:00 is morning_or_pre_open ambiguous.
+    result = parse_hha_row("1.2.3.4.5.6.7 (8am-12am)")
+    assert result["ambiguous"] is True
+    assert result["ambiguous_reason"] == "morning_or_pre_open"

@@ -28,19 +28,23 @@ _MARKER_PATTERN = re.compile(r":\d|am|pm", re.IGNORECASE)
 
 # Match a single side of a time block: 1-2 digit hour, optional
 # minutes via ":MM" or ".MM", optional am/pm suffix. Tolerates
-# spaces around the colon ("8: 30PM" is real data).
+# spaces around the colon ("8: 30PM" is real data). The colon/dot
+# separator is required when minutes are present — bare whitespace
+# between hour and minute digits is not accepted.
 _TIME_SIDE = re.compile(
-    r"(\d{1,2})\s*[:.]?\s*(\d{2})?\s*(am|pm)?",
+    r"(\d{1,2})(?:\s*[:.]\s*(\d{1,2}))?\s*(am|pm)?",
     re.IGNORECASE,
 )
 
 # Match a full time block: <side> <dash> <side>. The dash may be
 # ASCII '-' or unicode en-dash. Anchored with re.search so the
-# caller can pass a substring or full clause body.
+# caller can pass a substring or full clause body. Minutes require
+# an explicit colon/dot separator so "3 4-8pm" is not treated as
+# a time block (the "3 4" part has no separator).
 _TIME_BLOCK = re.compile(
-    r"(\d{1,2}\s*[:.]?\s*\d{0,2}\s*(?:am|pm)?)"
+    r"(\d{1,2}(?:\s*[:.]\s*\d{1,2})?\s*(?:am|pm)?)"
     r"\s*[-–~]\s*"
-    r"(\d{1,2}\s*[:.]?\s*\d{0,2}\s*(?:am|pm)?)",
+    r"(\d{1,2}(?:\s*[:.]\s*\d{1,2})?\s*(?:am|pm)?)",
     re.IGNORECASE,
 )
 
