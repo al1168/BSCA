@@ -154,6 +154,115 @@ def _parse_days(text):
     return out
 
 
+# Center open/close, baked in per spec.
+_CENTER_OPEN = "08:00"
+_CENTER_CLOSE = "16:00"
+
+
+def _split_clauses(text):
+    """Yield (days_text, time_text) pairs.
+
+    Strategy: find every time block in `text` via _TIME_BLOCK.finditer
+    and post-filter with _MARKER_PATTERN so day-ranges like "1-7" are
+    skipped (they get absorbed into the days_text of the next real
+    time block).
+
+    For each accepted match, "days_text" is the substring between the
+    previous accepted time-end (or start of string) and this match's
+    start. Handles both forms naturally:
+      "(4.5.6) 2:30-7pm"         -> [("(4.5.6) ", "2:30-7pm")]
+      "5.6.7(2pm-6pm)"           -> [("5.6.7(",   "2pm-6pm")]
+      "1-7(2-6pm)"               -> [("1-7(",     "2-6pm")]
+      "(d1) t1, (d2) t2"         -> [("(d1) ", t1), (", (d2) ", t2)]
+      "d1(t1) d2(t2)"            -> [("d1(", t1), (") d2(", t2)]
+    """
+    pairs = []
+    cursor = 0
+    for m in _TIME_BLOCK.finditer(text):
+        time_text = m.group(0)
+        if not _MARKER_PATTERN.search(time_text):
+            # Looks dash-joined but no real time marker — skip without
+            # advancing cursor so the next accepted clause's days_text
+            # subsumes it.
+            continue
+        days_text = text[cursor:m.start()]
+        pairs.append((days_text, time_text))
+        cursor = m.end()
+    return pairs
+
+
+def _classify_clause(days, time_block):
+    """Given a set of days and a (start, end) tuple, return a Clause
+    dict. Pure classification — no side effects.
+    """
+    if time_block is None:
+        return {
+            "days": days,
+            "avail_end": None,
+            "status": "ambiguous",
+            "reason": "time_unparseable",
+        }
+    start, _end = time_block
+    if not days:
+        return {
+            "days": set(),
+            "avail_end": None,
+            "status": "ambiguous",
+            "reason": "days_missing",
+        }
+    if start >= _CENTER_CLOSE:
+        return {
+            "days": days,
+            "avail_end": None,
+            "status": "skip",
+            "reason": None,
+        }
+    if start <= _CENTER_OPEN:
+        return {
+            "days": days,
+            "avail_end": None,
+            "status": "ambiguous",
+            "reason": "morning_or_pre_open",
+        }
+    return {
+        "days": days,
+        "avail_end": start,
+        "status": "apply",
+        "reason": None,
+    }
+
+
+def _aggregate_row(clauses, attempted_parse):
+    """Combine clause outcomes into a ParsedRow dict."""
+    applied = any(c["status"] == "apply" for c in clauses)
+    ambiguous = any(c["status"] == "ambiguous" for c in clauses)
+    skipped_only = (
+        not applied and not ambiguous
+        and any(c["status"] == "skip" for c in clauses)
+    )
+    # Reason priority per spec; only set when ambiguous.
+    reason = None
+    if ambiguous:
+        priority = [
+            "date_conditioned", "chinese_note", "morning_or_pre_open",
+            "time_unparseable", "days_missing", "clause_split_failed",
+        ]
+        present = {c["reason"] for c in clauses if c["status"] == "ambiguous"}
+        for p in priority:
+            if p in present:
+                reason = p
+                break
+    return {
+        "clauses": clauses,
+        "applied": applied,
+        "ambiguous": ambiguous,
+        "skipped": skipped_only,
+        "ignored": False,
+        "ambiguous_reason": reason,
+        "attempted_parse": attempted_parse,
+    }
+
+
 def _empty_result():
     return {
         "clauses": [],
@@ -180,5 +289,28 @@ def parse_hha_row(text):
         return {**_empty_result(), "ignored": True}
     if not _has_time_pattern(text):
         return {**_empty_result(), "ignored": True}
-    # No further stages wired yet — placeholder.
-    return {**_empty_result(), "ignored": True}
+    pairs = _split_clauses(text)
+    if not pairs:
+        # Time-looking substring exists but the stricter _TIME_BLOCK
+        # regex couldn't lock onto a clause. Flag for review.
+        return _aggregate_row(
+            [{"days": set(), "avail_end": None,
+              "status": "ambiguous", "reason": "clause_split_failed"}],
+            attempted_parse=f"raw={text!r}",
+        )
+    # Collect row-wide days so a clause missing its own days can fall
+    # back to "all days mentioned elsewhere in the row".
+    row_days = set()
+    for days_text, _ in pairs:
+        row_days |= _parse_days(days_text)
+    clauses = []
+    for days_text, time_text in pairs:
+        days = _parse_days(days_text) or row_days
+        time_block = _parse_time_block(time_text)
+        clauses.append(_classify_clause(days, time_block))
+    attempted = "; ".join(
+        f"days={sorted(c['days'])} end={c['avail_end']} "
+        f"status={c['status']} reason={c['reason']}"
+        for c in clauses
+    )
+    return _aggregate_row(clauses, attempted)

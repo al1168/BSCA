@@ -127,3 +127,41 @@ def test_parse_days_accepts_real_formats(text, expected):
 ])
 def test_parse_days_returns_empty_set_when_no_valid_days(text):
     assert _parse_days(text) == set()
+
+
+def _apply_clauses(result):
+    """Helper: return list of (day, avail_end) for clauses that
+    were marked apply, sorted by day for stable comparison."""
+    out = []
+    for c in result["clauses"]:
+        if c["status"] == "apply":
+            for d in sorted(c["days"]):
+                out.append((d, c["avail_end"]))
+    return sorted(out)
+
+
+def test_user_example_ppl_thursday_friday_saturday():
+    # The canonical example from the spec.
+    result = parse_hha_row("PPL: (4.5.6) 2:30-7pm")
+    assert result["applied"] is True
+    assert result["ambiguous"] is False
+    assert result["ignored"] is False
+    assert _apply_clauses(result) == [
+        (4, "14:30"), (5, "14:30"), (6, "14:30"),
+    ]
+
+
+def test_single_clause_no_agency_prefix():
+    # Real sample: "5.6.7(2pm-6pm)"
+    result = parse_hha_row("5.6.7(2pm-6pm)")
+    assert result["applied"] is True
+    assert _apply_clauses(result) == [
+        (5, "14:00"), (6, "14:00"), (7, "14:00"),
+    ]
+
+
+def test_single_clause_day_range():
+    # Real sample: "1-7(2-6pm)"
+    result = parse_hha_row("1-7(2-6pm)")
+    assert result["applied"] is True
+    assert _apply_clauses(result) == [(d, "14:00") for d in range(1, 8)]
