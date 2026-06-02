@@ -19,3 +19,20 @@ from monthly_schedule.auth_days import get_authorized_weekdays
 )
 def test_get_authorized_weekdays(raw, expected):
     assert get_authorized_weekdays(raw) == expected
+
+
+from monthly_schedule.auth_days import format_auth_days
+
+
+@pytest.mark.parametrize(
+    "days,expected",
+    [
+        ({1, 3, 5}, "1,3,5"),
+        ({5, 1, 3}, "1,3,5"),       # sorted
+        (set(), ""),                # empty -> empty string
+        ({1}, "1"),
+        ({1, 2, 3, 4, 5, 6, 7}, "1,2,3,4,5,6,7"),
+    ],
+)
+def test_format_auth_days(days, expected):
+    assert format_auth_days(days) == expected

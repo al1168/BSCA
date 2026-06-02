@@ -15,3 +15,10 @@ def get_authorized_weekdays(sadc_auth):
         return set()
     found = re.findall(r"\d+", str(sadc_auth))
     return {n for n in (int(x) for x in found) if 1 <= n <= 7}
+
+
+def format_auth_days(days):
+    """Inverse of get_authorized_weekdays: render a set of weekday
+    ints (1-7) as the canonical "d,d,d" form used by the Access
+    `auth_days` column. Empty set -> empty string."""
+    return ",".join(str(n) for n in sorted(days))
