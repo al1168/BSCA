@@ -169,6 +169,30 @@ Interactive PowerShell lookup of a member by Center ID:
 pwsh ./Get-Contact.ps1 -CenterID 24010
 ```
 
+## Backfill Availability from HHA notes
+
+One-shot script that parses the free-text `Contacts.HHA` column and
+writes the resulting end-of-day constraints to the `Availability`
+table. Rows that contain time content but can't be safely
+auto-interpreted (morning HHA, midday splits, date-conditioned
+entries, free-text notes) are emitted to a dated CSV for human
+review; rows with no time content are silently ignored.
+
+```
+python scripts\backfill_availability_from_hha.py --db <PATH> [--dry-run] [--csv-out DIR] [--quiet]
+```
+
+Assumes the center is open 08:00–16:00. An HHA window starting
+mid-afternoon (e.g. `(4.5.6) 2:30-7pm` → Thu/Fri/Sat) becomes that
+day's `avail_end`; windows fully after 16:00 produce no constraint.
+`--dry-run` parses, writes the CSV, and rolls back the DB
+transaction. The upsert is idempotent and only ever moves
+`avail_end` earlier — re-running never widens a previously
+shortened window. The ambiguous CSV lands at
+`<csv-out>/hha_backfill_ambiguous_<YYYY-MM-DD>.csv` (utf-8-sig so
+Excel renders CJK correctly). Full design in
+[`docs/superpowers/specs/2026-06-01-hha-availability-backfill-design.md`](docs/superpowers/specs/2026-06-01-hha-availability-backfill-design.md).
+
 ## Setup
 
 ```
