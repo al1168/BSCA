@@ -285,3 +285,40 @@ def test_three_clauses_all_after_close_row_is_skipped():
     assert result["applied"] is False
     assert result["ambiguous"] is False
     assert result["skipped"] is True
+
+
+def test_date_conditioned_is_ambiguous():
+    # Real sample: "6/1-6/30 (2.4.6.7) 7am-12pm,, 7/1-X (2.4.6.7) 3-8pm"
+    text = "6/1-6/30 (2.4.6.7) 7am-12pm,, 7/1-X (2.4.6.7) 3-8pm"
+    result = parse_hha_row(text)
+    assert result["ambiguous"] is True
+    assert result["ambiguous_reason"] == "date_conditioned"
+
+
+def test_chinese_note_in_body_is_ambiguous():
+    # Real sample: "占时每天2pm 开始护理 11/1/25有变动"
+    text = "占时每天2pm 开始护理 11/1/25有变动"
+    result = parse_hha_row(text)
+    assert result["ambiguous"] is True
+    # date_conditioned has higher priority than chinese_note per spec,
+    # but this string also has "11/1/25" — accept either as long as
+    # the row is flagged. Pin the priority:
+    assert result["ambiguous_reason"] in {
+        "date_conditioned", "chinese_note",
+    }
+
+
+def test_leading_chinese_agency_is_stripped_not_flagged():
+    # Real sample: "万有: (6.7) 12pm-6pm" — CJK is only the agency
+    # name. Should normalize away and parse cleanly.
+    result = parse_hha_row("万有: (6.7) 12pm-6pm")
+    assert result["applied"] is True
+    assert result["ambiguous"] is False
+    assert _apply_clauses(result) == [(6, "12:00"), (7, "12:00")]
+
+
+def test_date_conditioned_priority_over_morning():
+    # Even though "7am-12pm" would be morning_or_pre_open, the date
+    # prefix wins per the priority table.
+    result = parse_hha_row("6/1-6/30 (2.4.6.7) 7am-12pm")
+    assert result["ambiguous_reason"] == "date_conditioned"

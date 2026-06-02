@@ -49,6 +49,29 @@ _TIME_BLOCK = re.compile(
 )
 
 
+# A date substring like "6/1", "6/1-6/30", "11/1/25", "7/1-X".
+# Anchored by a digit + slash + digit (with optional more parts).
+_DATE_PATTERN = re.compile(
+    r"\b\d{1,2}/\d{1,2}(?:/\d{2,4}|-\d{1,2}/\d{1,2}|-x)?\b",
+    re.IGNORECASE,
+)
+
+# CJK Unified Ideographs (and most common extensions used in this data).
+_CJK_PATTERN = re.compile(r"[一-鿿]")
+
+
+def _detect_special_case(normalized_text):
+    """Return a reason string for date_conditioned or chinese_note,
+    or None. `normalized_text` is post-_normalize (agency stripped),
+    so any CJK that remains is in the BODY not the agency name.
+    """
+    if _DATE_PATTERN.search(normalized_text):
+        return "date_conditioned"
+    if _CJK_PATTERN.search(normalized_text):
+        return "chinese_note"
+    return None
+
+
 _UNICODE_PUNCT_MAP = str.maketrans({
     "（": "(",   # full-width (
     "）": ") ",  # full-width ) — trailing space so adjacent text separates
@@ -332,10 +355,36 @@ def _has_time_pattern(text):
     return False
 
 
+def _has_time_token(text):
+    """True iff text contains any time marker: ':MM', 'am', or 'pm'.
+    Less strict than _has_time_pattern — a single '2pm' with no range
+    is enough. Used to avoid flagging rows with no time content at all
+    (e.g. plain day-lists) as special-case ambiguous."""
+    return bool(_MARKER_PATTERN.search(text))
+
+
 def parse_hha_row(text):
     if text is None or not text.strip():
         return {**_empty_result(), "ignored": True}
     normalized = _normalize(text)
+    # Run special-case detector before the full time-range gate so that
+    # rows with a date prefix or CJK body note but only a bare time
+    # token (no dash-joined range) are still flagged — not silently
+    # ignored. Require at least one time token so that pure day-lists
+    # or phone numbers don't get caught.
+    if _has_time_token(normalized):
+        special = _detect_special_case(normalized)
+        if special is not None:
+            # Short-circuit: emit one ambiguous clause carrying the reason.
+            # We still record the row as "saw time content" — not ignored.
+            clause = {
+                "days": set(), "avail_end": None,
+                "status": "ambiguous", "reason": special,
+            }
+            return _aggregate_row(
+                [clause],
+                attempted_parse=f"special={special} raw={normalized!r}",
+            )
     if not _has_time_pattern(normalized):
         return {**_empty_result(), "ignored": True}
     pairs = _split_clauses(normalized)
