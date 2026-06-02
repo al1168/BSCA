@@ -236,3 +236,52 @@ def test_user_example_still_works_after_normalize_wiring():
     assert _apply_clauses(result) == [
         (4, "14:30"), (5, "14:30"), (6, "14:30"),
     ]
+
+
+def test_two_clauses_comma_separated():
+    # Real sample: "仁人: (3.4) 1pm-7pm, (5.6) 1-6pm"
+    result = parse_hha_row("(3.4) 1pm-7pm, (5.6) 1-6pm")
+    assert result["applied"] is True
+    assert _apply_clauses(result) == [
+        (3, "13:00"), (4, "13:00"), (5, "13:00"), (6, "13:00"),
+    ]
+
+
+def test_two_clauses_space_separated_with_inline_days():
+    # Real sample: "1.2.3.4(11-2pm) 5.6.7(11-1pm)"
+    result = parse_hha_row("1.2.3.4(11-2pm) 5.6.7(11-1pm)")
+    assert result["applied"] is True
+    assert _apply_clauses(result) == [
+        (1, "11:00"), (2, "11:00"), (3, "11:00"), (4, "11:00"),
+        (5, "11:00"), (6, "11:00"), (7, "11:00"),
+    ]
+
+
+def test_mixed_apply_and_skip_not_flagged():
+    # Real sample: "(1.3.5) 8:30-11:30PM, (7)3pm-6PM"
+    # First clause is evening (after close) -> skip.
+    # Second clause is afternoon -> apply.
+    # Per spec: row is applied, NOT ambiguous.
+    result = parse_hha_row("(1.3.5) 8:30-11:30PM, (7)3pm-6PM")
+    assert result["applied"] is True
+    assert result["ambiguous"] is False
+    assert _apply_clauses(result) == [(7, "15:00")]
+
+
+def test_mixed_apply_and_ambiguous_row_flagged():
+    # Constructed: first clause morning (ambiguous), second clause
+    # afternoon (apply). Per spec: row is applied AND ambiguous.
+    result = parse_hha_row("(1) 7am-10am, (7) 3pm-6pm")
+    assert result["applied"] is True
+    assert result["ambiguous"] is True
+    assert result["ambiguous_reason"] == "morning_or_pre_open"
+
+
+def test_three_clauses_all_after_close_row_is_skipped():
+    # Real sample: "常常: (1) 4-8pm, (2.3) 4-9pm, (6.7) 5-9pm"
+    # 4pm = 16:00, which is >= center close 16:00 -> skip.
+    # Whole row outcome: skipped.
+    result = parse_hha_row("(1) 4-8pm, (2.3) 4-9pm, (6.7) 5-9pm")
+    assert result["applied"] is False
+    assert result["ambiguous"] is False
+    assert result["skipped"] is True

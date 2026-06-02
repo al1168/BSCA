@@ -157,6 +157,19 @@ def _parse_time_block(text):
     left_has_explicit_suffix = left_explicit is not None and left_explicit[2] is not None
     if not left_has_explicit_suffix and end <= start and right[0] == "12" and right[2] == "am":
         end = f"12:{right[1]}"
+    # When only the right side gave us an am/pm marker and back-
+    # propagating it puts the range backward in 24h ("11-2pm" parsed
+    # as 23:00-14:00), the user's intent is the opposite suffix on
+    # the left ("11am-2pm" = 11:00-14:00). Only re-try when the left
+    # had no explicit suffix of its own and the range is genuinely
+    # backward — leave correct backward ranges (e.g. legitimate
+    # overnight shifts) untouched when both sides were explicit.
+    if start > end and not left_has_explicit_suffix and right[2] is not None:
+        opposite = "am" if right[2] == "pm" else "pm"
+        retry_left = (left[0], left[1], opposite)
+        retry_start = _to_24h(*retry_left)
+        if retry_start is not None and retry_start <= end:
+            start = retry_start
     return (start, end)
 
 
