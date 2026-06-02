@@ -52,11 +52,11 @@ def _hhmm_to_time(hhmm):
 
 def _apply_clause_to_db(cur, center_id, day, avail_end_hhmm, today,
                         stats):
-    """One upsert: find the currently-open Availability row for
-    (Center ID, Day Of Week). UPDATE if it exists with a different
-    avail_end; INSERT if it doesn't. Tracks earliest-time-wins for
-    repeat (day) within one row via the `by_day` map carried
-    by the caller (see _apply_row)."""
+    """One upsert into Availability: find the currently-open row for
+(Center ID, Day Of Week) and UPDATE its avail_end if the new value
+is strictly earlier (per-spec "only shorten" invariant), or INSERT
+a new row if none exists. Stats counters bookkeep updates vs. inserts.
+"""
     new_end_time = _hhmm_to_time(avail_end_hhmm)
     cur.execute(_AVAIL_OPEN_QUERY, str(center_id), day)
     existing = cur.fetchone()
@@ -65,7 +65,8 @@ def _apply_clause_to_db(cur, center_id, day, avail_end_hhmm, today,
         # existing_end is a datetime; compare on time of day.
         existing_end_time = existing_end.time() if hasattr(
             existing_end, "time") else existing_end
-        if existing_end_time != new_end_time:
+        # Only shorten: per spec the avail_end is monotonically pulled earlier as HHA constraints accumulate, never widened.
+        if new_end_time < existing_end_time:
             cur.execute(_AVAIL_UPDATE, new_end_time, int(existing_id))
             stats["updated"] += 1
     else:
@@ -193,7 +194,7 @@ def main(argv=None):
             "clauses_after_close": 0,
             "multi_clause_same_day": 0,
         }
-        ambiguous_rows = []  # filled in Task 12
+        ambiguous_rows = []
 
         for cid, last, first, hha in _read_contacts(conn):
             stats["scanned"] += 1
