@@ -19,6 +19,30 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
+_CONTACTS_QUERY = (
+    "SELECT [Center ID], [Last Name], [First Name], [Health Plan], "
+    "[SADC], [Auth BGN], [Auth EXP] "
+    "FROM [Contacts] "
+    "ORDER BY [Center ID]"
+)
+
+_AUTH_SELECT_FOR_MEMBER = (
+    "SELECT [ID], [Health Plan] FROM [Authorization] "
+    "WHERE [Center ID] = ?"
+)
+
+_AUTH_UPDATE_HEALTH_PLAN = (
+    "UPDATE [Authorization] SET [Health Plan] = ? WHERE [ID] = ?"
+)
+
+_AUTH_INSERT = (
+    "INSERT INTO [Authorization] "
+    "([Center ID], [auth_start], [auth_end], "
+    "[effective_start], [effective_end], [auth_days], [Health Plan]) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?)"
+)
+
+
 def _build_connection_string(db_path):
     return (
         "DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};"
