@@ -141,3 +141,65 @@ def test_update_branch_skips_when_contacts_health_plan_blank():
     assert all(s != backfill._AUTH_UPDATE_HEALTH_PLAN
                for s, _ in cur.executed)
     assert stats == {"updated_members": 0, "updated_rows": 0}
+
+
+from datetime import datetime
+
+
+def test_insert_branch_happy_path():
+    cur = FakeCursor()
+    stats = {"inserted_members": 0}
+    bgn = datetime(2026, 1, 1)
+    exp = datetime(2026, 12, 31)
+    result = backfill._process_insert_branch(
+        cur, center_id=24010, sadc="1.3.5",
+        auth_bgn=bgn, auth_exp=exp, health_plan="HOF", stats=stats,
+    )
+    assert result == ("inserted", None)
+    inserts = [(s, p) for s, p in cur.executed
+               if s == backfill._AUTH_INSERT]
+    assert len(inserts) == 1
+    _, params = inserts[0]
+    # ([Center ID], auth_start, auth_end, eff_start, eff_end,
+    #  auth_days, [Health Plan])
+    assert params == ("24010", bgn, exp, bgn, exp, "1,3,5", "HOF")
+    assert stats["inserted_members"] == 1
+
+
+def test_insert_branch_skip_missing_all():
+    cur = FakeCursor()
+    stats = {"inserted_members": 0}
+    result = backfill._process_insert_branch(
+        cur, center_id=24010, sadc=None,
+        auth_bgn=None, auth_exp=None, health_plan="", stats=stats,
+    )
+    assert result == ("skipped_missing", ["SADC", "Auth BGN",
+                                          "Auth EXP", "Health Plan"])
+    # No INSERT was issued.
+    assert all(s != backfill._AUTH_INSERT for s, _ in cur.executed)
+    assert stats["inserted_members"] == 0
+
+
+def test_insert_branch_skip_missing_subset():
+    cur = FakeCursor()
+    stats = {"inserted_members": 0}
+    result = backfill._process_insert_branch(
+        cur, center_id=24010, sadc="1,3,5",
+        auth_bgn=datetime(2026, 1, 1), auth_exp=None,
+        health_plan="HOF", stats=stats,
+    )
+    assert result == ("skipped_missing", ["Auth EXP"])
+    assert stats["inserted_members"] == 0
+
+
+def test_insert_branch_sadc_garbage_treated_as_missing():
+    cur = FakeCursor()
+    stats = {"inserted_members": 0}
+    # "TBD" parses to an empty set of weekdays.
+    result = backfill._process_insert_branch(
+        cur, center_id=24010, sadc="TBD",
+        auth_bgn=datetime(2026, 1, 1), auth_exp=datetime(2026, 12, 31),
+        health_plan="HOF", stats=stats,
+    )
+    assert result == ("skipped_missing", ["SADC"])
+    assert stats["inserted_members"] == 0

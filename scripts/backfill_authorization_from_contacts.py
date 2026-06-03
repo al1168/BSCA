@@ -106,5 +106,43 @@ def _process_update_branch(cur, center_id, health_plan, stats):
     return ("updated", len(blanks))
 
 
+from monthly_schedule.auth_days import (
+    get_authorized_weekdays, format_auth_days,
+)
+
+
+def _process_insert_branch(cur, center_id, sadc, auth_bgn, auth_exp,
+                           health_plan, stats):
+    """Insert one Authorization row from the legacy Contacts columns.
+
+    Returns one of:
+      ("inserted", None)                 — row was inserted
+      ("skipped_missing", [field, ...])  — listed legacy fields were
+                                           NULL/empty; nothing inserted
+    """
+    auth_days_str = format_auth_days(get_authorized_weekdays(sadc))
+    missing = []
+    if auth_days_str == "":
+        missing.append("SADC")
+    if auth_bgn is None:
+        missing.append("Auth BGN")
+    if auth_exp is None:
+        missing.append("Auth EXP")
+    if _is_blank(health_plan):
+        missing.append("Health Plan")
+    if missing:
+        return ("skipped_missing", missing)
+    cur.execute(
+        _AUTH_INSERT,
+        str(center_id),
+        auth_bgn, auth_exp,
+        auth_bgn, auth_exp,
+        auth_days_str,
+        str(health_plan).strip(),
+    )
+    stats["inserted_members"] += 1
+    return ("inserted", None)
+
+
 if __name__ == "__main__":
     sys.exit(main())
