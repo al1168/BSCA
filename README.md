@@ -169,6 +169,26 @@ Interactive PowerShell lookup of a member by Center ID:
 pwsh ./Get-Contact.ps1 -CenterID 24010
 ```
 
+## Create supporting tables
+
+One-shot DDL bootstrap. Given a fresh `.accdb` whose only table is
+`Contacts`, this script issues `CREATE TABLE` for the four
+supporting tables `Enrollment`, `Authorization`, `Absences`, and
+`Availability`, including the `[Health Plan]` column on
+`Authorization` from the get-go.
+
+```
+python scripts\create_supporting_tables.py --db <PATH> [--quiet]
+```
+
+No data is written. After this run succeeds, populate the new
+tables with the backfill scripts below
+(`backfill_availability_from_hha.py`,
+`backfill_authorization_from_contacts.py`). The script fails
+loudly if any of the four tables already exists — drop the
+offending tables in Access and re-run. The expected column lists
+are in [`docs/database.md`](docs/database.md).
+
 ## Backfill Availability from HHA notes
 
 One-shot script that parses the free-text `Contacts.HHA` column and

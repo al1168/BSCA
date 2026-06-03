@@ -134,8 +134,8 @@ Per-weekday time-of-day constraints with effective date ranges.
 | effective_start_date | Date/Time | First day this rule applies. |
 | effective_end_date | Date/Time, nullable | Last day this rule applies. NULL = ongoing. |
 | Day Of Week | Integer | 1=Mon … 7=Sun (matches Python's `date.isoweekday()`). |
-| avail_start | Short Text | `"HH:MM"`. Earliest the member can arrive. |
-| avail_end | Short Text | `"HH:MM"`. Latest the member must leave. |
+| avail_start | Date/Time | Time-only DATETIME (Access stores the time portion with a 1899-12-30 placeholder date). Earliest the member can arrive. The Python layer renders this as `"HH:MM"` via [`map_availability_row`](../monthly_schedule/db.py). |
+| avail_end | Date/Time | Time-only DATETIME, same storage convention as `avail_start`. Latest the member must leave. |
 | Notes | Long Text, nullable | |
 
 **Granularity.** One row per (member, weekday, effective period). A
@@ -146,10 +146,11 @@ weekday, date), the scheduler uses the plan's default arrival window
 from [rules.py](../monthly_schedule/rules.py). Availability rows are
 subtractive constraints — they tighten the window, never widen it.
 
-**Why Short Text for times.** The Python code already parses times in
-`"HH:MM"` form via `parse_hhmm` in [rules.py](../monthly_schedule/rules.py).
-Storing them as Short Text in Access is human-readable and matches
-the existing convention.
+**Why time-only DATETIME for times.** Access has no pure time-of-day
+type — DATETIME with a placeholder date is the conventional way to
+represent a wall-clock time, and it lights up Access's built-in time
+picker in the UI. The Python layer always reads/writes the time
+portion; the placeholder date (1899-12-30) is ignored.
 
 ## Relationships
 
@@ -226,7 +227,9 @@ Contacts and used a constellation of Contacts columns (`SADC Auth`,
 authorization metadata. Migrating to this design requires:
 
 1. Create the four new tables (Enrollment, Authorization, Absences,
-   Availability).
+   Availability) by running
+   [`scripts/create_supporting_tables.py`](../scripts/create_supporting_tables.py)
+   against the .accdb.
 2. For each active member, create:
    - One Enrollment row with `start_date` = their original enrollment
      date and `end_date` = NULL.
@@ -237,8 +240,10 @@ authorization metadata. Migrating to this design requires:
 3. Leave the legacy authorization columns on Contacts in place. They
    are not dropped — the scheduler simply stops reading them.
 
-A formal migration script is out of scope for the design spec — the
-expectation is that this is a one-time manual operation in Access.
+Per-member backfill of the new tables is now scripted in
+[`scripts/backfill_authorization_from_contacts.py`](../scripts/backfill_authorization_from_contacts.py)
+and
+[`scripts/backfill_availability_from_hha.py`](../scripts/backfill_availability_from_hha.py).
 
 ## See Also
 
