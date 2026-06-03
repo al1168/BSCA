@@ -79,6 +79,39 @@ def _fmt_date(value):
     return str(value)
 
 
+_DATE_FORMATS = (
+    "%Y-%m-%d",
+    "%m/%d/%Y",
+    "%m/%d/%y",
+    "%Y-%m-%d %H:%M:%S",
+)
+
+
+def _coerce_date(value):
+    """Normalize a Contacts.[Auth BGN] / Contacts.[Auth EXP] value
+    into a datetime that pyodbc can bind into the Authorization
+    table's DATETIME columns. Access columns typed Date/Time come
+    back from pyodbc as datetime (pass-through); columns typed Short
+    Text come back as str and need parsing.
+
+    Returns None if the value is NULL, blank, or doesn't match any
+    supported format — that signals the caller to treat the field as
+    missing and skip the member."""
+    if value is None:
+        return None
+    if hasattr(value, "year"):  # datetime or date
+        return value
+    s = str(value).strip()
+    if not s:
+        return None
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    return None
+
+
 def _parse_args(argv):
     p = argparse.ArgumentParser(
         description="Backfill Authorization from Contacts."
@@ -161,12 +194,14 @@ def _process_insert_branch(cur, center_id, sadc, auth_bgn, auth_exp,
                                            NULL/empty; nothing inserted
     """
     auth_days_str = format_auth_days(get_authorized_weekdays(sadc))
+    bgn = _coerce_date(auth_bgn)
+    exp = _coerce_date(auth_exp)
     missing = []
     if auth_days_str == "":
         missing.append("SADC")
-    if auth_bgn is None:
+    if bgn is None:
         missing.append("Auth BGN")
-    if auth_exp is None:
+    if exp is None:
         missing.append("Auth EXP")
     if _is_blank(health_plan):
         missing.append("Health Plan")
@@ -175,8 +210,8 @@ def _process_insert_branch(cur, center_id, sadc, auth_bgn, auth_exp,
     cur.execute(
         _AUTH_INSERT,
         str(center_id),
-        auth_bgn, auth_exp,
-        auth_bgn, auth_exp,
+        bgn, exp,
+        bgn, exp,
         auth_days_str,
         str(health_plan).strip(),
     )

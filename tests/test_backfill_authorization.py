@@ -98,6 +98,32 @@ def test_fmt_date_string():
     assert backfill._fmt_date("1/1/2026") == "1/1/2026"
 
 
+def test_coerce_date_none_and_blank():
+    assert backfill._coerce_date(None) is None
+    assert backfill._coerce_date("") is None
+    assert backfill._coerce_date("   ") is None
+
+
+def test_coerce_date_passthrough_datetime():
+    from datetime import datetime as _datetime
+    d = _datetime(2026, 1, 1, 10, 30)
+    assert backfill._coerce_date(d) is d
+
+
+def test_coerce_date_parses_common_formats():
+    from datetime import datetime as _datetime
+    assert backfill._coerce_date("2026-01-01") == _datetime(2026, 1, 1)
+    assert backfill._coerce_date("1/1/2026") == _datetime(2026, 1, 1)
+    assert backfill._coerce_date("01/01/2026") == _datetime(2026, 1, 1)
+    assert backfill._coerce_date("1/1/26") == _datetime(2026, 1, 1)
+    assert backfill._coerce_date("2026-01-01 00:00:00") == _datetime(2026, 1, 1)
+
+
+def test_coerce_date_garbage_is_none():
+    assert backfill._coerce_date("not a date") is None
+    assert backfill._coerce_date("13/45/9999") is None
+
+
 def test_is_blank():
     assert backfill._is_blank(None) is True
     assert backfill._is_blank("") is True
@@ -213,6 +239,36 @@ def test_insert_branch_sadc_garbage_treated_as_missing():
     )
     assert result == ("skipped_missing", ["SADC"])
     assert stats["inserted_members"] == 0
+
+
+def test_insert_branch_parses_string_dates():
+    cur = FakeCursor()
+    stats = {"inserted_members": 0}
+    result = backfill._process_insert_branch(
+        cur, center_id=24010, sadc="1,3,5",
+        auth_bgn="1/1/2026", auth_exp="12/31/2026",
+        health_plan="HOF", stats=stats,
+    )
+    assert result == ("inserted", None)
+    inserts = [(s, p) for s, p in cur.executed
+               if s == backfill._AUTH_INSERT]
+    assert len(inserts) == 1
+    _, params = inserts[0]
+    # The string dates must be normalized to datetime before binding.
+    assert params == ("24010", _dt(2026, 1, 1), _dt(2026, 12, 31),
+                      _dt(2026, 1, 1), _dt(2026, 12, 31), "1,3,5", "HOF")
+
+
+def test_insert_branch_unparseable_date_treated_as_missing():
+    cur = FakeCursor()
+    stats = {"inserted_members": 0}
+    result = backfill._process_insert_branch(
+        cur, center_id=24010, sadc="1,3,5",
+        auth_bgn="not a date", auth_exp="12/31/2026",
+        health_plan="HOF", stats=stats,
+    )
+    assert result == ("skipped_missing", ["Auth BGN"])
+    assert all(s != backfill._AUTH_INSERT for s, _ in cur.executed)
 
 
 import csv
