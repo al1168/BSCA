@@ -193,6 +193,34 @@ shortened window. The ambiguous CSV lands at
 Excel renders CJK correctly). Full design in
 [`docs/superpowers/specs/2026-06-01-hha-availability-backfill-design.md`](docs/superpowers/specs/2026-06-01-hha-availability-backfill-design.md).
 
+## Backfill Authorization from Contacts
+
+One-shot script that aligns the `Authorization` table with
+`Contacts` in two ways:
+
+1. For every Contact whose Authorization rows already exist, fills
+   any blank `Health Plan` column with the value from
+   `Contacts.[Health Plan]`. Non-blank values are left alone —
+   Authorization is the going-forward source of truth.
+2. For every Contact with no Authorization row, inserts one from
+   the legacy Contacts columns `SADC` → `auth_days`,
+   `Auth BGN`/`Auth EXP` → `auth_start`/`auth_end` (and the
+   matching `effective_*` pair), and `Health Plan`.
+
+Members with missing source data are emitted to a dated CSV for
+human review.
+
+```
+python scripts\backfill_authorization_from_contacts.py --db <PATH> [--dry-run] [--csv-out DIR] [--quiet]
+```
+
+`--dry-run` runs the full pass, writes the CSV, then rolls back
+the DB transaction so the operator can preview without
+committing. The skipped CSV lands at
+`<csv-out>/auth_backfill_skipped_<YYYY-MM-DD>.csv` (utf-8-sig so
+Excel renders CJK correctly). Full design in
+[`docs/superpowers/specs/2026-06-02-authorization-backfill-design.md`](docs/superpowers/specs/2026-06-02-authorization-backfill-design.md).
+
 ## Setup
 
 ```
