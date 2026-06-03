@@ -160,6 +160,7 @@ Two `action` values, nothing else:
 Authorization backfill summary
   Contacts scanned:                            287
   Existing-auth members: Health Plan filled:   142   (rows updated: 203)
+  Existing-auth members: already populated:    101
   Existing-auth members: skipped (no plan):      4
   No-auth members: Authorization inserted:     119
   No-auth members: skipped (missing legacy):    22

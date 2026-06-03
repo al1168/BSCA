@@ -20,6 +20,11 @@ from pathlib import Path
 # Make `from monthly_schedule import ...` work when invoked as a script.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from monthly_schedule.auth_days import (  # noqa: E402
+    format_auth_days,
+    get_authorized_weekdays,
+)
+
 
 _CONTACTS_QUERY = (
     "SELECT [Center ID], [Last Name], [First Name], [Health Plan], "
@@ -44,12 +49,24 @@ _AUTH_INSERT = (
     "VALUES (?, ?, ?, ?, ?, ?, ?)"
 )
 
+_CSV_COLUMNS = [
+    "center_id", "last_name", "first_name",
+    "action", "missing_fields",
+]
+
 
 def _build_connection_string(db_path):
     return (
         "DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};"
         f"DBQ={db_path};"
     )
+
+
+def _is_blank(value):
+    """True for NULL or a string that is empty / whitespace-only."""
+    if value is None:
+        return True
+    return not str(value).strip()
 
 
 def _parse_args(argv):
@@ -65,6 +82,96 @@ def _parse_args(argv):
     p.add_argument("--quiet", action="store_true",
                    help="Suppress per-row stdout; print only the summary.")
     return p.parse_args(argv)
+
+
+def _read_contacts(conn):
+    """Yield (cid:int, last, first, health_plan, sadc, auth_bgn,
+    auth_exp) tuples. Rows with NULL Center ID are skipped silently."""
+    cur = conn.cursor()
+    cur.execute(_CONTACTS_QUERY)
+    for row in cur.fetchall():
+        cid, last, first, plan, sadc, bgn, exp = row
+        if cid is None:
+            continue
+        yield (int(cid), last, first, plan, sadc, bgn, exp)
+
+
+def _write_skipped_csv(rows, out_dir, today):
+    """Write the skipped-members CSV to
+    `<out_dir>/auth_backfill_skipped_<YYYY-MM-DD>.csv`. Returns the
+    path written. Writes the header even if `rows` is empty so the
+    file's presence signals 'a backfill ran on this date'.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(
+        out_dir,
+        f"auth_backfill_skipped_{today.isoformat()}.csv",
+    )
+    with open(path, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=_CSV_COLUMNS)
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+    return path
+
+
+def _process_update_branch(cur, center_id, health_plan, stats):
+    """Fill blank [Health Plan] on every Authorization row for this
+    member. Returns one of:
+      ("updated", N)            — N rows were filled
+      ("noop", 0)               — every row was already populated
+      ("skipped_no_plan", 0)    — at least one blank row but Contacts
+                                  has no Health Plan to fill it with
+    Stats counters bookkeep updated_members and updated_rows.
+    Caller is responsible for confirming count(Authorization) > 0 before
+    calling this; here we re-read the rows we'll touch.
+    """
+    cur.execute(_AUTH_SELECT_FOR_MEMBER, str(center_id))
+    rows = cur.fetchall()
+    blanks = [row_id for row_id, plan in rows if _is_blank(plan)]
+    if not blanks:
+        return ("noop", 0)
+    if _is_blank(health_plan):
+        return ("skipped_no_plan", 0)
+    for row_id in blanks:
+        cur.execute(_AUTH_UPDATE_HEALTH_PLAN,
+                    str(health_plan).strip(), int(row_id))
+    stats["updated_members"] += 1
+    stats["updated_rows"] += len(blanks)
+    return ("updated", len(blanks))
+
+
+def _process_insert_branch(cur, center_id, sadc, auth_bgn, auth_exp,
+                           health_plan, stats):
+    """Insert one Authorization row from the legacy Contacts columns.
+
+    Returns one of:
+      ("inserted", None)                 — row was inserted
+      ("skipped_missing", [field, ...])  — listed legacy fields were
+                                           NULL/empty; nothing inserted
+    """
+    auth_days_str = format_auth_days(get_authorized_weekdays(sadc))
+    missing = []
+    if auth_days_str == "":
+        missing.append("SADC")
+    if auth_bgn is None:
+        missing.append("Auth BGN")
+    if auth_exp is None:
+        missing.append("Auth EXP")
+    if _is_blank(health_plan):
+        missing.append("Health Plan")
+    if missing:
+        return ("skipped_missing", missing)
+    cur.execute(
+        _AUTH_INSERT,
+        str(center_id),
+        auth_bgn, auth_exp,
+        auth_bgn, auth_exp,
+        auth_days_str,
+        str(health_plan).strip(),
+    )
+    stats["inserted_members"] += 1
+    return ("inserted", None)
 
 
 def main(argv=None):
@@ -131,7 +238,7 @@ def main(argv=None):
                     if not args.quiet:
                         print(f"  SKIPPED   {cid}  no Health Plan on "
                               f"Contacts (had {len(existing)} existing "
-                              f"auth row(s))")
+                              f"auth {'row' if len(existing) == 1 else 'rows'})")
             else:
                 # INSERT branch.
                 result, payload = _process_insert_branch(
@@ -139,9 +246,6 @@ def main(argv=None):
                 )
                 if result == "inserted":
                     if not args.quiet:
-                        from monthly_schedule.auth_days import (
-                            format_auth_days, get_authorized_weekdays,
-                        )
                         days = format_auth_days(
                             get_authorized_weekdays(sadc)
                         )
@@ -190,114 +294,6 @@ def main(argv=None):
     finally:
         conn.close()
     return 0
-
-
-def _is_blank(value):
-    """True for NULL or a string that is empty / whitespace-only."""
-    if value is None:
-        return True
-    return not str(value).strip()
-
-
-def _process_update_branch(cur, center_id, health_plan, stats):
-    """Fill blank [Health Plan] on every Authorization row for this
-    member. Returns one of:
-      ("updated", N)            — N rows were filled
-      ("noop", 0)               — every row was already populated
-      ("skipped_no_plan", 0)    — at least one blank row but Contacts
-                                  has no Health Plan to fill it with
-    Stats counters bookkeep updated_members and updated_rows.
-    Caller is responsible for confirming count(Authorization) > 0 before
-    calling this; here we re-read the rows we'll touch.
-    """
-    cur.execute(_AUTH_SELECT_FOR_MEMBER, str(center_id))
-    rows = cur.fetchall()
-    blanks = [row_id for row_id, plan in rows if _is_blank(plan)]
-    if not blanks:
-        return ("noop", 0)
-    if _is_blank(health_plan):
-        return ("skipped_no_plan", 0)
-    for row_id in blanks:
-        cur.execute(_AUTH_UPDATE_HEALTH_PLAN,
-                    str(health_plan).strip(), int(row_id))
-    stats["updated_members"] += 1
-    stats["updated_rows"] += len(blanks)
-    return ("updated", len(blanks))
-
-
-from monthly_schedule.auth_days import (
-    get_authorized_weekdays, format_auth_days,
-)
-
-
-def _process_insert_branch(cur, center_id, sadc, auth_bgn, auth_exp,
-                           health_plan, stats):
-    """Insert one Authorization row from the legacy Contacts columns.
-
-    Returns one of:
-      ("inserted", None)                 — row was inserted
-      ("skipped_missing", [field, ...])  — listed legacy fields were
-                                           NULL/empty; nothing inserted
-    """
-    auth_days_str = format_auth_days(get_authorized_weekdays(sadc))
-    missing = []
-    if auth_days_str == "":
-        missing.append("SADC")
-    if auth_bgn is None:
-        missing.append("Auth BGN")
-    if auth_exp is None:
-        missing.append("Auth EXP")
-    if _is_blank(health_plan):
-        missing.append("Health Plan")
-    if missing:
-        return ("skipped_missing", missing)
-    cur.execute(
-        _AUTH_INSERT,
-        str(center_id),
-        auth_bgn, auth_exp,
-        auth_bgn, auth_exp,
-        auth_days_str,
-        str(health_plan).strip(),
-    )
-    stats["inserted_members"] += 1
-    return ("inserted", None)
-
-
-_CSV_COLUMNS = [
-    "center_id", "last_name", "first_name",
-    "action", "missing_fields",
-]
-
-
-def _write_skipped_csv(rows, out_dir, today):
-    """Write the skipped-members CSV to
-    `<out_dir>/auth_backfill_skipped_<YYYY-MM-DD>.csv`. Returns the
-    path written. Writes the header even if `rows` is empty so the
-    file's presence signals 'a backfill ran on this date'.
-    """
-    os.makedirs(out_dir, exist_ok=True)
-    path = os.path.join(
-        out_dir,
-        f"auth_backfill_skipped_{today.isoformat()}.csv",
-    )
-    with open(path, "w", encoding="utf-8-sig", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=_CSV_COLUMNS)
-        w.writeheader()
-        for r in rows:
-            w.writerow(r)
-    return path
-
-
-def _read_contacts(conn):
-    """Yield (cid:int, last, first, health_plan, sadc, auth_bgn,
-    auth_exp) tuples. Rows with NULL Center ID are skipped silently."""
-    cur = conn.cursor()
-    cur.execute(_CONTACTS_QUERY)
-    for row in cur.fetchall():
-        cid, last, first, plan, sadc, bgn, exp = row
-        if cid is None:
-            continue
-        yield (int(cid), last, first, plan, sadc, bgn, exp)
 
 
 if __name__ == "__main__":
