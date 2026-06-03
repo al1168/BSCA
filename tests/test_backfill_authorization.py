@@ -250,3 +250,25 @@ def test_write_skipped_csv_creates_output_dir(tmp_path):
         [], str(out), datetime.date(2026, 6, 2),
     )
     assert os.path.exists(path)
+
+
+def test_read_contacts_skips_null_center_id():
+    class StubConn:
+        def cursor(self):
+            return self
+
+        def execute(self, sql):
+            self.sql = sql
+            return self
+
+        def fetchall(self):
+            return [
+                (None, "Skip", "Me", "HOF", "1,3,5", None, None),
+                (24010, "Real", "One", "HOF", "1,3,5", None, None),
+            ]
+
+    conn = StubConn()
+    rows = list(backfill._read_contacts(conn))
+    assert len(rows) == 1
+    assert rows[0][0] == 24010  # int
+    assert conn.sql == backfill._CONTACTS_QUERY

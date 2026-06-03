@@ -72,7 +72,124 @@ def main(argv=None):
     if not os.path.exists(args.db):
         print(f"ERROR: database not found: {args.db}", file=sys.stderr)
         return 2
-    return 0  # placeholder; real work lands in later tasks
+    import pyodbc
+    try:
+        conn = pyodbc.connect(_build_connection_string(args.db))
+    except pyodbc.Error as exc:
+        print(
+            "ERROR: could not open the Access database. Verify the "
+            "Microsoft Access ODBC driver is installed and its "
+            "bitness matches this Python interpreter. "
+            f"Original error: {exc}",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        cur = conn.cursor()
+        today = datetime.date.today()
+        stats = {
+            "scanned": 0,
+            "updated_members": 0,
+            "updated_rows": 0,
+            "noop_members": 0,
+            "skipped_no_plan_members": 0,
+            "inserted_members": 0,
+            "skipped_missing_members": 0,
+        }
+        skipped_rows = []
+
+        for cid, last, first, plan, sadc, bgn, exp in _read_contacts(conn):
+            stats["scanned"] += 1
+            # Branch decision: any existing Authorization row for this
+            # member?
+            cur.execute(_AUTH_SELECT_FOR_MEMBER, str(cid))
+            existing = cur.fetchall()
+            if existing:
+                # UPDATE branch. _process_update_branch re-issues the
+                # SELECT internally; pass the already-fetched rows by
+                # re-binding the cursor is unnecessary because Access
+                # cursors don't allow result reuse cleanly. The second
+                # SELECT is cheap.
+                result, n = _process_update_branch(
+                    cur, cid, plan, stats,
+                )
+                if result == "updated":
+                    if not args.quiet:
+                        print(f"  UPDATED   {cid}  filled {n} row(s) "
+                              f"with {str(plan).strip()!r}")
+                elif result == "noop":
+                    stats["noop_members"] += 1
+                else:  # "skipped_no_plan"
+                    stats["skipped_no_plan_members"] += 1
+                    skipped_rows.append({
+                        "center_id": cid,
+                        "last_name": last or "",
+                        "first_name": first or "",
+                        "action": "no_health_plan_for_update",
+                        "missing_fields": "Health Plan",
+                    })
+                    if not args.quiet:
+                        print(f"  SKIPPED   {cid}  no Health Plan on "
+                              f"Contacts (had {len(existing)} existing "
+                              f"auth row(s))")
+            else:
+                # INSERT branch.
+                result, payload = _process_insert_branch(
+                    cur, cid, sadc, bgn, exp, plan, stats,
+                )
+                if result == "inserted":
+                    if not args.quiet:
+                        from monthly_schedule.auth_days import (
+                            format_auth_days, get_authorized_weekdays,
+                        )
+                        days = format_auth_days(
+                            get_authorized_weekdays(sadc)
+                        )
+                        print(f"  INSERTED  {cid}  "
+                              f"{str(plan).strip()}, {days}, "
+                              f"{bgn.date()} -> {exp.date()}")
+                else:  # "skipped_missing"
+                    stats["skipped_missing_members"] += 1
+                    skipped_rows.append({
+                        "center_id": cid,
+                        "last_name": last or "",
+                        "first_name": first or "",
+                        "action": "missing_legacy_fields",
+                        "missing_fields": "; ".join(payload),
+                    })
+                    if not args.quiet:
+                        print(f"  SKIPPED   {cid}  no existing auth + "
+                              f"missing: {', '.join(payload)}")
+
+        if args.dry_run:
+            conn.rollback()
+            mode = "DRY-RUN (no changes committed)"
+        else:
+            conn.commit()
+            mode = "APPLIED"
+
+        csv_path = _write_skipped_csv(skipped_rows, args.csv_out, today)
+
+        print()
+        print("Authorization backfill summary")
+        print(f"  Contacts scanned:                            "
+              f"{stats['scanned']}")
+        print(f"  Existing-auth members: Health Plan filled:   "
+              f"{stats['updated_members']}   "
+              f"(rows updated: {stats['updated_rows']})")
+        print(f"  Existing-auth members: already populated:    "
+              f"{stats['noop_members']}")
+        print(f"  Existing-auth members: skipped (no plan):    "
+              f"{stats['skipped_no_plan_members']}")
+        print(f"  No-auth members: Authorization inserted:     "
+              f"{stats['inserted_members']}")
+        print(f"  No-auth members: skipped (missing legacy):   "
+              f"{stats['skipped_missing_members']}")
+        print(f"  Skipped CSV: {csv_path}")
+        print(f"  Mode: {mode}")
+    finally:
+        conn.close()
+    return 0
 
 
 def _is_blank(value):
@@ -169,6 +286,18 @@ def _write_skipped_csv(rows, out_dir, today):
         for r in rows:
             w.writerow(r)
     return path
+
+
+def _read_contacts(conn):
+    """Yield (cid:int, last, first, health_plan, sadc, auth_bgn,
+    auth_exp) tuples. Rows with NULL Center ID are skipped silently."""
+    cur = conn.cursor()
+    cur.execute(_CONTACTS_QUERY)
+    for row in cur.fetchall():
+        cid, last, first, plan, sadc, bgn, exp = row
+        if cid is None:
+            continue
+        yield (int(cid), last, first, plan, sadc, bgn, exp)
 
 
 if __name__ == "__main__":
