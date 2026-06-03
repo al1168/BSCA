@@ -73,5 +73,38 @@ def main(argv=None):
     return 0  # placeholder; real work lands in later tasks
 
 
+def _is_blank(value):
+    """True for NULL or a string that is empty / whitespace-only."""
+    if value is None:
+        return True
+    return not str(value).strip()
+
+
+def _process_update_branch(cur, center_id, health_plan, stats):
+    """Fill blank [Health Plan] on every Authorization row for this
+    member. Returns one of:
+      ("updated", N)            — N rows were filled
+      ("noop", 0)               — every row was already populated
+      ("skipped_no_plan", 0)    — at least one blank row but Contacts
+                                  has no Health Plan to fill it with
+    Stats counters bookkeep updated_members and updated_rows.
+    Caller is responsible for confirming count(Authorization) > 0 before
+    calling this; here we re-read the rows we'll touch.
+    """
+    cur.execute(_AUTH_SELECT_FOR_MEMBER, str(center_id))
+    rows = cur.fetchall()
+    blanks = [row_id for row_id, plan in rows if _is_blank(plan)]
+    if not blanks:
+        return ("noop", 0)
+    if _is_blank(health_plan):
+        return ("skipped_no_plan", 0)
+    for row_id in blanks:
+        cur.execute(_AUTH_UPDATE_HEALTH_PLAN,
+                    str(health_plan).strip(), int(row_id))
+    stats["updated_members"] += 1
+    stats["updated_rows"] += len(blanks)
+    return ("updated", len(blanks))
+
+
 if __name__ == "__main__":
     sys.exit(main())

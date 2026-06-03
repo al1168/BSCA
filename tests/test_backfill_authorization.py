@@ -58,3 +58,86 @@ def test_auth_insert_query_columns():
         assert col in q
     # Seven values, no trailing commas, exactly seven `?` placeholders.
     assert q.count("?") == 7
+
+
+class FakeCursor:
+    """Records execute() calls and returns canned fetch results.
+
+    Use queue_fetchall() before each execute that the code-under-test
+    will follow with fetchall(). Use queue_fetchone() similarly.
+    """
+    def __init__(self):
+        self.executed = []        # list of (sql, params_tuple)
+        self._fetchall_queue = []
+        self._fetchone_queue = []
+
+    def queue_fetchall(self, rows):
+        self._fetchall_queue.append(rows)
+
+    def queue_fetchone(self, row):
+        self._fetchone_queue.append(row)
+
+    def execute(self, sql, *params):
+        self.executed.append((sql, params))
+        return self
+
+    def fetchall(self):
+        return self._fetchall_queue.pop(0)
+
+    def fetchone(self):
+        return self._fetchone_queue.pop(0)
+
+
+def test_is_blank():
+    assert backfill._is_blank(None) is True
+    assert backfill._is_blank("") is True
+    assert backfill._is_blank("   ") is True
+    assert backfill._is_blank("\t\n") is True
+    assert backfill._is_blank("HOF") is False
+    assert backfill._is_blank("  HOF  ") is False
+
+
+def test_update_branch_fills_only_blank_rows():
+    cur = FakeCursor()
+    # Two existing rows: ID=10 blank, ID=11 already "HOFV2".
+    cur.queue_fetchall([(10, None), (11, "HOFV2")])
+    stats = {"updated_members": 0, "updated_rows": 0}
+    result = backfill._process_update_branch(
+        cur, center_id=24010, health_plan="HOF", stats=stats,
+    )
+    assert result == ("updated", 1)  # 1 row filled
+    # Verify the SELECT then exactly one UPDATE on ID=10.
+    selects = [(s, p) for s, p in cur.executed
+               if s == backfill._AUTH_SELECT_FOR_MEMBER]
+    updates = [(s, p) for s, p in cur.executed
+               if s == backfill._AUTH_UPDATE_HEALTH_PLAN]
+    assert selects == [(backfill._AUTH_SELECT_FOR_MEMBER, ("24010",))]
+    assert updates == [(backfill._AUTH_UPDATE_HEALTH_PLAN, ("HOF", 10))]
+    assert stats == {"updated_members": 1, "updated_rows": 1}
+
+
+def test_update_branch_all_rows_already_filled():
+    cur = FakeCursor()
+    cur.queue_fetchall([(10, "HOF"), (11, "HOFV2")])
+    stats = {"updated_members": 0, "updated_rows": 0}
+    result = backfill._process_update_branch(
+        cur, center_id=24010, health_plan="HOF", stats=stats,
+    )
+    assert result == ("noop", 0)
+    # No UPDATE was issued.
+    assert all(s != backfill._AUTH_UPDATE_HEALTH_PLAN
+               for s, _ in cur.executed)
+    assert stats == {"updated_members": 0, "updated_rows": 0}
+
+
+def test_update_branch_skips_when_contacts_health_plan_blank():
+    cur = FakeCursor()
+    cur.queue_fetchall([(10, None)])
+    stats = {"updated_members": 0, "updated_rows": 0}
+    result = backfill._process_update_branch(
+        cur, center_id=24010, health_plan="", stats=stats,
+    )
+    assert result == ("skipped_no_plan", 0)
+    assert all(s != backfill._AUTH_UPDATE_HEALTH_PLAN
+               for s, _ in cur.executed)
+    assert stats == {"updated_members": 0, "updated_rows": 0}
