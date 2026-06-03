@@ -11,6 +11,8 @@ Members with missing source data are skipped and written to a CSV.
 See docs/superpowers/specs/2026-06-02-authorization-backfill-design.md
 """
 import argparse
+import csv
+import datetime
 import os
 import sys
 from pathlib import Path
@@ -142,6 +144,31 @@ def _process_insert_branch(cur, center_id, sadc, auth_bgn, auth_exp,
     )
     stats["inserted_members"] += 1
     return ("inserted", None)
+
+
+_CSV_COLUMNS = [
+    "center_id", "last_name", "first_name",
+    "action", "missing_fields",
+]
+
+
+def _write_skipped_csv(rows, out_dir, today):
+    """Write the skipped-members CSV to
+    `<out_dir>/auth_backfill_skipped_<YYYY-MM-DD>.csv`. Returns the
+    path written. Writes the header even if `rows` is empty so the
+    file's presence signals 'a backfill ran on this date'.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(
+        out_dir,
+        f"auth_backfill_skipped_{today.isoformat()}.csv",
+    )
+    with open(path, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=_CSV_COLUMNS)
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+    return path
 
 
 if __name__ == "__main__":

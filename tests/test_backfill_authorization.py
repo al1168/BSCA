@@ -143,14 +143,14 @@ def test_update_branch_skips_when_contacts_health_plan_blank():
     assert stats == {"updated_members": 0, "updated_rows": 0}
 
 
-from datetime import datetime
+from datetime import datetime as _dt
 
 
 def test_insert_branch_happy_path():
     cur = FakeCursor()
     stats = {"inserted_members": 0}
-    bgn = datetime(2026, 1, 1)
-    exp = datetime(2026, 12, 31)
+    bgn = _dt(2026, 1, 1)
+    exp = _dt(2026, 12, 31)
     result = backfill._process_insert_branch(
         cur, center_id=24010, sadc="1.3.5",
         auth_bgn=bgn, auth_exp=exp, health_plan="HOF", stats=stats,
@@ -185,7 +185,7 @@ def test_insert_branch_skip_missing_subset():
     stats = {"inserted_members": 0}
     result = backfill._process_insert_branch(
         cur, center_id=24010, sadc="1,3,5",
-        auth_bgn=datetime(2026, 1, 1), auth_exp=None,
+        auth_bgn=_dt(2026, 1, 1), auth_exp=None,
         health_plan="HOF", stats=stats,
     )
     assert result == ("skipped_missing", ["Auth EXP"])
@@ -198,8 +198,55 @@ def test_insert_branch_sadc_garbage_treated_as_missing():
     # "TBD" parses to an empty set of weekdays.
     result = backfill._process_insert_branch(
         cur, center_id=24010, sadc="TBD",
-        auth_bgn=datetime(2026, 1, 1), auth_exp=datetime(2026, 12, 31),
+        auth_bgn=_dt(2026, 1, 1), auth_exp=_dt(2026, 12, 31),
         health_plan="HOF", stats=stats,
     )
     assert result == ("skipped_missing", ["SADC"])
     assert stats["inserted_members"] == 0
+
+
+import csv
+import datetime
+
+
+def test_write_skipped_csv_header_only(tmp_path):
+    path = backfill._write_skipped_csv(
+        [], str(tmp_path), datetime.date(2026, 6, 2),
+    )
+    assert path.endswith("auth_backfill_skipped_2026-06-02.csv")
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        rows = list(csv.reader(f))
+    assert rows == [["center_id", "last_name", "first_name",
+                     "action", "missing_fields"]]
+
+
+def test_write_skipped_csv_with_rows(tmp_path):
+    rows_in = [
+        {"center_id": 24012, "last_name": "Wong", "first_name": "Mei",
+         "action": "no_health_plan_for_update",
+         "missing_fields": "Health Plan"},
+        {"center_id": 24013, "last_name": "Chen", "first_name": "Li",
+         "action": "missing_legacy_fields",
+         "missing_fields": "SADC; Auth EXP"},
+    ]
+    path = backfill._write_skipped_csv(
+        rows_in, str(tmp_path), datetime.date(2026, 6, 2),
+    )
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert rows == [
+        {"center_id": "24012", "last_name": "Wong", "first_name": "Mei",
+         "action": "no_health_plan_for_update",
+         "missing_fields": "Health Plan"},
+        {"center_id": "24013", "last_name": "Chen", "first_name": "Li",
+         "action": "missing_legacy_fields",
+         "missing_fields": "SADC; Auth EXP"},
+    ]
+
+
+def test_write_skipped_csv_creates_output_dir(tmp_path):
+    out = tmp_path / "nested" / "dir"
+    path = backfill._write_skipped_csv(
+        [], str(out), datetime.date(2026, 6, 2),
+    )
+    assert os.path.exists(path)
