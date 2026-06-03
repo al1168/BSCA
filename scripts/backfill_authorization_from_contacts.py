@@ -69,6 +69,16 @@ def _is_blank(value):
     return not str(value).strip()
 
 
+def _fmt_date(value):
+    """Render a per-row date for stdout. Access columns typed
+    Date/Time come back from pyodbc as datetime; columns typed
+    Short Text (some real-world Contacts use this for Auth BGN /
+    Auth EXP) come back as str. Handle both."""
+    if hasattr(value, "date"):
+        return value.date().isoformat()
+    return str(value)
+
+
 def _parse_args(argv):
     p = argparse.ArgumentParser(
         description="Backfill Authorization from Contacts."
@@ -251,7 +261,7 @@ def main(argv=None):
                         )
                         print(f"  INSERTED  {cid}  "
                               f"{str(plan).strip()}, {days}, "
-                              f"{bgn.date()} -> {exp.date()}")
+                              f"{_fmt_date(bgn)} -> {_fmt_date(exp)}")
                 else:  # "skipped_missing"
                     stats["skipped_missing_members"] += 1
                     skipped_rows.append({

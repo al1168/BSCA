@@ -88,6 +88,16 @@ class FakeCursor:
         return self._fetchone_queue.pop(0)
 
 
+def test_fmt_date_datetime():
+    from datetime import datetime as _datetime
+    assert backfill._fmt_date(_datetime(2026, 1, 1, 10, 30)) == "2026-01-01"
+
+
+def test_fmt_date_string():
+    assert backfill._fmt_date("2026-01-01") == "2026-01-01"
+    assert backfill._fmt_date("1/1/2026") == "1/1/2026"
+
+
 def test_is_blank():
     assert backfill._is_blank(None) is True
     assert backfill._is_blank("") is True
