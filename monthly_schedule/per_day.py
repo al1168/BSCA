@@ -51,12 +51,26 @@ def compute_day_eligibility(day: date, ctx, plan_rules) -> DayEligibility:
     if day.isoweekday() not in authorized:
         return DayEligibility(eligible=False)
 
-    if ctx.is_absent(day):
-        return DayEligibility(eligible=False)
-
-    avail = ctx.availability_for(day)
-    if avail is None:
-        return DayEligibility(eligible=True)
+    one_offs = ctx.one_offs_for(day)
+    if one_offs:
+        center_id = one_offs[0]["center_id"]
+        if len(one_offs) > 1:
+            raise OneOffConflict(
+                center_id, day,
+                f"duplicate one-off rows for {day.isoformat()}",
+            )
+        if ctx.is_absent(day):
+            raise OneOffConflict(
+                center_id, day,
+                f"one-off on {day.isoformat()} conflicts with absence",
+            )
+        avail = one_offs[0]
+    else:
+        if ctx.is_absent(day):
+            return DayEligibility(eligible=False)
+        avail = ctx.availability_for(day)
+        if avail is None:
+            return DayEligibility(eligible=True)
 
     plan_lo = parse_hhmm(plan_rules["arrival_window"][0])
     plan_hi = parse_hhmm(plan_rules["arrival_window"][1])
