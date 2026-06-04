@@ -15,7 +15,14 @@ database schema reference, see [docs/database.md](../docs/database.md).
 | [`create_supporting_tables.py`](create_supporting_tables.py) | DDL bootstrap. Issues `CREATE TABLE` for the four supporting tables (`Enrollment`, `Authorization`, `Absences`, `Availability`) on an `.accdb` that already contains `Contacts`. No data is written. |
 | [`backfill_authorization_from_contacts.py`](backfill_authorization_from_contacts.py) | Aligns the `Authorization` table with `Contacts`: fills blank `[Health Plan]` on existing rows, and inserts one new row per Contact-with-no-authorization from the legacy `SADC` / `Auth BGN` / `Auth EXP` / `Health Plan` columns. Skipped members go to a dated CSV. |
 | [`backfill_availability_from_hha.py`](backfill_availability_from_hha.py) | Parses the free-text `Contacts.HHA` column and writes end-of-day constraints to the `Availability` table. Ambiguous rows (morning HHA, midday splits, date-conditioned entries) go to a dated CSV for human review. |
+| [`audit_sadc.py`](audit_sadc.py) | Read-only audit. Lists every distinct `Contacts.[SADC]` value with its member count and what the current SADC parser produces. Writes a dated CSV with an empty `expected_output` column for the operator to fill in by hand. Used to surface SADC notation variants (e.g. `1.2.3->2.4`, `1.2.3(9am-1pm)`) before changing the parser. |
 | [`make_test_db.py`](make_test_db.py) | Creates or resets a gitignored test `.accdb` seeded with one of several scenarios (`happy_path`, `missing_data`, `mid_period_change`, `plan_full`, `populate_real_members`). Used to exercise the GUI without touching prod. |
+
+Run `audit_sadc.py` whenever you suspect the SADC parser is
+mis-handling a notation variant in production. The CSV it writes
+(`sadc_audit_<YYYY-MM-DD>.csv`) is the spec input for any future
+parser change — fill in `expected_output` for the rows you want to
+correct, then hand the CSV back to drive the update.
 
 ## Migration steps for a new DB
 
