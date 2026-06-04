@@ -313,6 +313,45 @@ def get_all_availability(db_path: str) -> dict:
     return _index_by_center_id(rows)
 
 
+ONE_OFFS_QUERY = (
+    "SELECT [ID], [Center ID], [date], [avail_start], [avail_end] "
+    "FROM [OneOffAvailability] "
+    "WHERE [Center ID] = ?"
+)
+
+
+def map_one_off_row(row):
+    """Map a raw OneOffAvailability row. `date` is stored as DATETIME
+    in Access; the mapper truncates to date. `avail_start`/`avail_end`
+    are stored as the 1899-12-30 placeholder DATETIME and extracted as
+    'HH:MM' (same convention as Availability)."""
+    return {
+        "id": int(row[0]),
+        "center_id": int(row[1]),
+        "date": _to_date(row[2]),
+        "avail_start": _datetime_to_hhmm(row[3]),
+        "avail_end": _datetime_to_hhmm(row[4]),
+    }
+
+
+def get_one_offs(center_id, db_path):
+    """Return all OneOffAvailability rows for `center_id` as a list of dicts."""
+    return _fetch_all(ONE_OFFS_QUERY, center_id, db_path, map_one_off_row)
+
+
+ALL_ONE_OFFS_QUERY = (
+    "SELECT [ID], [Center ID], [date], [avail_start], [avail_end] "
+    "FROM [OneOffAvailability]"
+)
+
+
+def get_all_one_offs(db_path):
+    """Return {center_id: [one_off dicts]} for every OneOffAvailability
+    row. One ODBC round-trip vs N when used by the batch worker modes."""
+    rows = _fetch_all_unfiltered(ALL_ONE_OFFS_QUERY, db_path, map_one_off_row)
+    return _index_by_center_id(rows)
+
+
 def _index_by_center_id(rows):
     """Group a flat list of row-dicts into {center_id: [rows]}."""
     out: dict[int, list] = {}
