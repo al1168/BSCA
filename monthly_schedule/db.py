@@ -334,7 +334,7 @@ def map_one_off_row(row):
     }
 
 
-def get_one_offs(center_id, db_path):
+def get_one_offs(center_id: int, db_path: str) -> list:
     """Return all OneOffAvailability rows for `center_id` as a list of dicts."""
     return _fetch_all(ONE_OFFS_QUERY, center_id, db_path, map_one_off_row)
 
@@ -345,7 +345,7 @@ ALL_ONE_OFFS_QUERY = (
 )
 
 
-def get_all_one_offs(db_path):
+def get_all_one_offs(db_path: str) -> dict:
     """Return {center_id: [one_off dicts]} for every OneOffAvailability
     row. One ODBC round-trip vs N when used by the batch worker modes."""
     rows = _fetch_all_unfiltered(ALL_ONE_OFFS_QUERY, db_path, map_one_off_row)
@@ -362,7 +362,7 @@ def _index_by_center_id(rows):
 
 def _fetch_all_unfiltered(query: str, db_path: str, mapper):
     """Open one connection, run an unfiltered SELECT, map each row.
-    Used by the four `get_all_<table>` batch fetchers so a whole-table
+    Used by the five `get_all_<table>` batch fetchers so a whole-table
     load is one ODBC round-trip instead of N."""
     if not os.path.exists(db_path):
         raise FileNotFoundError(f"Database not found: {db_path}")
