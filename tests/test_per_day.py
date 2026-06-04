@@ -35,7 +35,7 @@ def _ctx(enrolled=True, authorized="1,3,5", absent=False, availability=None):
         if absent else []
     )
     availabilities = [availability] if availability else []
-    return MemberContext(enrollments, authorizations, absences, availabilities)
+    return MemberContext(enrollments, authorizations, absences, availabilities, [])
 
 
 def test_eligible_day_no_availability_rule():
@@ -143,6 +143,7 @@ def test_month_failure_partial_absence_is_not_whole_month():
                    "start_date": date(2026, 5, 4),
                    "end_date": date(2026, 5, 4)}],
         availabilities=[],
+        one_offs=[],
     )
     assert compute_month_failure(2026, 5, ctx) is None
 

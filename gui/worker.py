@@ -158,6 +158,7 @@ class ScheduleWorker(QThread):
                     authorizations=auth_idx.get(cid, []),
                     absences=absence_idx.get(cid, []),
                     availabilities=avail_idx.get(cid, []),
+                    one_offs=[],
                 )
                 if self.mode == "all":
                     raw_plan = member.get("health_plan")

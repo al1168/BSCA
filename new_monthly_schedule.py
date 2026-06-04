@@ -216,6 +216,7 @@ def main(argv=None):
             authorizations=get_authorizations(member["center_id"], args.db_path),
             absences=get_absences(member["center_id"], args.db_path),
             availabilities=get_availability(member["center_id"], args.db_path),
+            one_offs=[],   # populated in Task 7 once get_one_offs exists
         )
         ok, stage, reason = process_member(
             member, ctx, args.year, args.month, out_dir,
