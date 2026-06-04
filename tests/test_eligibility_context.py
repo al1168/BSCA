@@ -191,7 +191,7 @@ def test_one_offs_for_returns_all_duplicates():
     assert {r["id"] for r in out} == {1, 2}
 
 
-def test_one_offs_defaults_to_empty_list_when_none_passed():
+def test_one_offs_for_returns_empty_list_when_one_offs_is_empty():
     from monthly_schedule.eligibility_context import MemberContext
     ctx = MemberContext(
         enrollments=[], authorizations=[], absences=[],
