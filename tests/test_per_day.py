@@ -212,3 +212,55 @@ def test_one_off_inside_plan_window_narrows_arrival():
     )
     assert result.eligible is True
     assert result.arrival_window == (540, 630)
+
+
+def test_duplicate_one_off_rows_raise_conflict():
+    from monthly_schedule.per_day import OneOffConflict
+    one_offs = [
+        {"id": 1, "center_id": 1, "date": date(2026, 5, 4),
+         "avail_start": "09:00", "avail_end": "12:00"},
+        {"id": 2, "center_id": 1, "date": date(2026, 5, 4),
+         "avail_start": "10:00", "avail_end": "13:00"},
+    ]
+    import pytest
+    with pytest.raises(OneOffConflict) as info:
+        compute_day_eligibility(
+            date(2026, 5, 4), _ctx(one_offs=one_offs), PLAN_RULES
+        )
+    assert info.value.center_id == 1
+    assert info.value.day == date(2026, 5, 4)
+    assert info.value.reason == "duplicate one-off rows for 2026-05-04"
+
+
+def test_one_off_with_absence_raises_conflict():
+    from monthly_schedule.per_day import OneOffConflict
+    one_off = {"id": 99, "center_id": 1, "date": date(2026, 5, 4),
+               "avail_start": "09:00", "avail_end": "12:00"}
+    import pytest
+    with pytest.raises(OneOffConflict) as info:
+        # `absent=True` covers the entire month of May 2026.
+        compute_day_eligibility(
+            date(2026, 5, 4),
+            _ctx(absent=True, one_offs=[one_off]),
+            PLAN_RULES,
+        )
+    assert info.value.reason == "one-off on 2026-05-04 conflicts with absence"
+
+
+def test_duplicate_one_off_beats_absence_conflict():
+    # Two one-offs AND an absence: first-match wins; duplicate is checked first.
+    from monthly_schedule.per_day import OneOffConflict
+    one_offs = [
+        {"id": 1, "center_id": 1, "date": date(2026, 5, 4),
+         "avail_start": "09:00", "avail_end": "12:00"},
+        {"id": 2, "center_id": 1, "date": date(2026, 5, 4),
+         "avail_start": "10:00", "avail_end": "13:00"},
+    ]
+    import pytest
+    with pytest.raises(OneOffConflict) as info:
+        compute_day_eligibility(
+            date(2026, 5, 4),
+            _ctx(absent=True, one_offs=one_offs),
+            PLAN_RULES,
+        )
+    assert "duplicate" in info.value.reason
