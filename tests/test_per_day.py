@@ -263,4 +263,4 @@ def test_duplicate_one_off_beats_absence_conflict():
             _ctx(absent=True, one_offs=one_offs),
             PLAN_RULES,
         )
-    assert "duplicate" in info.value.reason
+    assert info.value.reason == "duplicate one-off rows for 2026-05-04"
