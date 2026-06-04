@@ -153,41 +153,39 @@ arguments.
 
 ## Scheduler integration
 
+Enrollment, active authorization, and the `auth_days` weekday check
+are **hard silent gates**: if any of them fail, the day is
+ineligible and no flag is raised, regardless of whether a one-off
+exists for that day. The scheduler does not second-guess
+authorization with one-off data. A one-off entered for a day the
+member is not enrolled in, has no auth coverage for, or whose
+weekday is not in `auth_days` is simply ignored.
+
 [`compute_day_eligibility`](../../../monthly_schedule/per_day.py#L29)
-gains a new branch at the top. The one-off lookup runs **before** the
-existing enrollment / authorization / absence checks, because when a
-one-off is present those conditions become *conflicts to flag* rather
-than *silent ineligibility reasons*.
+ordered logic:
 
-New ordered logic:
-
-1. **`one_offs = ctx.one_offs_for(day)`**.
-
-2. If `one_offs` is non-empty:
-   - Run the five conflict checks in order (see "Conflict checks"
-     below). First match wins.
-   - If any check fails: raise
-     `OneOffConflict(center_id, day, reason)`. The caller catches it
-     and adds the member to the flagged list.
-   - If all checks pass: use the single row's
-     `avail_start`/`avail_end` as the day's availability window and
-     **skip the recurring availability lookup entirely**. Jump to
-     step 4.
-
-3. If `one_offs` is empty: the existing path applies, unchanged.
-   - Not enrolled → `DayEligibility(eligible=False)`.
-   - No active authorization → `DayEligibility(eligible=False)`.
-   - Weekday not in `auth_days` → `DayEligibility(eligible=False)`.
+1. Not enrolled → `DayEligibility(eligible=False)`. (Unchanged.)
+2. No active authorization → `DayEligibility(eligible=False)`.
+   (Unchanged.)
+3. Weekday not in `auth_days` → `DayEligibility(eligible=False)`.
+   (Unchanged.)
+4. **New step:** `one_offs = ctx.one_offs_for(day)`.
+   - If `one_offs` is non-empty, run the two conflict checks
+     (see "Conflict checks" below). First match wins. If any check
+     fails, raise `OneOffConflict(center_id, day, reason)`.
+   - If `one_offs` is non-empty and both checks pass, use the single
+     row's `avail_start`/`avail_end` as the day's availability window
+     and **skip the recurring availability lookup entirely**. Jump
+     to step 6.
+5. If `one_offs` is empty: existing path applies.
    - `ctx.is_absent(day)` → `DayEligibility(eligible=False)`.
+     (Unchanged.)
    - Call `ctx.availability_for(day)`. If it returns a row, use that
      window; otherwise the day is eligible with no arrival-window
      narrowing.
-
-4. Intersect the day's availability window (one-off or recurring) with
-   the plan's arrival window. If the intersection is empty,
-   `DayEligibility(eligible=False)` — no flag. This is the same
-   silent-skip behavior the recurring path already has when an
-   `Availability` row doesn't intersect the plan.
+6. Intersect the day's availability window (one-off or recurring)
+   with the plan's arrival window. If the intersection is empty,
+   `DayEligibility(eligible=False)` — no flag. (Unchanged.)
 
 Conflict propagation is handled one level up, at the per-member loop
 in the workbook runner:
@@ -207,45 +205,37 @@ conflict CSV (Section "CSV output").
 
 ## Conflict checks
 
-When `one_offs_for(day)` returns a non-empty list, apply these five
-checks in order. **First match wins** — that's the reason carried in
-the CSV.
+When `one_offs_for(day)` returns a non-empty list **and the day has
+already cleared the enrollment, auth, and weekday gates**, apply
+these two checks in order. **First match wins** — that's the reason
+carried in the CSV.
 
 | # | Check | Reason string |
 | --- | --- | --- |
 | 1 | `len(one_offs) > 1` | `"duplicate one-off rows for {date}"` |
-| 2 | The one-off's `date` is not inside any of the member's `Enrollment` windows. | `"one-off on {date} outside enrollment window"` |
-| 3 | No active authorization covers `date`. | `"one-off on {date} has no active authorization"` |
-| 4 | `date.isoweekday()` is not in the active authorization's `auth_days`. | `"one-off on {date} falls on unauthorized weekday"` |
-| 5 | `ctx.is_absent(date)` is True. | `"one-off on {date} conflicts with absence"` |
+| 2 | `ctx.is_absent(date)` is True. | `"one-off on {date} conflicts with absence"` |
 
-Order rationale: structural problems (duplicate row) come first,
-then the "right to be scheduled" checks in the same order the
-existing eligibility logic uses (enrollment → authorization →
-weekday), then the absence conflict — which is only meaningful if
-the one-off was otherwise valid.
+Order rationale: the structural problem (duplicate row) is reported
+before the absence conflict, because the absence conflict is only
+meaningful if the one-off was otherwise unambiguous.
 
-Checks 1 and 5 are unique to one-offs. Checks 2, 3, and 4 are
-*re-statements* of conditions that already cause silent ineligibility
-in the existing path — they are escalated to flags **only when a
-one-off is present**, because the act of entering a one-off implies
-the operator believed the member should be scheduled that day, so a
-contradiction is worth surfacing.
+### What is intentionally not a conflict (silent skip)
 
-Check 3 (no active authorization) is added by symmetry with check 2
-(outside enrollment window): both mean "the one-off was entered for a
-day the member cannot attend." Confirm during user review that this
-extra check is desired; if not, drop check 3 and let the no-auth case
-fall through to silent ineligibility.
+- **Not enrolled on the date.** Authorization is the source of truth;
+  a one-off cannot conjure attendance on an unenrolled day.
+- **No active authorization for the date.** Same reasoning.
+- **Authorized weekdays do not include the date's weekday.** Same
+  reasoning — even though the auth row covers the date range, the
+  weekday rule excludes that day, and a one-off does not override it.
+- **One-off's `avail_start`/`avail_end` does not intersect the
+  plan's arrival window** (e.g., one-off is 12:00–16:00 but the
+  plan only allows 09:00–11:00 arrival). The day is dropped without
+  a flag, matching today's behavior for non-intersecting recurring
+  `Availability` rows.
 
-### What is not a conflict
-
-If the one-off's `avail_start`/`avail_end` window does not intersect
-the plan's arrival window (e.g., one-off says 12:00–16:00 but the
-plan only allows arrival 09:00–11:00), `compute_day_eligibility`
-returns `DayEligibility(eligible=False)` without raising. The day is
-silently dropped from the schedule. This matches the existing
-behavior for non-intersecting recurring `Availability` rows.
+In all four cases the one-off is effectively ignored, the day is
+ineligible (or silently dropped from scheduling), and the run
+proceeds normally.
 
 ### New exception type
 
@@ -322,14 +312,17 @@ bootstrap. The script is safe to run repeatedly.
 - A valid one-off narrows the arrival window: assert the returned
   `arrival_window` is the intersection of the one-off with the plan,
   not the recurring rule.
-- Each of the five conflict reasons raises `OneOffConflict` with the
+- Each of the two conflict reasons raises `OneOffConflict` with the
   correct `reason` string. One test per row of the conflict table.
-- **Order test:** a member that satisfies multiple conflict conditions
-  simultaneously (e.g., duplicate one-off rows AND on an unauthorized
-  weekday AND absent) raises with the *first-match* reason
+- **Order test:** a member that satisfies both conflict conditions
+  simultaneously (duplicate one-off rows AND absent on that day)
+  raises with the *first-match* reason
   (`"duplicate one-off rows for ..."`).
-- A non-intersecting one-off window returns
-  `DayEligibility(eligible=False)` without raising (silent-skip).
+- **Silent-skip cases:** a one-off on a day where the member is
+  not enrolled, has no active auth, or whose weekday is not in
+  `auth_days` returns `DayEligibility(eligible=False)` without
+  raising. Same for a one-off whose window does not intersect the
+  plan's arrival window. One test per case.
 
 **Smoke test** (extend `tests/test_smoke.py`):
 
