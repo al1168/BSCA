@@ -154,25 +154,39 @@ arguments.
 ## Scheduler integration
 
 [`compute_day_eligibility`](../../../monthly_schedule/per_day.py#L29)
-changes its ordered checks as follows:
+gains a new branch at the top. The one-off lookup runs **before** the
+existing enrollment / authorization / absence checks, because when a
+one-off is present those conditions become *conflicts to flag* rather
+than *silent ineligibility reasons*.
 
-1. Not enrolled → `DayEligibility(eligible=False)`. (Unchanged.)
-2. No active authorization → `DayEligibility(eligible=False)`.
-   (Unchanged.)
-3. **New step:** `one_offs = ctx.one_offs_for(day)`.
-   - If `one_offs` is non-empty, run the four conflict checks below.
-     If any fail, raise `OneOffConflict(center_id, day, reason)`.
-   - If `one_offs` is non-empty and all checks pass, use the single
-     row's `avail_start`/`avail_end` as the day's availability window
-     and **skip the recurring availability lookup entirely**.
-4. If `one_offs` is empty: the existing path applies.
-   - If `ctx.is_absent(day)` → not eligible. (Unchanged.)
-   - Otherwise call `ctx.availability_for(day)` and intersect with the
-     plan's arrival window. (Unchanged.)
-5. Intersect the day's availability window (one-off or recurring) with
-   the plan's arrival window. (Unchanged.) If the intersection is
-   empty, `DayEligibility(eligible=False)` — no flag. This is the
-   same silent-skip behavior the recurring path already has when an
+New ordered logic:
+
+1. **`one_offs = ctx.one_offs_for(day)`**.
+
+2. If `one_offs` is non-empty:
+   - Run the five conflict checks in order (see "Conflict checks"
+     below). First match wins.
+   - If any check fails: raise
+     `OneOffConflict(center_id, day, reason)`. The caller catches it
+     and adds the member to the flagged list.
+   - If all checks pass: use the single row's
+     `avail_start`/`avail_end` as the day's availability window and
+     **skip the recurring availability lookup entirely**. Jump to
+     step 4.
+
+3. If `one_offs` is empty: the existing path applies, unchanged.
+   - Not enrolled → `DayEligibility(eligible=False)`.
+   - No active authorization → `DayEligibility(eligible=False)`.
+   - Weekday not in `auth_days` → `DayEligibility(eligible=False)`.
+   - `ctx.is_absent(day)` → `DayEligibility(eligible=False)`.
+   - Call `ctx.availability_for(day)`. If it returns a row, use that
+     window; otherwise the day is eligible with no arrival-window
+     narrowing.
+
+4. Intersect the day's availability window (one-off or recurring) with
+   the plan's arrival window. If the intersection is empty,
+   `DayEligibility(eligible=False)` — no flag. This is the same
+   silent-skip behavior the recurring path already has when an
    `Availability` row doesn't intersect the plan.
 
 Conflict propagation is handled one level up, at the per-member loop
@@ -193,7 +207,7 @@ conflict CSV (Section "CSV output").
 
 ## Conflict checks
 
-When `one_offs_for(day)` returns a non-empty list, apply these four
+When `one_offs_for(day)` returns a non-empty list, apply these five
 checks in order. **First match wins** — that's the reason carried in
 the CSV.
 
@@ -201,20 +215,28 @@ the CSV.
 | --- | --- | --- |
 | 1 | `len(one_offs) > 1` | `"duplicate one-off rows for {date}"` |
 | 2 | The one-off's `date` is not inside any of the member's `Enrollment` windows. | `"one-off on {date} outside enrollment window"` |
-| 3 | `date.isoweekday()` is not in the active authorization's `auth_days`. | `"one-off on {date} falls on unauthorized weekday"` |
-| 4 | `ctx.is_absent(date)` is True. | `"one-off on {date} conflicts with absence"` |
+| 3 | No active authorization covers `date`. | `"one-off on {date} has no active authorization"` |
+| 4 | `date.isoweekday()` is not in the active authorization's `auth_days`. | `"one-off on {date} falls on unauthorized weekday"` |
+| 5 | `ctx.is_absent(date)` is True. | `"one-off on {date} conflicts with absence"` |
 
-Order rationale: structural problems (duplicate row, outside
-enrollment, wrong weekday) are reported before the absence conflict,
-because the absence conflict is only meaningful if the one-off was
-otherwise valid.
+Order rationale: structural problems (duplicate row) come first,
+then the "right to be scheduled" checks in the same order the
+existing eligibility logic uses (enrollment → authorization →
+weekday), then the absence conflict — which is only meaningful if
+the one-off was otherwise valid.
 
-Checks 1 and 4 are unique to one-offs. Checks 2 and 3 are
+Checks 1 and 5 are unique to one-offs. Checks 2, 3, and 4 are
 *re-statements* of conditions that already cause silent ineligibility
 in the existing path — they are escalated to flags **only when a
 one-off is present**, because the act of entering a one-off implies
 the operator believed the member should be scheduled that day, so a
 contradiction is worth surfacing.
+
+Check 3 (no active authorization) is added by symmetry with check 2
+(outside enrollment window): both mean "the one-off was entered for a
+day the member cannot attend." Confirm during user review that this
+extra check is desired; if not, drop check 3 and let the no-auth case
+fall through to silent ineligibility.
 
 ### What is not a conflict
 
@@ -300,7 +322,7 @@ bootstrap. The script is safe to run repeatedly.
 - A valid one-off narrows the arrival window: assert the returned
   `arrival_window` is the intersection of the one-off with the plan,
   not the recurring rule.
-- Each of the four conflict reasons raises `OneOffConflict` with the
+- Each of the five conflict reasons raises `OneOffConflict` with the
   correct `reason` string. One test per row of the conflict table.
 - **Order test:** a member that satisfies multiple conflict conditions
   simultaneously (e.g., duplicate one-off rows AND on an unauthorized
