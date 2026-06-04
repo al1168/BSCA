@@ -145,3 +145,15 @@ def test_month_failure_partial_absence_is_not_whole_month():
         availabilities=[],
     )
     assert compute_month_failure(2026, 5, ctx) is None
+
+
+def test_one_off_conflict_exception_carries_fields():
+    from datetime import date
+    from monthly_schedule.per_day import OneOffConflict
+    exc = OneOffConflict(123, date(2026, 6, 5), "duplicate one-off rows for 2026-06-05")
+    assert exc.center_id == 123
+    assert exc.day == date(2026, 6, 5)
+    assert exc.reason == "duplicate one-off rows for 2026-06-05"
+    assert "123" in str(exc)
+    assert "2026-06-05" in str(exc)
+    assert "duplicate" in str(exc)

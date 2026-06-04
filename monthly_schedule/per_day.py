@@ -15,6 +15,18 @@ REASON_NO_AUTH = "no active authorization for this month"
 REASON_ABSENT_MONTH = "absent for the entire month"
 
 
+class OneOffConflict(Exception):
+    """Raised by compute_day_eligibility when a one-off availability row
+    exists for a day but conflicts with an absence or a duplicate one-off
+    row. The per-member runner catches this to write the conflict CSV."""
+
+    def __init__(self, center_id, day, reason):
+        self.center_id = center_id
+        self.day = day
+        self.reason = reason
+        super().__init__(f"{center_id} {day}: {reason}")
+
+
 @dataclass(frozen=True)
 class DayEligibility:
     """Result of a single-day eligibility check.
