@@ -416,3 +416,65 @@ def test_no_authorization_yields_failure(monkeypatch, tmp_path, capsys):
     assert rc == 2
     err = capsys.readouterr().err
     assert "eligibility — no active authorization for this month" in err
+
+
+# ---------------------------------------------------------------------------
+# write_one_off_conflict_csv
+# ---------------------------------------------------------------------------
+
+from new_monthly_schedule import write_one_off_conflict_csv, Failure
+
+
+def test_write_one_off_conflict_csv_no_conflicts_returns_none(tmp_path):
+    """Returns None and writes no file when no conflict failures are present."""
+    failures = [
+        cli.Failure(24010, "Cheng, Lizhu", "lookup", "not found", None),
+    ]
+    result = write_one_off_conflict_csv(
+        failures, str(tmp_path), today=date(2026, 6, 4)
+    )
+    assert result is None
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_write_one_off_conflict_csv_single_conflict(tmp_path):
+    """Writes a single-row CSV with correct filename, header, and row."""
+    failures = [
+        Failure(24010, "Cheng, Lizhu", "one_off_conflict",
+                "one-off on auth day", date(2026, 6, 4)),
+    ]
+    result = write_one_off_conflict_csv(
+        failures, str(tmp_path), today=date(2026, 6, 4)
+    )
+    expected_path = tmp_path / "one_off_conflicts_2026-06-04.csv"
+    assert result == str(expected_path)
+    assert expected_path.exists()
+    content = expected_path.read_text(encoding="utf-8")
+    lines = content.splitlines()
+    assert lines[0] == "center_id,name,date,reason"
+    assert lines[1] == '24010,"Cheng, Lizhu",2026-06-04,one-off on auth day'
+    assert len(lines) == 2
+
+
+def test_write_one_off_conflict_csv_multiple_conflicts_preserves_order(tmp_path):
+    """Writes one row per conflict in input order."""
+    failures = [
+        Failure(24010, "Cheng, Lizhu", "one_off_conflict",
+                "conflict A", date(2026, 6, 1)),
+        Failure(24011, "Smith, John", "one_off_conflict",
+                "conflict B", date(2026, 6, 3)),
+        Failure(24012, "Jones, Mary", "one_off_conflict",
+                "conflict C", date(2026, 6, 5)),
+    ]
+    result = write_one_off_conflict_csv(
+        failures, str(tmp_path), today=date(2026, 6, 4)
+    )
+    expected_path = tmp_path / "one_off_conflicts_2026-06-04.csv"
+    assert result == str(expected_path)
+    content = expected_path.read_text(encoding="utf-8")
+    lines = content.splitlines()
+    assert lines[0] == "center_id,name,date,reason"
+    assert lines[1] == '24010,"Cheng, Lizhu",2026-06-01,conflict A'
+    assert lines[2] == '24011,"Smith, John",2026-06-03,conflict B'
+    assert lines[3] == '24012,"Jones, Mary",2026-06-05,conflict C'
+    assert len(lines) == 4
