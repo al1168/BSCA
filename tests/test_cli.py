@@ -59,6 +59,7 @@ def _stub_travel(monkeypatch):
     )
     monkeypatch.setattr(cli, "get_absences", lambda cid, db: [])
     monkeypatch.setattr(cli, "get_availability", lambda cid, db: [])
+    monkeypatch.setattr(cli, "get_one_offs", lambda cid, db: [])
 
 
 def test_preview_data_returns_zero_and_prints(monkeypatch, capsys):
@@ -185,9 +186,9 @@ def test_format_summary_preview_no_outdir():
 
 def test_format_summary_with_failures_lists_them():
     failures = [
-        cli.Failure(24099, "", "lookup", "not found in database"),
+        cli.Failure(24099, "", "lookup", "not found in database", None),
         cli.Failure(24100, "Smith, John", "write",
-                    "PermissionError — denied"),
+                    "PermissionError — denied", None),
     ]
     s = cli.format_summary(
         "Wrote", 18, 20, "plan HOF 2026-05", "out/HOF_2026-05", failures
