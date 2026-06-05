@@ -84,15 +84,24 @@ def _truncate(conn, tables) -> None:
 
 def _seed_member(conn, center_id: int, last: str, first: str,
                  plan: str = "HOF",
-                 address: str = "123 Test St, New York, NY 10001") -> None:
+                 address: str = "123 Test St, New York, NY 10001",
+                 long_lat: str | None = None) -> None:
     """Insert one Contacts row with only the columns the scheduler reads.
-    Contacts.[Center ID] is DOUBLE in Access; pyodbc widens int → float."""
+    Contacts.[Center ID] is DOUBLE in Access; pyodbc widens int → float.
+    Pass `long_lat` as "lat,long" to bypass geocoding (e.g. for test seeds)."""
     cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO [Contacts] ([Center ID], [Last Name], [First Name], "
-        "[Health Plan], [Address]) VALUES (?, ?, ?, ?, ?)",
-        center_id, last, first, plan, address,
-    )
+    if long_lat is not None:
+        cur.execute(
+            "INSERT INTO [Contacts] ([Center ID], [Last Name], [First Name], "
+            "[Health Plan], [Address], [Long Lat]) VALUES (?, ?, ?, ?, ?, ?)",
+            center_id, last, first, plan, address, long_lat,
+        )
+    else:
+        cur.execute(
+            "INSERT INTO [Contacts] ([Center ID], [Last Name], [First Name], "
+            "[Health Plan], [Address]) VALUES (?, ?, ?, ?, ?)",
+            center_id, last, first, plan, address,
+        )
 
 
 def _seed_one_off(conn, center_id: int, when: date,
@@ -407,7 +416,11 @@ def _seed_one_off_conflict(conn, today: date) -> None:
     m1, _, mlast, mnext_last = _month_bounds(today)
     cid = 100100
 
-    _seed_member(conn, cid, "Conflict", "Sample")
+    # Supply Long Lat so the CLI skips the Geocoding API during tests.
+    # The route entry for this coordinate must be pre-seeded in the geo
+    # cache the test passes via --geo-cache (see test_smoke.py).
+    _seed_member(conn, cid, "Conflict", "Sample",
+                 long_lat="40.71280,-74.00600")
 
     cur = conn.cursor()
     cur.execute(

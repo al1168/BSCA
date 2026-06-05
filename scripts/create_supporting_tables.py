@@ -134,13 +134,28 @@ def main(argv=None):
     try:
         cur = conn.cursor()
         created = []
+        skipped = []
         for name, ddl in _DDLS:
-            cur.execute(ddl)
-            created.append(name)
-            if not args.quiet:
-                print(f"  CREATED  {name}")
+            try:
+                cur.execute(ddl)
+                created.append(name)
+                if not args.quiet:
+                    print(f"  CREATED  {name}")
+            except Exception as exc:
+                # 42S01 = table already exists; skip gracefully.
+                if "42S01" in str(exc):
+                    skipped.append(name)
+                    if not args.quiet:
+                        print(f"  SKIPPED  {name} (already exists)")
+                else:
+                    raise
         conn.commit()
-        print(f"Created: {', '.join(created)}")
+        parts = []
+        if created:
+            parts.append(f"Created: {', '.join(created)}")
+        if skipped:
+            parts.append(f"Skipped (already exist): {', '.join(skipped)}")
+        print("; ".join(parts) if parts else "Nothing to do.")
     finally:
         conn.close()
     return 0
