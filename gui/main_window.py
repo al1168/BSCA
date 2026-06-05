@@ -336,12 +336,11 @@ class MainWindow(QWidget):
             )
             return False
 
-        gc_path = self._settings.get("google_config", "")
-        if not os.path.isfile(gc_path):
+        if not self._settings.get("google_api_key", "").strip():
             QMessageBox.warning(
                 self,
-                tr("msg.gc_not_found.title"),
-                tr("msg.gc_not_found.body", path=gc_path),
+                tr("msg.api_key_missing.title"),
+                tr("msg.api_key_missing.body"),
             )
             return False
 
@@ -394,7 +393,7 @@ class MainWindow(QWidget):
             out_dir=out_dir,
             preview=preview,
             db_path=self._settings["db_path"],
-            google_config=self._settings["google_config"],
+            google_api_key=self._settings["google_api_key"],
             geo_cache=self._settings["geo_cache"],
         )
         self._worker.progress.connect(self._on_progress)
