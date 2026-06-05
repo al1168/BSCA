@@ -15,6 +15,7 @@ database schema reference, see [docs/database.md](../docs/database.md).
 | [`create_supporting_tables.py`](create_supporting_tables.py) | DDL bootstrap. Issues `CREATE TABLE` for the five supporting tables (`Enrollment`, `Authorization`, `Absences`, `Availability`, `OneOffAvailability`) on an `.accdb` that already contains `Contacts`. No data is written. |
 | [`backfill_authorization_from_contacts.py`](backfill_authorization_from_contacts.py) | Aligns the `Authorization` table with `Contacts`: fills blank `[Health Plan]` on existing rows, and inserts one new row per Contact-with-no-authorization from the legacy `SADC` / `Auth BGN` / `Auth EXP` / `Health Plan` columns. Skipped members go to a dated CSV. |
 | [`backfill_availability_from_hha.py`](backfill_availability_from_hha.py) | Parses the free-text `Contacts.HHA` column and writes end-of-day constraints to the `Availability` table. Ambiguous rows (morning HHA, midday splits, date-conditioned entries) go to a dated CSV for human review. |
+| [`backfill_enrollment_from_contacts.py`](backfill_enrollment_from_contacts.py) | Inserts one `Enrollment` row per Contact with `start_date = today` and `end_date = NULL` (open-ended). Idempotent: skips members who already have at least one Enrollment row. Run this whenever new Contacts are added so the scheduler treats them as enrolled. |
 | [`audit_sadc.py`](audit_sadc.py) | Read-only audit. Lists every distinct `Contacts.[SADC]` value with its member count and what the current SADC parser produces. Writes a dated CSV with an empty `expected_output` column for the operator to fill in by hand. Used to surface SADC notation variants (e.g. `1.2.3->2.4`, `1.2.3(9am-1pm)`) before changing the parser. |
 | [`add_one_off_availability_table.py`](add_one_off_availability_table.py) | Idempotent DDL migration. Adds the `OneOffAvailability` table to an existing `.accdb` that already has the original four supporting tables. Safe to run repeatedly: skips with a friendly message if the table already exists. |
 | [`make_test_db.py`](make_test_db.py) | Creates or resets a gitignored test `.accdb` seeded with one of several scenarios (`happy_path`, `missing_data`, `mid_period_change`, `plan_full`, `populate_real_members`). Used to exercise the GUI without touching prod. |
@@ -42,14 +43,21 @@ python scripts\backfill_authorization_from_contacts.py --db <PATH>
 # 3. Backfill Availability from HHA notes — preview, then apply.
 python scripts\backfill_availability_from_hha.py --db <PATH> --dry-run
 python scripts\backfill_availability_from_hha.py --db <PATH>
+
+# 4. Backfill Enrollment — one row per Contact, start_date = today,
+#    end_date = NULL. Preview, then apply.
+python scripts\backfill_enrollment_from_contacts.py --db <PATH> --dry-run
+python scripts\backfill_enrollment_from_contacts.py --db <PATH>
 ```
 
 After step 1 you have empty supporting tables. After step 2, every
 Contact has at least one Authorization row with `[Health Plan]`
 filled. After step 3, members whose `Contacts.HHA` text describes
-an end-of-day constraint have matching Availability rows.
+an end-of-day constraint have matching Availability rows. After
+step 4, every Contact has at least one Enrollment row so the
+scheduler can pick them up.
 
-After step 3, you have a fully migrated database. The
+After step 4, you have a fully migrated database. The
 `OneOffAvailability` table starts empty; there is no backfill
 script for it (no legacy source).
 
@@ -64,15 +72,19 @@ table prints "already exists" and exits 0.
 
 Each backfill drops a CSV next to the run that lists members it
 couldn't process — review those, fix the offending Contacts row,
-and re-run. Both backfills are idempotent (only-fill-blanks / only-shorten).
+and re-run. All three backfills are idempotent: authorization fills
+only blank `[Health Plan]` values, availability only shortens
+existing `avail_end` times, and enrollment skips members who already
+have an Enrollment row.
 
 ## Common flags
 
 | Flag | Used by | Effect |
 | --- | --- | --- |
-| `--db PATH` | all five | Path to the Access `.accdb`. Required. |
-| `--dry-run` | both backfills | Run the full pass, write the CSV, then `rollback()` instead of `commit()`. Use this first against any DB you care about. |
-| `--csv-out DIR` | both backfills | Directory for the skipped/ambiguous CSV (default `.`). |
+| `--db PATH` | all six | Path to the Access `.accdb`. Required. |
+| `--dry-run` | all three backfills | Run the full pass, write the CSV, then `rollback()` instead of `commit()`. Use this first against any DB you care about. |
+| `--csv-out DIR` | all three backfills | Directory for the skipped/ambiguous CSV (default `.`). |
+| `--exclude-test-members` | all three backfills | Skip members whose Center ID ends in `00` (operator convention for scratch / test members). Filtered members appear in the stdout count only; never in the CSV. |
 | `--quiet` | all except `make_test_db.py` | Suppress per-row stdout; the run summary still prints. |
 | `--scenario NAME` | `make_test_db.py` | Which seed scenario to apply. |
 | `--use` | `make_test_db.py` | After seeding, flip `bsca_settings.json` so the GUI immediately picks up the new test DB. |
