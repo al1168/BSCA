@@ -106,6 +106,7 @@ STRINGS: dict[str, dict[str, str]] = {
         # worker log lines
         "worker.preview": "Preview: {id} ({last}, {first})",
         "worker.wrote": "Wrote {filename}",
+        "worker.wrote_conflict_csv": "Wrote conflict report: {filename}",
         "worker.no_members": "No members found in the database.",
         "worker.no_members_for_plan": "No members found for plan {plan}.",
         "worker.cannot_create_folder": "Cannot create output folder: {error}",
@@ -245,6 +246,7 @@ STRINGS: dict[str, dict[str, str]] = {
         # worker log lines
         "worker.preview": "预览：{id}（{last}，{first}）",
         "worker.wrote": "已写入 {filename}",
+        "worker.wrote_conflict_csv": "已写入冲突报告: {filename}",
         "worker.no_members": "数据库中找不到成员。",
         "worker.no_members_for_plan": "计划 {plan} 中找不到成员。",
         "worker.cannot_create_folder": "无法创建输出文件夹：{error}",

@@ -22,6 +22,7 @@ from new_monthly_schedule import (
     process_member,
     resolve_output_dir,
     schedule_filename,
+    write_one_off_conflict_csv,
 )
 
 
@@ -219,12 +220,11 @@ class ScheduleWorker(QThread):
 
         save_cache(self.geo_cache, cache)
 
-        from new_monthly_schedule import write_one_off_conflict_csv
         if not self.preview:
             csv_path = write_one_off_conflict_csv(failures, self.out_dir)
             if csv_path is not None:
                 self.log_line.emit(
-                    "worker.wrote",
+                    "worker.wrote_conflict_csv",
                     {"filename": os.path.basename(csv_path)},
                 )
 
