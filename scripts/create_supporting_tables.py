@@ -1,11 +1,11 @@
-"""Create the four supporting tables in an Access .accdb that already
+"""Create the five supporting tables in an Access .accdb that already
 contains a Contacts table.
 
 Given a fresh .accdb whose only table is `Contacts`, this script
-issues four CREATE TABLE statements to bring up the `Enrollment`,
-`Authorization`, `Absences`, and `Availability` tables — every
-column the scheduler and the backfill scripts read, including the
-`[Health Plan]` column on `Authorization`.
+issues five CREATE TABLE statements to bring up the `Enrollment`,
+`Authorization`, `Absences`, `Availability`, and `OneOffAvailability`
+tables — every column the scheduler and the backfill scripts read,
+including the `[Health Plan]` column on `Authorization`.
 
 The script is a one-shot DDL bootstrap. No data is touched. If a
 supporting table already exists the run fails with the ODBC error
@@ -72,11 +72,23 @@ _CREATE_AVAILABILITY = (
     ")"
 )
 
+_CREATE_ONE_OFF_AVAILABILITY = (
+    "CREATE TABLE [OneOffAvailability] ("
+    "[ID] AUTOINCREMENT PRIMARY KEY, "
+    "[Center ID] DOUBLE, "
+    "[date] DATETIME, "
+    "[avail_start] DATETIME, "
+    "[avail_end] DATETIME, "
+    "[Notes] MEMO"
+    ")"
+)
+
 _DDLS = [
     ("Enrollment", _CREATE_ENROLLMENT),
     ("Authorization", _CREATE_AUTHORIZATION),
     ("Absences", _CREATE_ABSENCES),
     ("Availability", _CREATE_AVAILABILITY),
+    ("OneOffAvailability", _CREATE_ONE_OFF_AVAILABILITY),
 ]
 
 
