@@ -85,25 +85,27 @@ def format_summary(verb, success_count, total, scope, out_dir,
     return "\n".join(lines)
 
 
-def write_one_off_conflict_csv(failures, out_dir, today=None):
-    """If any failures carry stage='one_off_conflict', write
-    `one_off_conflicts_<YYYY-MM-DD>.csv` into `out_dir` with one row
-    per conflict. Return the path written, or None when there are no
-    conflict failures (the file is not created in that case)."""
-    conflict_failures = [f for f in failures if f.stage == "one_off_conflict"]
-    if not conflict_failures:
+def write_skipped_members_csv(failures, out_dir, today=None):
+    """If `failures` is non-empty, write `skipped_members_<YYYY-MM-DD>.csv`
+    into `out_dir` with one row per skipped member. Return the path
+    written, or None when `failures` is empty (file not created).
+
+    The `day` column is the ISO date from `failure.day` when set
+    (currently only `one_off_conflict` failures), empty string otherwise."""
+    if not failures:
         return None
     today = today or _date.today()
-    path = os.path.join(out_dir, f"one_off_conflicts_{today.isoformat()}.csv")
+    path = os.path.join(out_dir, f"skipped_members_{today.isoformat()}.csv")
     with open(path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["center_id", "name", "date", "reason"])
-        for f in conflict_failures:
+        writer.writerow(["center_id", "name", "stage", "reason", "day"])
+        for f in failures:
             writer.writerow([
                 f.center_id,
                 f.name,
-                f.day.isoformat() if f.day else "",
+                f.stage,
                 f.reason,
+                f.day.isoformat() if f.day else "",
             ])
     return path
 
@@ -263,9 +265,9 @@ def main(argv=None):
 
     save_cache(args.geo_cache, cache)
     if not args.preview_data:
-        conflict_csv = write_one_off_conflict_csv(failures, out_dir)
-        if conflict_csv is not None:
-            print(f"Wrote conflict report: {conflict_csv}", file=sys.stderr)
+        skipped_csv = write_skipped_members_csv(failures, out_dir)
+        if skipped_csv is not None:
+            print(f"Wrote skipped members report: {skipped_csv}", file=sys.stderr)
     total = success + len(failures)
     verb = "Previewed" if args.preview_data else "Wrote"
     summary_dir = None if args.preview_data else out_dir

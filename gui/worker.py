@@ -22,7 +22,7 @@ from new_monthly_schedule import (
     process_member,
     resolve_output_dir,
     schedule_filename,
-    write_one_off_conflict_csv,
+    write_skipped_members_csv,
 )
 
 
@@ -220,13 +220,13 @@ class ScheduleWorker(QThread):
         save_cache(self.geo_cache, cache)
 
         if not self.preview:
-            # Conflict CSV lives at the base output dir even in "all" mode —
-            # conflicts can span multiple plans, so a single roll-up file
+            # Skipped-members CSV lives at the base output dir even in "all"
+            # mode — skips can span multiple plans, so a single roll-up file
             # is more useful than per-plan duplicates.
-            csv_path = write_one_off_conflict_csv(failures, self.out_dir)
+            csv_path = write_skipped_members_csv(failures, self.out_dir)
             if csv_path is not None:
                 self.log_line.emit(
-                    "worker.wrote_conflict_csv",
+                    "worker.wrote_skipped_csv",
                     {"filename": os.path.basename(csv_path)},
                 )
 
