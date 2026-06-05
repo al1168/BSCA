@@ -179,10 +179,9 @@ class ScheduleWorker(QThread):
                     self.preview, api_key, cache,
                 )
             except OneOffConflict as exc:
-                # process_member already catches OneOffConflict internally
-                # (Task 8 step 8.5) and returns it as a Failure. This
-                # outer catch guards against any direct OneOffConflict
-                # propagation in future refactors.
+                # process_member catches OneOffConflict internally and
+                # returns it via the failure tuple. This branch only fires
+                # if a future refactor removes that inner catch.
                 ok = False
                 stage = "one_off_conflict"
                 reason = exc.reason
@@ -221,6 +220,9 @@ class ScheduleWorker(QThread):
         save_cache(self.geo_cache, cache)
 
         if not self.preview:
+            # Conflict CSV lives at the base output dir even in "all" mode —
+            # conflicts can span multiple plans, so a single roll-up file
+            # is more useful than per-plan duplicates.
             csv_path = write_one_off_conflict_csv(failures, self.out_dir)
             if csv_path is not None:
                 self.log_line.emit(
