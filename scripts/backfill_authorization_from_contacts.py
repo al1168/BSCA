@@ -69,6 +69,12 @@ def _is_blank(value):
     return not str(value).strip()
 
 
+def _is_test_id(center_id):
+    """True if the Center ID, rendered as a base-10 integer, ends in '00'.
+    Used by the --exclude-test-members flag to filter scratch members."""
+    return str(int(center_id)).endswith("00")
+
+
 def _fmt_date(value):
     """Render a per-row date for stdout. Access columns typed
     Date/Time come back from pyodbc as datetime; columns typed
@@ -124,6 +130,8 @@ def _parse_args(argv):
                    help="Parse + write CSV, do NOT commit DB changes.")
     p.add_argument("--quiet", action="store_true",
                    help="Suppress per-row stdout; print only the summary.")
+    p.add_argument("--exclude-test-members", action="store_true",
+                   help="Skip members whose Center ID ends in '00'.")
     return p.parse_args(argv)
 
 
@@ -241,6 +249,7 @@ def main(argv=None):
         today = datetime.date.today()
         stats = {
             "scanned": 0,
+            "test_skipped": 0,
             "updated_members": 0,
             "updated_rows": 0,
             "noop_members": 0,
@@ -252,6 +261,13 @@ def main(argv=None):
 
         for cid, last, first, plan, sadc, bgn, exp in _read_contacts(conn):
             stats["scanned"] += 1
+
+            if args.exclude_test_members and _is_test_id(cid):
+                stats["test_skipped"] += 1
+                if not args.quiet:
+                    print(f"  TEST-SKIP {cid}  (Center ID ends in 00)")
+                continue
+
             # Branch decision: any existing Authorization row for this
             # member?
             cur.execute(_AUTH_SELECT_FOR_MEMBER, str(cid))
@@ -323,6 +339,8 @@ def main(argv=None):
         print("Authorization backfill summary")
         print(f"  Contacts scanned:                            "
               f"{stats['scanned']}")
+        print(f"  Test members excluded (--exclude-test-members): "
+              f"{stats['test_skipped']}")
         print(f"  Existing-auth members: Health Plan filled:   "
               f"{stats['updated_members']}   "
               f"(rows updated: {stats['updated_rows']})")
