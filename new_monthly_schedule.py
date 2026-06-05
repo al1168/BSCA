@@ -1,17 +1,20 @@
 """CLI: generate monthly schedule workbooks from the four-table Access data model."""
 
 import argparse
+import csv
 import os
 import random
 import sys
 from collections import namedtuple
+from datetime import date as _date
 
 from monthly_schedule.db import (
     get_member, get_members_by_plan,
     get_enrollments, get_authorizations, get_absences, get_availability,
+    get_one_offs,
 )
 from monthly_schedule.eligibility_context import MemberContext
-from monthly_schedule.per_day import compute_month_failure
+from monthly_schedule.per_day import compute_month_failure, OneOffConflict
 from monthly_schedule.rules import get_rules_for_plan
 from monthly_schedule.rows import build_rows
 from monthly_schedule.workbook import build_workbook
@@ -58,7 +61,7 @@ def resolve_output_dir(base, plan_code, year, month):
     return os.path.join(base, sub)
 
 
-Failure = namedtuple("Failure", "center_id name stage reason")
+Failure = namedtuple("Failure", "center_id name stage reason day")
 
 REASON_NOT_FOUND = "not found in database"
 
@@ -80,6 +83,29 @@ def format_summary(verb, success_count, total, scope, out_dir,
             f"  - ID {f.center_id}{name}: {f.stage} — {f.reason}"
         )
     return "\n".join(lines)
+
+
+def write_one_off_conflict_csv(failures, out_dir, today=None):
+    """If any failures carry stage='one_off_conflict', write
+    `one_off_conflicts_<YYYY-MM-DD>.csv` into `out_dir` with one row
+    per conflict. Return the path written, or None when there are no
+    conflict failures (the file is not created in that case)."""
+    conflict_failures = [f for f in failures if f.stage == "one_off_conflict"]
+    if not conflict_failures:
+        return None
+    today = today or _date.today()
+    path = os.path.join(out_dir, f"one_off_conflicts_{today.isoformat()}.csv")
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["center_id", "name", "date", "reason"])
+        for f in conflict_failures:
+            writer.writerow([
+                f.center_id,
+                f.name,
+                f.day.isoformat() if f.day else "",
+                f.reason,
+            ])
+    return path
 
 
 def parse_args(argv):
@@ -105,18 +131,18 @@ def parse_args(argv):
 
 def process_member(member, ctx, year, month, out_dir, preview,
                    api_key, cache):
-    """Run the per-member pipeline. Returns (ok, stage, reason).
-    On success ok is True and stage/reason are None. On failure
-    stage is one of 'eligibility'/'geocode'/'route'/'generate'/'write'
-    with the reason."""
+    """Run the per-member pipeline. Returns (ok, stage, reason, day).
+    On success ok is True and stage/reason/day are None. On failure
+    stage is one of 'eligibility'/'geocode'/'route'/'one_off_conflict'/
+    'generate'/'write' with the reason; day is set for one_off_conflict."""
     failure = compute_month_failure(year, month, ctx)
     if failure is not None:
-        return (False, "eligibility", failure)
+        return (False, "eligibility", failure, None)
 
     try:
         travel_minutes = resolve_travel_minutes(member, api_key, cache)
     except TravelError as exc:
-        return (False, exc.stage, exc.reason)
+        return (False, exc.stage, exc.reason, None)
 
     rng = random.Random()
     try:
@@ -127,8 +153,10 @@ def process_member(member, ctx, year, month, out_dir, preview,
         rules["dropoff_trail_min"] = (travel_minutes + buf_lo,
                                       travel_minutes + buf_hi)
         rows = build_rows(year, month, ctx, rules, rng)
+    except OneOffConflict as exc:
+        return (False, "one_off_conflict", exc.reason, exc.day)
     except Exception as exc:  # reported in the run summary
-        return (False, "generate", f"{type(exc).__name__} — {exc}")
+        return (False, "generate", f"{type(exc).__name__} — {exc}", None)
 
     if preview:
         print(
@@ -137,7 +165,7 @@ def process_member(member, ctx, year, month, out_dir, preview,
         )
         for row in rows:
             print({**row, "date": str(row["date"])})
-        return (True, None, None)
+        return (True, None, None, None)
 
     path = os.path.join(
         out_dir, schedule_filename(member["center_id"], year, month)
@@ -145,9 +173,9 @@ def process_member(member, ctx, year, month, out_dir, preview,
     try:
         build_workbook(member, rows, path)
     except Exception as exc:  # reported in the run summary
-        return (False, "write", f"{type(exc).__name__} — {exc}")
+        return (False, "write", f"{type(exc).__name__} — {exc}", None)
     print(f"Wrote {path}")
-    return (True, None, None)
+    return (True, None, None, None)
 
 
 def main(argv=None):
@@ -183,7 +211,7 @@ def main(argv=None):
                 member = get_member(cid, args.db_path)
                 if member is None:
                     failures.append(
-                        Failure(cid, "", "lookup", REASON_NOT_FOUND)
+                        Failure(cid, "", "lookup", REASON_NOT_FOUND, None)
                     )
                 else:
                     members.append(member)
@@ -216,8 +244,9 @@ def main(argv=None):
             authorizations=get_authorizations(member["center_id"], args.db_path),
             absences=get_absences(member["center_id"], args.db_path),
             availabilities=get_availability(member["center_id"], args.db_path),
+            one_offs=get_one_offs(member["center_id"], args.db_path),
         )
-        ok, stage, reason = process_member(
+        ok, stage, reason, day = process_member(
             member, ctx, args.year, args.month, out_dir,
             args.preview_data, api_key, cache,
         )
@@ -228,11 +257,15 @@ def main(argv=None):
                 Failure(
                     member["center_id"],
                     f"{member['last_name']}, {member['first_name']}",
-                    stage, reason,
+                    stage, reason, day,
                 )
             )
 
     save_cache(args.geo_cache, cache)
+    if not args.preview_data:
+        conflict_csv = write_one_off_conflict_csv(failures, out_dir)
+        if conflict_csv is not None:
+            print(f"Wrote conflict report: {conflict_csv}", file=sys.stderr)
     total = success + len(failures)
     verb = "Previewed" if args.preview_data else "Wrote"
     summary_dir = None if args.preview_data else out_dir

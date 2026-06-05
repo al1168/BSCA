@@ -262,8 +262,7 @@ workbook, matching the convention of
 | Column | Example |
 | --- | --- |
 | `center_id` | `12345` |
-| `last_name` | `Smith` |
-| `first_name` | `Jane` |
+| `name` | `"Smith, Jane"` |
 | `date` | `2026-06-05` |
 | `reason` | `one-off on 2026-06-05 conflicts with absence` |
 

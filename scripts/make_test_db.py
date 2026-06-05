@@ -22,8 +22,8 @@ DEFAULT_SOURCE = r"\\BOWERY3\Users\Shared\Access Member 5.5.26_copy.accdb"
 
 # Deletion order: children first, parents last. Access FK constraints
 # may or may not enforce; deleting in this order is safe regardless.
-SUPPORTING_TABLES = ("Availability", "Absences", "Authorization",
-                     "Enrollment")
+SUPPORTING_TABLES = ("OneOffAvailability", "Availability", "Absences",
+                     "Authorization", "Enrollment")
 DATA_TABLES = SUPPORTING_TABLES + ("Contacts",)
 
 # Scenarios that should preserve the real Contacts table and only
@@ -84,14 +84,40 @@ def _truncate(conn, tables) -> None:
 
 def _seed_member(conn, center_id: int, last: str, first: str,
                  plan: str = "HOF",
-                 address: str = "123 Test St, New York, NY 10001") -> None:
+                 address: str = "123 Test St, New York, NY 10001",
+                 long_lat: str | None = None) -> None:
     """Insert one Contacts row with only the columns the scheduler reads.
-    Contacts.[Center ID] is DOUBLE in Access; pyodbc widens int → float."""
+    Contacts.[Center ID] is DOUBLE in Access; pyodbc widens int → float.
+    Pass `long_lat` as "lat,long" to bypass geocoding (e.g. for test seeds)."""
+    cur = conn.cursor()
+    if long_lat is not None:
+        cur.execute(
+            "INSERT INTO [Contacts] ([Center ID], [Last Name], [First Name], "
+            "[Health Plan], [Address], [Long Lat]) VALUES (?, ?, ?, ?, ?, ?)",
+            center_id, last, first, plan, address, long_lat,
+        )
+    else:
+        cur.execute(
+            "INSERT INTO [Contacts] ([Center ID], [Last Name], [First Name], "
+            "[Health Plan], [Address]) VALUES (?, ?, ?, ?, ?)",
+            center_id, last, first, plan, address,
+        )
+
+
+def _seed_one_off(conn, center_id: int, when: date,
+                  start_hm: tuple, end_hm: tuple,
+                  notes: str = "") -> None:
+    """Insert one OneOffAvailability row.
+
+    `when` is the date the exception applies to. `start_hm` / `end_hm`
+    are (hour, minute) tuples, which become the 1899-12-30 placeholder
+    DATETIMEs Access uses for time-only fields."""
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO [Contacts] ([Center ID], [Last Name], [First Name], "
-        "[Health Plan], [Address]) VALUES (?, ?, ?, ?, ?)",
-        center_id, last, first, plan, address,
+        "INSERT INTO [OneOffAvailability] "
+        "([Center ID], [date], [avail_start], [avail_end], [Notes]) "
+        "VALUES (?, ?, ?, ?, ?)",
+        center_id, _dt(when), _hhmm(*start_hm), _hhmm(*end_hm), notes,
     )
 
 
@@ -374,10 +400,73 @@ def seed_populate_real_members(conn, today: date) -> None:
         )
 
 
+def _seed_one_off_conflict(conn, today: date) -> None:
+    """Seed: a single member with a one-off on a day they're also
+    absent on. Exercises the OneOffConflict path end-to-end.
+
+    Layout:
+      - Enrollment: this month + next month.
+      - Authorization: this month + next month, Mon/Wed/Fri (1,3,5).
+      - Availability: Mon 09:00-15:00 (recurring), Wed 09:00-15:00,
+        Fri 09:00-15:00.
+      - Absence: a single day = first Monday of this month.
+      - OneOffAvailability: the SAME first Monday, 12:00-16:00 ->
+        conflict reason: 'one-off on YYYY-MM-DD conflicts with absence'.
+    """
+    m1, _, mlast, mnext_last = _month_bounds(today)
+    cid = 100100
+
+    # Supply Long Lat so the CLI skips the Geocoding API during tests.
+    # The route entry for this coordinate must be pre-seeded in the geo
+    # cache the test passes via --geo-cache (see test_smoke.py).
+    _seed_member(conn, cid, "Conflict", "Sample",
+                 long_lat="40.71280,-74.00600")
+
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO [Enrollment] ([Center ID], [start_date], [end_date]) "
+        "VALUES (?, ?, ?)",
+        cid, _dt(m1), _dt(mnext_last),
+    )
+    cur.execute(
+        "INSERT INTO [Authorization] ([Center ID], [auth_start], [auth_end], "
+        "[effective_start], [effective_end], [auth_days], [Health Plan]) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        cid, _dt(m1), _dt(mnext_last), _dt(m1), _dt(mnext_last),
+        "1,3,5", "HOF",
+    )
+    for dow in (1, 3, 5):
+        cur.execute(
+            "INSERT INTO [Availability] ([Center ID], "
+            "[effective_start_date], [effective_end_date], [Day Of Week], "
+            "[avail_start], [avail_end]) VALUES (?, ?, ?, ?, ?, ?)",
+            cid, _dt(m1), None, dow, _hhmm(9, 0), _hhmm(15, 0),
+        )
+
+    # First Monday of this month is the conflict day.
+    first_monday = m1
+    while first_monday.isoweekday() != 1:
+        first_monday = first_monday + timedelta(days=1)
+
+    cur.execute(
+        "INSERT INTO [Absences] ([Center ID], [Leave Type], "
+        "[Start_Date], [End_Date], [Notes]) VALUES (?, ?, ?, ?, ?)",
+        cid, "Sick", _dt(first_monday), _dt(first_monday), "",
+    )
+
+    _seed_one_off(
+        conn, cid, first_monday,
+        start_hm=(12, 0), end_hm=(16, 0),
+        notes="doctor appt 8-12",
+    )
+    conn.commit()
+
+
 SCENARIOS: dict[str, Callable] = {
     "happy_path": seed_happy_path,
     "missing_data": seed_missing_data,
     "mid_period_change": seed_mid_period_change,
+    "one_off_conflict": _seed_one_off_conflict,
     "plan_full": seed_plan_full,
     "populate_real_members": seed_populate_real_members,
 }

@@ -1,16 +1,15 @@
-"""Create the four supporting tables in an Access .accdb that already
+"""Create the five supporting tables in an Access .accdb that already
 contains a Contacts table.
 
 Given a fresh .accdb whose only table is `Contacts`, this script
-issues four CREATE TABLE statements to bring up the `Enrollment`,
-`Authorization`, `Absences`, and `Availability` tables — every
-column the scheduler and the backfill scripts read, including the
-`[Health Plan]` column on `Authorization`.
+issues five CREATE TABLE statements to bring up the `Enrollment`,
+`Authorization`, `Absences`, `Availability`, and `OneOffAvailability`
+tables — every column the scheduler and the backfill scripts read,
+including the `[Health Plan]` column on `Authorization`.
 
 The script is a one-shot DDL bootstrap. No data is touched. If a
-supporting table already exists the run fails with the ODBC error
-on the first conflicting CREATE; drop the partial tables in Access
-and re-run.
+supporting table already exists it is skipped and the script
+continues with the remaining CREATE statements.
 
 After this script succeeds, run the backfill scripts to populate
 the new tables from Contacts:
@@ -72,11 +71,23 @@ _CREATE_AVAILABILITY = (
     ")"
 )
 
+_CREATE_ONE_OFF_AVAILABILITY = (
+    "CREATE TABLE [OneOffAvailability] ("
+    "[ID] AUTOINCREMENT PRIMARY KEY, "
+    "[Center ID] DOUBLE, "
+    "[date] DATETIME, "
+    "[avail_start] DATETIME, "
+    "[avail_end] DATETIME, "
+    "[Notes] MEMO"
+    ")"
+)
+
 _DDLS = [
     ("Enrollment", _CREATE_ENROLLMENT),
     ("Authorization", _CREATE_AUTHORIZATION),
     ("Absences", _CREATE_ABSENCES),
     ("Availability", _CREATE_AVAILABILITY),
+    ("OneOffAvailability", _CREATE_ONE_OFF_AVAILABILITY),
 ]
 
 
@@ -90,9 +101,9 @@ def _build_connection_string(db_path):
 def _parse_args(argv):
     p = argparse.ArgumentParser(
         description=(
-            "Create the four supporting tables (Enrollment, "
-            "Authorization, Absences, Availability) in an Access "
-            ".accdb that already contains Contacts."
+            "Create the five supporting tables (Enrollment, "
+            "Authorization, Absences, Availability, OneOffAvailability) "
+            "in an Access .accdb that already contains Contacts."
         )
     )
     p.add_argument("--db", required=True,
@@ -122,13 +133,28 @@ def main(argv=None):
     try:
         cur = conn.cursor()
         created = []
+        skipped = []
         for name, ddl in _DDLS:
-            cur.execute(ddl)
-            created.append(name)
-            if not args.quiet:
-                print(f"  CREATED  {name}")
+            try:
+                cur.execute(ddl)
+                created.append(name)
+                if not args.quiet:
+                    print(f"  CREATED  {name}")
+            except Exception as exc:
+                # 42S01 = table already exists; skip gracefully.
+                if "42S01" in str(exc):
+                    skipped.append(name)
+                    if not args.quiet:
+                        print(f"  SKIPPED  {name} (already exists)")
+                else:
+                    raise
         conn.commit()
-        print(f"Created: {', '.join(created)}")
+        parts = []
+        if created:
+            parts.append(f"Created: {', '.join(created)}")
+        if skipped:
+            parts.append(f"Skipped (already exist): {', '.join(skipped)}")
+        print("; ".join(parts) if parts else "Nothing to do.")
     finally:
         conn.close()
     return 0

@@ -12,11 +12,13 @@ class MemberContext:
     to the largest `id` (deliberate, see spec section "Overlap Resolution").
     """
 
-    def __init__(self, enrollments, authorizations, absences, availabilities):
+    def __init__(self, enrollments, authorizations, absences,
+                 availabilities, one_offs):
         self._enrollments = list(enrollments)
         self._authorizations = list(authorizations)
         self._absences = list(absences)
         self._availabilities = list(availabilities)
+        self._one_offs = list(one_offs)
 
     def is_enrolled(self, day: date) -> bool:
         for row in self._enrollments:
@@ -58,3 +60,10 @@ class MemberContext:
         if not candidates:
             return None
         return max(candidates, key=lambda r: (r["effective_start_date"], r["id"]))
+
+    def one_offs_for(self, day: date):
+        """Return list of one-off rows whose date equals `day`.
+
+        Empty list if none. May contain more than one row — the caller
+        (compute_day_eligibility) flags the duplicate as a conflict."""
+        return [r for r in self._one_offs if r["date"] == day]

@@ -8,9 +8,10 @@ from monthly_schedule.db import (
     get_enrollments, get_authorizations, get_absences, get_availability,
     get_all_members,
     get_all_enrollments, get_all_authorizations,
-    get_all_absences, get_all_availability,
+    get_all_absences, get_all_availability, get_all_one_offs,
 )
 from monthly_schedule.eligibility_context import MemberContext
+from monthly_schedule.per_day import OneOffConflict
 from monthly_schedule.travel import load_api_key, load_cache, save_cache
 from gui.errors import friendly_db_error
 from gui.i18n import tr
@@ -21,6 +22,7 @@ from new_monthly_schedule import (
     process_member,
     resolve_output_dir,
     schedule_filename,
+    write_one_off_conflict_csv,
 )
 
 
@@ -109,7 +111,7 @@ class ScheduleWorker(QThread):
                     member = get_member(cid, self.db_path)
                     if member is None:
                         failures.append(
-                            Failure(cid, "", "lookup", REASON_NOT_FOUND)
+                            Failure(cid, "", "lookup", REASON_NOT_FOUND, None)
                         )
                     else:
                         members.append(member)
@@ -149,6 +151,7 @@ class ScheduleWorker(QThread):
         auth_idx = get_all_authorizations(self.db_path)
         absence_idx = get_all_absences(self.db_path)
         avail_idx = get_all_availability(self.db_path)
+        one_off_idx = get_all_one_offs(self.db_path)
 
         for i, member in enumerate(members):
             try:
@@ -158,6 +161,7 @@ class ScheduleWorker(QThread):
                     authorizations=auth_idx.get(cid, []),
                     absences=absence_idx.get(cid, []),
                     availabilities=avail_idx.get(cid, []),
+                    one_offs=one_off_idx.get(cid, []),
                 )
                 if self.mode == "all":
                     raw_plan = member.get("health_plan")
@@ -169,15 +173,24 @@ class ScheduleWorker(QThread):
                         os.makedirs(member_out_dir, exist_ok=True)
                 else:
                     member_out_dir = self.out_dir
-                ok, stage, reason = process_member(
+                ok, stage, reason, day = process_member(
                     member, ctx,
                     self.year, self.month, member_out_dir,
                     self.preview, api_key, cache,
                 )
+            except OneOffConflict as exc:
+                # process_member catches OneOffConflict internally and
+                # returns it via the failure tuple. This branch only fires
+                # if a future refactor removes that inner catch.
+                ok = False
+                stage = "one_off_conflict"
+                reason = exc.reason
+                day = exc.day
             except Exception as exc:  # noqa: BLE001 - surface in summary, never kill run
                 ok = False
                 stage = "worker"
                 reason = f"{type(exc).__name__}: {exc}"
+                day = None
             if ok:
                 success += 1
                 if self.preview:
@@ -199,13 +212,23 @@ class ScheduleWorker(QThread):
                     Failure(
                         member["center_id"],
                         f"{member['last_name']}, {member['first_name']}",
-                        stage,
-                        reason,
+                        stage, reason, day,
                     )
                 )
             self.progress.emit(i + 1, len(members))
 
         save_cache(self.geo_cache, cache)
+
+        if not self.preview:
+            # Conflict CSV lives at the base output dir even in "all" mode —
+            # conflicts can span multiple plans, so a single roll-up file
+            # is more useful than per-plan duplicates.
+            csv_path = write_one_off_conflict_csv(failures, self.out_dir)
+            if csv_path is not None:
+                self.log_line.emit(
+                    "worker.wrote_conflict_csv",
+                    {"filename": os.path.basename(csv_path)},
+                )
 
         payload = {
             "verb_key": "summary.verb.previewed" if self.preview else "summary.verb.wrote",

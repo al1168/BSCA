@@ -29,6 +29,7 @@ def _ctx_full_month(authorized="1,3,5"):
                          "auth_days": authorized}],
         absences=[],
         availabilities=[],
+        one_offs=[],
     )
 
 
@@ -74,6 +75,7 @@ def test_absence_blocks_an_authorized_day():
                    "start_date": date(2026, 5, 4),
                    "end_date": date(2026, 5, 4)}],
         availabilities=[],
+        one_offs=[],
     )
     rows = build_rows(2026, 5, ctx, PLAN_RULES, random.Random(0))
     mon = next(r for r in rows if r["date"] == date(2026, 5, 4))
@@ -97,6 +99,7 @@ def test_availability_window_honored():
                          "auth_days": "1,3,5"}],
         absences=[],
         availabilities=[avail],
+        one_offs=[],
     )
     rows = build_rows(2026, 5, ctx, PLAN_RULES, random.Random(0))
     mon = next(r for r in rows if r["date"] == date(2026, 5, 4))

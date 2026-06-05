@@ -106,6 +106,7 @@ STRINGS: dict[str, dict[str, str]] = {
         # worker log lines
         "worker.preview": "Preview: {id} ({last}, {first})",
         "worker.wrote": "Wrote {filename}",
+        "worker.wrote_conflict_csv": "Wrote conflict report: {filename}",
         "worker.no_members": "No members found in the database.",
         "worker.no_members_for_plan": "No members found for plan {plan}.",
         "worker.cannot_create_folder": "Cannot create output folder: {error}",
@@ -124,6 +125,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "summary.stage.write": "write",
         "summary.stage.lookup": "lookup",
         "summary.stage.eligibility": "eligibility",
+        "summary.stage.one_off_conflict": "one-off conflict",
+        "summary.stage.worker": "worker error",
         "summary.reason.not_found": "not found in database",
         "summary.reason.not_enrolled": "not enrolled during this month",
         "summary.reason.no_auth": "no active authorization for this month",
@@ -245,6 +248,7 @@ STRINGS: dict[str, dict[str, str]] = {
         # worker log lines
         "worker.preview": "预览：{id}（{last}，{first}）",
         "worker.wrote": "已写入 {filename}",
+        "worker.wrote_conflict_csv": "已写入冲突报告: {filename}",
         "worker.no_members": "数据库中找不到成员。",
         "worker.no_members_for_plan": "计划 {plan} 中找不到成员。",
         "worker.cannot_create_folder": "无法创建输出文件夹：{error}",
@@ -263,6 +267,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "summary.stage.write": "写入",
         "summary.stage.lookup": "查找",
         "summary.stage.eligibility": "资格",
+        "summary.stage.one_off_conflict": "一次性冲突",
+        "summary.stage.worker": "工作进程错误",
         "summary.reason.not_found": "数据库中未找到",
         "summary.reason.not_enrolled": "本月未入册",
         "summary.reason.no_auth": "本月无有效授权",

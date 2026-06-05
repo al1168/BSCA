@@ -14,7 +14,8 @@ PLAN_RULES = {
 }
 
 
-def _ctx(enrolled=True, authorized="1,3,5", absent=False, availability=None):
+def _ctx(enrolled=True, authorized="1,3,5", absent=False,
+        availability=None, one_offs=None):
     enrollments = (
         [{"id": 1, "center_id": 1,
           "start_date": date(2026, 1, 1), "end_date": None}]
@@ -35,7 +36,10 @@ def _ctx(enrolled=True, authorized="1,3,5", absent=False, availability=None):
         if absent else []
     )
     availabilities = [availability] if availability else []
-    return MemberContext(enrollments, authorizations, absences, availabilities)
+    return MemberContext(
+        enrollments, authorizations, absences, availabilities,
+        list(one_offs or []),
+    )
 
 
 def test_eligible_day_no_availability_rule():
@@ -143,5 +147,168 @@ def test_month_failure_partial_absence_is_not_whole_month():
                    "start_date": date(2026, 5, 4),
                    "end_date": date(2026, 5, 4)}],
         availabilities=[],
+        one_offs=[],
     )
     assert compute_month_failure(2026, 5, ctx) is None
+
+
+def test_one_off_conflict_exception_carries_fields():
+    from datetime import date
+    from monthly_schedule.per_day import OneOffConflict
+    exc = OneOffConflict(123, date(2026, 6, 5), "duplicate one-off rows for 2026-06-05")
+    assert exc.center_id == 123
+    assert exc.day == date(2026, 6, 5)
+    assert exc.reason == "duplicate one-off rows for 2026-06-05"
+    assert "123" in str(exc)
+    assert "2026-06-05" in str(exc)
+    assert "duplicate" in str(exc)
+
+
+def test_one_off_narrows_window_and_ignores_recurring_availability():
+    # Plan default arrival 08:00-11:00, session_span_min lower bound 210.
+    # Recurring availability (Mon 10:00-15:00) would narrow to (600, 660).
+    # A one-off for the same Monday says 12:00-16:00.
+    # The one-off must win and the recurring rule must be IGNORED.
+    # Intersect (12:00-16:00) with plan (08:00-11:00) - session lower 210:
+    #   lo = max(480, 720) = 720
+    #   hi = min(660, 960 - 210) = min(660, 750) = 660
+    # lo > hi → ineligible (silent skip — non-intersecting), no flag.
+    avail = {"id": 1, "center_id": 1,
+             "effective_start_date": date(2026, 1, 1),
+             "effective_end_date": None,
+             "day_of_week": 1,
+             "avail_start": "10:00", "avail_end": "15:00"}
+    one_off = {"id": 99, "center_id": 1, "date": date(2026, 5, 4),
+               "avail_start": "12:00", "avail_end": "16:00"}
+    result = compute_day_eligibility(
+        date(2026, 5, 4),
+        _ctx(availability=avail, one_offs=[one_off]),
+        PLAN_RULES,
+    )
+    # No flag, no raise; just silent skip (non-intersecting window).
+    assert result.eligible is False
+
+
+def test_one_off_inside_plan_window_narrows_arrival():
+    # Plan default arrival 08:00-11:00 = (480, 660).
+    # session_span_min lower bound is 210.
+    # One-off says 09:00-14:00.
+    # Recurring rule does NOT apply (Mon 12:00-13:00 would on its own
+    # be ineligible). The one-off must replace it entirely.
+    #   lo = max(480 [08:00], 540 [09:00]) = 540
+    #   hi = min(660 [11:00], 840 [14:00] - 210) = min(660, 630) = 630
+    # Arrival window: (540, 630).
+    narrow_recurring = {"id": 1, "center_id": 1,
+                        "effective_start_date": date(2026, 1, 1),
+                        "effective_end_date": None,
+                        "day_of_week": 1,
+                        "avail_start": "12:00", "avail_end": "13:00"}
+    one_off = {"id": 99, "center_id": 1, "date": date(2026, 5, 4),
+               "avail_start": "09:00", "avail_end": "14:00"}
+    result = compute_day_eligibility(
+        date(2026, 5, 4),
+        _ctx(availability=narrow_recurring, one_offs=[one_off]),
+        PLAN_RULES,
+    )
+    assert result.eligible is True
+    assert result.arrival_window == (540, 630)
+
+
+def test_duplicate_one_off_rows_raise_conflict():
+    from monthly_schedule.per_day import OneOffConflict
+    one_offs = [
+        {"id": 1, "center_id": 1, "date": date(2026, 5, 4),
+         "avail_start": "09:00", "avail_end": "12:00"},
+        {"id": 2, "center_id": 1, "date": date(2026, 5, 4),
+         "avail_start": "10:00", "avail_end": "13:00"},
+    ]
+    import pytest
+    with pytest.raises(OneOffConflict) as info:
+        compute_day_eligibility(
+            date(2026, 5, 4), _ctx(one_offs=one_offs), PLAN_RULES
+        )
+    assert info.value.center_id == 1
+    assert info.value.day == date(2026, 5, 4)
+    assert info.value.reason == "duplicate one-off rows for 2026-05-04"
+
+
+def test_one_off_with_absence_raises_conflict():
+    from monthly_schedule.per_day import OneOffConflict
+    one_off = {"id": 99, "center_id": 1, "date": date(2026, 5, 4),
+               "avail_start": "09:00", "avail_end": "12:00"}
+    import pytest
+    with pytest.raises(OneOffConflict) as info:
+        # `absent=True` covers the entire month of May 2026.
+        compute_day_eligibility(
+            date(2026, 5, 4),
+            _ctx(absent=True, one_offs=[one_off]),
+            PLAN_RULES,
+        )
+    assert info.value.reason == "one-off on 2026-05-04 conflicts with absence"
+
+
+def test_duplicate_one_off_beats_absence_conflict():
+    # Two one-offs AND an absence: first-match wins; duplicate is checked first.
+    from monthly_schedule.per_day import OneOffConflict
+    one_offs = [
+        {"id": 1, "center_id": 1, "date": date(2026, 5, 4),
+         "avail_start": "09:00", "avail_end": "12:00"},
+        {"id": 2, "center_id": 1, "date": date(2026, 5, 4),
+         "avail_start": "10:00", "avail_end": "13:00"},
+    ]
+    import pytest
+    with pytest.raises(OneOffConflict) as info:
+        compute_day_eligibility(
+            date(2026, 5, 4),
+            _ctx(absent=True, one_offs=one_offs),
+            PLAN_RULES,
+        )
+    assert info.value.reason == "duplicate one-off rows for 2026-05-04"
+
+
+def test_one_off_on_unenrolled_day_silently_skipped():
+    one_off = {"id": 99, "center_id": 1, "date": date(2026, 5, 4),
+               "avail_start": "12:00", "avail_end": "14:00"}
+    result = compute_day_eligibility(
+        date(2026, 5, 4),
+        _ctx(enrolled=False, one_offs=[one_off]),
+        PLAN_RULES,
+    )
+    assert result.eligible is False  # silent — no raise
+
+
+def test_one_off_with_no_active_auth_silently_skipped():
+    one_off = {"id": 99, "center_id": 1, "date": date(2026, 5, 4),
+               "avail_start": "12:00", "avail_end": "14:00"}
+    result = compute_day_eligibility(
+        date(2026, 5, 4),
+        _ctx(authorized=None, one_offs=[one_off]),
+        PLAN_RULES,
+    )
+    assert result.eligible is False
+
+
+def test_one_off_on_unauthorized_weekday_silently_skipped():
+    # 2026-05-05 is Tuesday (weekday 2); _ctx default auth_days "1,3,5"
+    # excludes it. A one-off must not override the weekday gate.
+    one_off = {"id": 99, "center_id": 1, "date": date(2026, 5, 5),
+               "avail_start": "12:00", "avail_end": "14:00"}
+    result = compute_day_eligibility(
+        date(2026, 5, 5),
+        _ctx(one_offs=[one_off]),
+        PLAN_RULES,
+    )
+    assert result.eligible is False
+
+
+def test_one_off_window_outside_plan_silently_skipped():
+    # Plan arrival 08:00-11:00, session_min_lower 210.
+    # One-off window 14:00-17:00 cannot intersect → silent skip, no raise.
+    one_off = {"id": 99, "center_id": 1, "date": date(2026, 5, 4),
+               "avail_start": "14:00", "avail_end": "17:00"}
+    result = compute_day_eligibility(
+        date(2026, 5, 4),
+        _ctx(one_offs=[one_off]),
+        PLAN_RULES,
+    )
+    assert result.eligible is False
