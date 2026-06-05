@@ -57,6 +57,10 @@ def test_one_off_conflict_writes_conflict_csv(tmp_path):
         check=True,
     )
 
+    # Cache schema is defined by monthly_schedule/travel.py. The "route"
+    # key uses 5-decimal rounding via resolve_travel_minutes; the "ts" entry
+    # must be unexpired so _purge_expired (called in load_cache) does not
+    # evict the pre-seeded entry before the route lookup occurs.
     # Pre-seed the geo cache so the CLI never calls the Google APIs.
     # The test member is seeded with Long Lat "40.71280,-74.00600"; the
     # route cache key is round(lat,5),round(lng,5) = "40.7128,-74.006".

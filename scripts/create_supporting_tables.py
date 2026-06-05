@@ -8,9 +8,8 @@ tables — every column the scheduler and the backfill scripts read,
 including the `[Health Plan]` column on `Authorization`.
 
 The script is a one-shot DDL bootstrap. No data is touched. If a
-supporting table already exists the run fails with the ODBC error
-on the first conflicting CREATE; drop the partial tables in Access
-and re-run.
+supporting table already exists it is skipped and the script
+continues with the remaining CREATE statements.
 
 After this script succeeds, run the backfill scripts to populate
 the new tables from Contacts:
