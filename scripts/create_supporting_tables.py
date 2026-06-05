@@ -102,9 +102,9 @@ def _build_connection_string(db_path):
 def _parse_args(argv):
     p = argparse.ArgumentParser(
         description=(
-            "Create the four supporting tables (Enrollment, "
-            "Authorization, Absences, Availability) in an Access "
-            ".accdb that already contains Contacts."
+            "Create the five supporting tables (Enrollment, "
+            "Authorization, Absences, Availability, OneOffAvailability) "
+            "in an Access .accdb that already contains Contacts."
         )
     )
     p.add_argument("--db", required=True,
