@@ -42,6 +42,12 @@ _AVAIL_INSERT = (
 )
 
 
+def _is_test_id(center_id):
+    """True if the Center ID, rendered as a base-10 integer, ends in '00'.
+    Used by the --exclude-test-members flag to filter scratch members."""
+    return str(int(center_id)).endswith("00")
+
+
 def _hhmm_to_time(hhmm):
     """Convert 'HH:MM' to a datetime.time. Access stores time-only
     DATETIME fields with a 1899-12-30 placeholder; pyodbc accepts
@@ -159,6 +165,8 @@ def _parse_args(argv):
                    help="Parse + write CSV, do NOT commit DB changes.")
     p.add_argument("--quiet", action="store_true",
                    help="Suppress per-row stdout; print only the summary.")
+    p.add_argument("--exclude-test-members", action="store_true",
+                   help="Skip members whose Center ID ends in '00'.")
     return p.parse_args(argv)
 
 
@@ -184,6 +192,7 @@ def main(argv=None):
         today = datetime.date.today()
         stats = {
             "scanned": 0,
+            "test_skipped": 0,
             "ignored": 0,
             "skipped_row": 0,
             "applied": 0,
@@ -198,6 +207,13 @@ def main(argv=None):
 
         for cid, last, first, hha in _read_contacts(conn):
             stats["scanned"] += 1
+
+            if args.exclude_test_members and _is_test_id(cid):
+                stats["test_skipped"] += 1
+                if not args.quiet:
+                    print(f"  TEST-SKIP {cid}  (Center ID ends in 00)")
+                continue
+
             parsed = parse_hha_row(hha)
             if parsed["ignored"]:
                 stats["ignored"] += 1
@@ -245,6 +261,10 @@ def main(argv=None):
         print()
         print("HHA backfill summary")
         print(f"  Contacts scanned (with non-empty HHA): {non_empty}")
+        print(
+            f"  Test members excluded (--exclude-test-members): "
+            f"{stats['test_skipped']}"
+        )
         print(f"  Rows ignored (no time):                {stats['ignored']}")
         print(f"  Rows skipped (HHA fully after close):  {stats['skipped_row']}")
         print(
