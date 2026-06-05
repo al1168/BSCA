@@ -31,8 +31,9 @@ def test_main_missing_db_returns_2(tmp_path, capsys):
 
 def test_contacts_query_columns():
     q = backfill._CONTACTS_QUERY
-    for col in ("[Center ID]", "[Last Name]", "[First Name]"):
-        assert col in q
+    assert "[Center ID]" in q
+    assert "[Last Name]" not in q
+    assert "[First Name]" not in q
     assert "FROM [Contacts]" in q
     assert "WHERE" not in q  # full table scan
     assert "ORDER BY [Center ID]" in q
@@ -144,8 +145,8 @@ def _make_fake_conn_for_contacts(contacts_rows, count_values):
 
 def test_main_inserts_for_members_without_enrollment(tmp_path, monkeypatch):
     contacts = [
-        (12301, "Smith", "Alice"),
-        (12302, "Jones", "Bob"),
+        (12301,),
+        (12302,),
     ]
     conn, cur = _make_fake_conn_for_contacts(contacts, [0, 0])
 
@@ -168,7 +169,7 @@ def test_main_inserts_for_members_without_enrollment(tmp_path, monkeypatch):
     assert len(inserts) == 2
 
     # Verify parameters: (str(cid), datetime, None)
-    for (sql, params), (cid, _, _) in zip(inserts, contacts):
+    for (sql, params), (cid,) in zip(inserts, contacts):
         assert params[0] == str(cid)
         assert isinstance(params[1], datetime.datetime)
         assert params[2] is None
@@ -182,7 +183,7 @@ def test_main_inserts_for_members_without_enrollment(tmp_path, monkeypatch):
 
 
 def test_main_skips_members_already_enrolled(tmp_path, monkeypatch):
-    contacts = [(12301, "Smith", "Alice")]
+    contacts = [(12301,)]
     conn, cur = _make_fake_conn_for_contacts(contacts, [1])
 
     import pyodbc as _pyodbc
@@ -213,7 +214,7 @@ def test_main_skips_members_already_enrolled(tmp_path, monkeypatch):
 
 
 def test_exclude_test_members_skips_trailing_00(tmp_path, monkeypatch, capsys):
-    contacts = [(12300, "Test", "Member")]
+    contacts = [(12300,)]
     # No COUNT queued — the member should be skipped before COUNT is called.
     conn, cur = _make_fake_conn_for_contacts(contacts, [])
 
@@ -246,7 +247,7 @@ def test_exclude_test_members_skips_trailing_00(tmp_path, monkeypatch, capsys):
 
 
 def test_exclude_test_members_default_off_includes_00_ids(tmp_path, monkeypatch):
-    contacts = [(12300, "Test", "Member")]
+    contacts = [(12300,)]
     # COUNT returns 0 -> should be inserted.
     conn, cur = _make_fake_conn_for_contacts(contacts, [0])
 
@@ -274,7 +275,7 @@ def test_exclude_test_members_default_off_includes_00_ids(tmp_path, monkeypatch)
 
 
 def test_dry_run_calls_rollback_not_commit(tmp_path, monkeypatch):
-    contacts = [(12301, "Smith", "Alice")]
+    contacts = [(12301,)]
     conn, cur = _make_fake_conn_for_contacts(contacts, [0])
 
     import pyodbc as _pyodbc

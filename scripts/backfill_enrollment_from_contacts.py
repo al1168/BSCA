@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 _CONTACTS_QUERY = (
-    "SELECT [Center ID], [Last Name], [First Name] "
+    "SELECT [Center ID] "
     "FROM [Contacts] "
     "ORDER BY [Center ID]"
 )
@@ -36,7 +36,7 @@ _ENROLLMENT_INSERT = (
     "VALUES (?, ?, ?)"
 )
 
-_CSV_COLUMNS = ["center_id", "last_name", "first_name", "action"]
+_CSV_COLUMNS = ["center_id", "action"]
 
 
 def _build_connection_string(db_path):
@@ -70,15 +70,15 @@ def _parse_args(argv):
 
 
 def _read_contacts(conn):
-    """Yield (cid:int, last, first) tuples.
+    """Yield cid (int) values.
     Rows with NULL Center ID are skipped silently."""
     cur = conn.cursor()
     cur.execute(_CONTACTS_QUERY)
     for row in cur.fetchall():
-        cid, last, first = row
+        (cid,) = row
         if cid is None:
             continue
-        yield (int(cid), last, first)
+        yield int(cid)
 
 
 def _write_skipped_csv(rows, out_dir, today):
@@ -128,7 +128,7 @@ def main(argv=None):
         }
         skipped_rows = []
 
-        for cid, last, first in _read_contacts(conn):
+        for cid in _read_contacts(conn):
             stats["scanned"] += 1
 
             if args.exclude_test_members and _is_test_id(cid):
@@ -165,9 +165,8 @@ def main(argv=None):
         print("Enrollment backfill summary")
         print(f"  Contacts scanned:                            "
               f"{stats['scanned']}")
-        if args.exclude_test_members:
-            print(f"  Test members excluded (--exclude-test-members): "
-                  f"{stats['test_skipped']}")
+        print(f"  Test members excluded (--exclude-test-members): "
+              f"{stats['test_skipped']}")
         print(f"  Already enrolled (skipped):                  "
               f"{stats['already_enrolled']}")
         print(f"  Enrollment inserted:                         "
