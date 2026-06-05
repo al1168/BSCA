@@ -41,8 +41,19 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _stub_travel(monkeypatch):
-    """Neutralize travel + new DB lookups for legacy tests."""
-    monkeypatch.setattr(cli, "load_api_key", lambda path: "K")
+    """Neutralize travel + new DB lookups for legacy tests.
+
+    Injects --api-key K into every parse_args call so individual tests
+    don't have to thread the flag through every cli.main() invocation.
+    """
+    _real_parse_args = cli.parse_args
+
+    def _parse_args_with_key(argv):
+        if "--api-key" not in argv:
+            argv = list(argv) + ["--api-key", "K"]
+        return _real_parse_args(argv)
+
+    monkeypatch.setattr(cli, "parse_args", _parse_args_with_key)
     monkeypatch.setattr(cli, "load_cache", lambda path: {})
     monkeypatch.setattr(cli, "save_cache", lambda path, cache: None)
     monkeypatch.setattr(
@@ -376,22 +387,6 @@ def test_travel_failure_skips_member_in_summary(
     assert ("ID 24010 (Cheng, Lizhu): geocode — "
             "ZERO_RESULTS for 'x'") in err
     assert not (tmp_path / "Schedule_24010_2026-05.xlsx").exists()
-
-
-def test_missing_api_key_config_aborts(monkeypatch, capsys):
-    monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
-
-    def no_key(path):
-        raise RuntimeError(
-            "Google API key config not found: google_maps.config"
-        )
-    monkeypatch.setattr(cli, "load_api_key", no_key)
-    rc = cli.main(
-        ["--center-id", "24010", "--year", "2026", "--month", "5",
-         "--preview-data"]
-    )
-    assert rc == 1
-    assert "Google API key config not found" in capsys.readouterr().err
 
 
 def test_no_enrollment_yields_failure(monkeypatch, tmp_path, capsys):
