@@ -82,7 +82,7 @@ def test_one_off_conflict_writes_skipped_csv(tmp_path):
          "--year", "2026", "--month", "6",
          "--db-path", str(test_db),
          "--output-path", str(out_dir),
-         "--google-config", str(REPO_ROOT / "google_maps.config"),
+         "--api-key", "TEST_KEY_NOT_USED",
          "--geo-cache", str(tmp_path / "geo_cache.json"),
         ],
         capture_output=True, text=True,
