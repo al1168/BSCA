@@ -12,7 +12,7 @@ from monthly_schedule.db import (
 )
 from monthly_schedule.eligibility_context import MemberContext
 from monthly_schedule.per_day import OneOffConflict
-from monthly_schedule.travel import load_api_key, load_cache, save_cache
+from monthly_schedule.travel import load_cache, save_cache
 from gui.errors import friendly_db_error
 from gui.i18n import tr
 from new_monthly_schedule import (
@@ -42,7 +42,7 @@ class ScheduleWorker(QThread):
         out_dir,
         preview,
         db_path,
-        google_config,
+        google_api_key,
         geo_cache,
         parent=None,
     ):
@@ -56,7 +56,7 @@ class ScheduleWorker(QThread):
         self.out_dir = out_dir
         self.preview = preview
         self.db_path = db_path
-        self.google_config = google_config
+        self.google_api_key = google_api_key
         self.geo_cache = geo_cache
 
     def _emit_error(self, text: str):
@@ -74,12 +74,7 @@ class ScheduleWorker(QThread):
             )
 
     def _run_inner(self):
-        try:
-            api_key = load_api_key(self.google_config)
-        except RuntimeError as exc:
-            self._emit_error(str(exc))
-            return
-
+        api_key = self.google_api_key
         cache = load_cache(self.geo_cache)
 
         members = []

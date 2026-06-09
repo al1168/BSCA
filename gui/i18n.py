@@ -49,37 +49,26 @@ STRINGS: dict[str, dict[str, str]] = {
         "opts.open_folder": "Open Output Folder",
         # settings dialog
         "settings.welcome": (
-            "Before you get started, please locate the three files "
+            "Before you get started, please fill in the fields "
             "below.\nYou can change these at any time using the ⚙ "
             "Settings button."
         ),
         "settings.db_label": "Database File",
         "settings.output_label": "Output Folder",
-        "settings.google_label": "Google Maps Config File",
+        "settings.api_key_label": "Google Maps API Key",
         "settings.cache_label": "Travel Cache File",
         "settings.browse": "Browse…",
-        "settings.create_open": "Create & Open",
-        "settings.create_open_tooltip": (
-            "Create a new config file and open it in Notepad to paste "
-            "your API key"
-        ),
         "settings.test_connection": "Test Connection",
+        "settings.api_key.show": "Show",
+        "settings.api_key.hide": "Hide",
         "settings.file_dialog.file": "Select File",
         "settings.file_dialog.folder": "Select Folder",
-        "settings.file_dialog.google": "Select Google Maps Config File",
         "settings.test_result_title": "Connection Test",
         "settings.test.db_not_found": "Database: File not found — {path}",
         "settings.test.db_ok": "Database: Connected successfully.",
         "settings.test.db_fail": "Database: Connection failed — {error}",
-        "settings.test.gc_not_found": "Google Config: File not found — {path}",
-        "settings.test.gc_ok": "Google Config: API key loaded successfully.",
-        "settings.test.gc_fail": "Google Config: {error}",
-        "settings.file_exists_title": "File Already Exists",
-        "settings.file_exists_body": (
-            "A config file already exists at:\n{path}\n\n"
-            "Open it for editing?"
-        ),
-        "settings.create_fail_title": "Could Not Create File",
+        "settings.test.api_key_present": "API Key: provided.",
+        "settings.test.api_key_missing": "API Key: missing — enter one above.",
         # message dialogs
         "msg.missing_info.title": "Missing Info",
         "msg.missing_info.member_id": "Please enter a Member ID.",
@@ -97,10 +86,9 @@ STRINGS: dict[str, dict[str, str]] = {
             "The database file could not be found:\n{path}\n\n"
             "Open Settings to fix the path."
         ),
-        "msg.gc_not_found.title": "Google Config Not Found",
-        "msg.gc_not_found.body": (
-            "The Google Maps config file could not be found:\n{path}\n\n"
-            "Open Settings to fix the path."
+        "msg.api_key_missing.title": "API Key Missing",
+        "msg.api_key_missing.body": (
+            "Open Settings and enter your Google Maps API key before generating."
         ),
         "msg.completed_errors.title": "Completed with errors",
         # worker log lines
@@ -193,35 +181,25 @@ STRINGS: dict[str, dict[str, str]] = {
         "opts.open_folder": "打开输出文件夹",
         # settings dialog
         "settings.welcome": (
-            "开始之前，请定位以下三个文件。\n"
+            "开始之前，请填写以下各项。\n"
             "您可以随时通过 ⚙ 设置按钮更改它们。"
         ),
         "settings.db_label": "数据库文件",
         "settings.output_label": "输出文件夹",
-        "settings.google_label": "Google 地图配置文件",
+        "settings.api_key_label": "Google 地图 API 密钥",
         "settings.cache_label": "出行缓存文件",
         "settings.browse": "浏览…",
-        "settings.create_open": "创建并打开",
-        "settings.create_open_tooltip": (
-            "创建一个新的配置文件并在记事本中打开以粘贴您的 API 密钥"
-        ),
         "settings.test_connection": "测试连接",
+        "settings.api_key.show": "显示",
+        "settings.api_key.hide": "隐藏",
         "settings.file_dialog.file": "选择文件",
         "settings.file_dialog.folder": "选择文件夹",
-        "settings.file_dialog.google": "选择 Google 地图配置文件",
         "settings.test_result_title": "连接测试",
         "settings.test.db_not_found": "数据库：找不到文件 — {path}",
         "settings.test.db_ok": "数据库：连接成功。",
         "settings.test.db_fail": "数据库：连接失败 — {error}",
-        "settings.test.gc_not_found": "Google 配置：找不到文件 — {path}",
-        "settings.test.gc_ok": "Google 配置：API 密钥加载成功。",
-        "settings.test.gc_fail": "Google 配置：{error}",
-        "settings.file_exists_title": "文件已存在",
-        "settings.file_exists_body": (
-            "配置文件已存在于：\n{path}\n\n"
-            "打开以进行编辑？"
-        ),
-        "settings.create_fail_title": "无法创建文件",
+        "settings.test.api_key_present": "API 密钥：已填写。",
+        "settings.test.api_key_missing": "API 密钥：未填写 — 请在上方输入。",
         # message dialogs
         "msg.missing_info.title": "缺少信息",
         "msg.missing_info.member_id": "请输入成员编号。",
@@ -239,10 +217,9 @@ STRINGS: dict[str, dict[str, str]] = {
             "找不到数据库文件：\n{path}\n\n"
             "打开设置以修正路径。"
         ),
-        "msg.gc_not_found.title": "找不到 Google 配置",
-        "msg.gc_not_found.body": (
-            "找不到 Google 地图配置文件：\n{path}\n\n"
-            "打开设置以修正路径。"
+        "msg.api_key_missing.title": "缺少 API 密钥",
+        "msg.api_key_missing.body": (
+            "请打开设置并输入您的 Google 地图 API 密钥，然后再生成。"
         ),
         "msg.completed_errors.title": "完成但有错误",
         # worker log lines

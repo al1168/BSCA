@@ -1,6 +1,4 @@
 import os
-import subprocess
-import sys
 
 from PyQt6.QtWidgets import (
     QDialog,
@@ -16,17 +14,8 @@ from PyQt6.QtWidgets import (
 )
 
 from monthly_schedule.db import get_member
-from monthly_schedule.travel import load_api_key
 from gui.errors import friendly_db_error
 from gui.i18n import LanguageManager, tr
-
-_GOOGLE_CONFIG_PLACEHOLDER = "PASTE_YOUR_GOOGLE_MAPS_API_KEY_HERE\n"
-
-
-def _default_config_dir() -> str:
-    if getattr(sys, "frozen", False):
-        return os.path.dirname(sys.executable)
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class _PathRow(QHBoxLayout):
@@ -67,67 +56,31 @@ class _PathRow(QHBoxLayout):
         self.edit.setText(v)
 
 
-class _GoogleConfigRow(QHBoxLayout):
-    def __init__(self, default_path: str):
+class _ApiKeyRow(QHBoxLayout):
+    def __init__(self, initial_value: str):
         super().__init__()
-        self.edit = QLineEdit(default_path)
-        self.edit.setMinimumWidth(260)
-        self.browse_btn = QPushButton()
-        self.browse_btn.setFixedWidth(80)
-        self.browse_btn.clicked.connect(self._browse)
-        self.create_btn = QPushButton()
-        self.create_btn.setFixedWidth(105)
-        self.create_btn.clicked.connect(self._create_and_open)
+        self.edit = QLineEdit(initial_value)
+        self.edit.setMinimumWidth(320)
+        self.edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.toggle_btn = QPushButton()
+        self.toggle_btn.setFixedWidth(70)
+        self.toggle_btn.clicked.connect(self._toggle)
         self.addWidget(self.edit, 1)
-        self.addWidget(self.browse_btn)
-        self.addWidget(self.create_btn)
+        self.addWidget(self.toggle_btn)
 
     def retranslate(self):
-        self.browse_btn.setText(tr("settings.browse"))
-        self.create_btn.setText(tr("settings.create_open"))
-        self.create_btn.setToolTip(tr("settings.create_open_tooltip"))
-
-    def _browse(self):
-        path, _ = QFileDialog.getOpenFileName(
-            None,
-            tr("settings.file_dialog.google"),
-            self.edit.text(),
-            "Config files (*)",
-        )
-        if path:
-            self.edit.setText(path)
-
-    def _create_and_open(self):
-        current = self.edit.text().strip()
-        if current:
-            target = current
+        if self.edit.echoMode() == QLineEdit.EchoMode.Password:
+            self.toggle_btn.setText(tr("settings.api_key.show"))
         else:
-            target = os.path.join(_default_config_dir(), "google_maps.config")
+            self.toggle_btn.setText(tr("settings.api_key.hide"))
 
-        if os.path.isfile(target):
-            reply = QMessageBox.question(
-                None,
-                tr("settings.file_exists_title"),
-                tr("settings.file_exists_body", path=target),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            )
-            if reply != QMessageBox.StandardButton.Yes:
-                return
+    def _toggle(self):
+        if self.edit.echoMode() == QLineEdit.EchoMode.Password:
+            self.edit.setEchoMode(QLineEdit.EchoMode.Normal)
+            self.toggle_btn.setText(tr("settings.api_key.hide"))
         else:
-            try:
-                with open(target, "w", encoding="utf-8") as f:
-                    f.write(_GOOGLE_CONFIG_PLACEHOLDER)
-            except OSError as exc:
-                QMessageBox.warning(
-                    None, tr("settings.create_fail_title"), str(exc)
-                )
-                return
-
-        self.edit.setText(target)
-        if sys.platform == "win32":
-            os.startfile(target)
-        else:
-            subprocess.Popen(["xdg-open", target])
+            self.edit.setEchoMode(QLineEdit.EchoMode.Password)
+            self.toggle_btn.setText(tr("settings.api_key.show"))
 
     def value(self) -> str:
         return self.edit.text().strip()
@@ -163,19 +116,19 @@ class SettingsDialog(QDialog):
             "Access Database (*.accdb *.mdb)",
         )
         self._out_row = _PathRow(settings.get("output_path", ""), pick_dir=True)
-        self._gc_row = _GoogleConfigRow(settings.get("google_config", ""))
+        self._key_row = _ApiKeyRow(settings.get("google_api_key", ""))
         self._cache_row = _PathRow(
             settings.get("geo_cache", ""), "JSON files (*.json)"
         )
 
         self._db_label = QLabel()
         self._out_label = QLabel()
-        self._gc_label = QLabel()
+        self._api_key_label = QLabel()
         self._cache_label = QLabel()
 
         form.addRow(self._db_label, self._db_row)
         form.addRow(self._out_label, self._out_row)
-        form.addRow(self._gc_label, self._gc_row)
+        form.addRow(self._api_key_label, self._key_row)
         form.addRow(self._cache_label, self._cache_row)
         layout.addLayout(form)
 
@@ -207,18 +160,18 @@ class SettingsDialog(QDialog):
             self._welcome.setText(tr("settings.welcome"))
         self._db_label.setText(tr("settings.db_label"))
         self._out_label.setText(tr("settings.output_label"))
-        self._gc_label.setText(tr("settings.google_label"))
+        self._api_key_label.setText(tr("settings.api_key_label"))
         self._cache_label.setText(tr("settings.cache_label"))
         self._db_row.retranslate()
         self._out_row.retranslate()
-        self._gc_row.retranslate()
+        self._key_row.retranslate()
         self._cache_row.retranslate()
         if self._test_btn is not None:
             self._test_btn.setText(tr("settings.test_connection"))
 
     def _test_connection(self):
         db_path = self._db_row.value()
-        gc_path = self._gc_row.value()
+        api_key = self._key_row.value()
         lines = []
 
         if not os.path.isfile(db_path):
@@ -234,14 +187,10 @@ class SettingsDialog(QDialog):
             except Exception as exc:
                 lines.append(tr("settings.test.db_fail", error=str(exc)))
 
-        if not os.path.isfile(gc_path):
-            lines.append(tr("settings.test.gc_not_found", path=gc_path))
+        if api_key:
+            lines.append(tr("settings.test.api_key_present"))
         else:
-            try:
-                load_api_key(gc_path)
-                lines.append(tr("settings.test.gc_ok"))
-            except RuntimeError as exc:
-                lines.append(tr("settings.test.gc_fail", error=str(exc)))
+            lines.append(tr("settings.test.api_key_missing"))
 
         QMessageBox.information(
             self, tr("settings.test_result_title"), "\n".join(lines)
@@ -251,7 +200,7 @@ class SettingsDialog(QDialog):
         self._result = {
             "db_path": self._db_row.value(),
             "output_path": self._out_row.value(),
-            "google_config": self._gc_row.value(),
+            "google_api_key": self._key_row.value(),
             "geo_cache": self._cache_row.value(),
         }
         self.accept()

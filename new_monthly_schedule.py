@@ -19,7 +19,6 @@ from monthly_schedule.rules import get_rules_for_plan
 from monthly_schedule.rows import build_rows
 from monthly_schedule.workbook import build_workbook
 from monthly_schedule.travel import (
-    load_api_key,
     load_cache,
     save_cache,
     resolve_travel_minutes,
@@ -27,7 +26,6 @@ from monthly_schedule.travel import (
 )
 
 DEFAULT_DB = r"\\BOWERY3\Users\Shared\Access Member 5.5.26_copy.accdb"
-DEFAULT_GOOGLE_CONFIG = "google_maps.config"
 DEFAULT_GEO_CACHE = "geo_cache.json"
 
 
@@ -125,7 +123,7 @@ def parse_args(argv):
     )
     parser.add_argument("--db-path", default=DEFAULT_DB)
     parser.add_argument("--output-path", default=".")
-    parser.add_argument("--google-config", default=DEFAULT_GOOGLE_CONFIG)
+    parser.add_argument("--api-key", required=True)
     parser.add_argument("--geo-cache", default=DEFAULT_GEO_CACHE)
     parser.add_argument("--preview-data", action="store_true")
     return parser.parse_args(argv)
@@ -183,11 +181,7 @@ def process_member(member, ctx, year, month, out_dir, preview,
 def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
 
-    try:
-        api_key = load_api_key(args.google_config)
-    except RuntimeError as exc:
-        print(exc, file=sys.stderr)
-        return 1
+    api_key = args.api_key
     cache = load_cache(args.geo_cache)
 
     if args.center_id is not None:
