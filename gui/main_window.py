@@ -31,7 +31,7 @@ from gui.worker import ScheduleWorker
 from new_monthly_schedule import REASON_NOT_FOUND, parse_center_ids, resolve_output_dir
 from monthly_schedule.per_day import REASON_NOT_ENROLLED, REASON_NO_AUTH, REASON_ABSENT_MONTH
 
-PLAN_CODES = ["HOF"]
+PLAN_CODES = ["HF", "HOF", "VCM", "BCBS", "ES", "AE", "HC", "Aetna", "Anthem", "BCSB"]
 
 
 def _translate_reason(reason: str) -> str:
