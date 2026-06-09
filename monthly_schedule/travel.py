@@ -94,22 +94,6 @@ def save_cache(path, cache):
         json.dump(cache, fh, indent=2, sort_keys=True)
 
 
-def load_api_key(config_path):
-    """Return the trimmed Google API key from `config_path`. Raises
-    RuntimeError if the file is missing or empty."""
-    if not os.path.exists(config_path):
-        raise RuntimeError(
-            f"Google API key config not found: {config_path}"
-        )
-    with open(config_path, "r", encoding="utf-8") as fh:
-        key = fh.read().strip()
-    if not key:
-        raise RuntimeError(
-            f"Google API key config is empty: {config_path}"
-        )
-    return key
-
-
 GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
 ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
 

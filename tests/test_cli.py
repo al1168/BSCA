@@ -41,8 +41,19 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _stub_travel(monkeypatch):
-    """Neutralize travel + new DB lookups for legacy tests."""
-    monkeypatch.setattr(cli, "load_api_key", lambda path: "K")
+    """Neutralize travel + new DB lookups for legacy tests.
+
+    Injects --api-key K into every parse_args call so individual tests
+    don't have to thread the flag through every cli.main() invocation.
+    """
+    _real_parse_args = cli.parse_args
+
+    def _parse_args_with_key(argv):
+        if "--api-key" not in argv:
+            argv = list(argv) + ["--api-key", "K"]
+        return _real_parse_args(argv)
+
+    monkeypatch.setattr(cli, "parse_args", _parse_args_with_key)
     monkeypatch.setattr(cli, "load_cache", lambda path: {})
     monkeypatch.setattr(cli, "save_cache", lambda path, cache: None)
     monkeypatch.setattr(
@@ -378,22 +389,6 @@ def test_travel_failure_skips_member_in_summary(
     assert not (tmp_path / "Schedule_24010_2026-05.xlsx").exists()
 
 
-def test_missing_api_key_config_aborts(monkeypatch, capsys):
-    monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
-
-    def no_key(path):
-        raise RuntimeError(
-            "Google API key config not found: google_maps.config"
-        )
-    monkeypatch.setattr(cli, "load_api_key", no_key)
-    rc = cli.main(
-        ["--center-id", "24010", "--year", "2026", "--month", "5",
-         "--preview-data"]
-    )
-    assert rc == 1
-    assert "Google API key config not found" in capsys.readouterr().err
-
-
 def test_no_enrollment_yields_failure(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
     monkeypatch.setattr(cli, "get_enrollments", lambda cid, db: [])
@@ -419,62 +414,76 @@ def test_no_authorization_yields_failure(monkeypatch, tmp_path, capsys):
 
 
 # ---------------------------------------------------------------------------
-# write_one_off_conflict_csv
+# write_skipped_members_csv
 # ---------------------------------------------------------------------------
 
-from new_monthly_schedule import write_one_off_conflict_csv, Failure
+from new_monthly_schedule import write_skipped_members_csv, Failure
 
 
-def test_write_one_off_conflict_csv_no_conflicts_returns_none(tmp_path):
-    """Returns None and writes no file when no conflict failures are present."""
-    failures = [
-        cli.Failure(24010, "Cheng, Lizhu", "lookup", "not found", None),
-    ]
-    result = write_one_off_conflict_csv(
-        failures, str(tmp_path), today=date(2026, 6, 4)
+def test_write_skipped_members_csv_empty_returns_none(tmp_path):
+    """Empty failures list returns None and writes nothing."""
+    result = write_skipped_members_csv(
+        [], str(tmp_path), today=date(2026, 6, 4)
     )
     assert result is None
     assert list(tmp_path.iterdir()) == []
 
 
-def test_write_one_off_conflict_csv_single_conflict(tmp_path):
-    """Writes a single-row CSV with correct filename, header, and row."""
+def test_write_skipped_members_csv_filename_uses_today(tmp_path):
+    """The returned path is `skipped_members_<today>.csv` in out_dir."""
     failures = [
-        Failure(24010, "Cheng, Lizhu", "one_off_conflict",
-                "one-off on auth day", date(2026, 6, 4)),
+        Failure(24010, "Cheng, Lizhu", "lookup", "not found", None),
     ]
-    result = write_one_off_conflict_csv(
+    result = write_skipped_members_csv(
         failures, str(tmp_path), today=date(2026, 6, 4)
     )
-    expected_path = tmp_path / "one_off_conflicts_2026-06-04.csv"
+    expected_path = tmp_path / "skipped_members_2026-06-04.csv"
     assert result == str(expected_path)
     assert expected_path.exists()
-    content = expected_path.read_text(encoding="utf-8")
-    lines = content.splitlines()
-    assert lines[0] == "center_id,name,date,reason"
-    assert lines[1] == '24010,"Cheng, Lizhu",2026-06-04,one-off on auth day'
-    assert len(lines) == 2
+    lines = expected_path.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "center_id,name,stage,reason,day"
 
 
-def test_write_one_off_conflict_csv_multiple_conflicts_preserves_order(tmp_path):
-    """Writes one row per conflict in input order."""
+def test_write_skipped_members_csv_includes_all_stages(tmp_path):
+    """All failure stages appear in the CSV. The `day` column is the ISO
+    date only for one_off_conflict rows and empty for everything else."""
     failures = [
-        Failure(24010, "Cheng, Lizhu", "one_off_conflict",
-                "conflict A", date(2026, 6, 1)),
-        Failure(24011, "Smith, John", "one_off_conflict",
-                "conflict B", date(2026, 6, 3)),
-        Failure(24012, "Jones, Mary", "one_off_conflict",
-                "conflict C", date(2026, 6, 5)),
+        Failure(24010, "Cheng, Lizhu", "lookup", "not found in database", None),
+        Failure(24011, "Smith, John", "eligibility", "not enrolled", None),
+        Failure(24012, "Jones, Mary", "geocode", "ZERO_RESULTS for 'x'", None),
+        Failure(24013, "Park, Eun", "one_off_conflict",
+                "one-off on auth day", date(2026, 6, 5)),
     ]
-    result = write_one_off_conflict_csv(
+    result = write_skipped_members_csv(
         failures, str(tmp_path), today=date(2026, 6, 4)
     )
-    expected_path = tmp_path / "one_off_conflicts_2026-06-04.csv"
+    expected_path = tmp_path / "skipped_members_2026-06-04.csv"
     assert result == str(expected_path)
     content = expected_path.read_text(encoding="utf-8")
     lines = content.splitlines()
-    assert lines[0] == "center_id,name,date,reason"
-    assert lines[1] == '24010,"Cheng, Lizhu",2026-06-01,conflict A'
-    assert lines[2] == '24011,"Smith, John",2026-06-03,conflict B'
-    assert lines[3] == '24012,"Jones, Mary",2026-06-05,conflict C'
-    assert len(lines) == 4
+    assert lines[0] == "center_id,name,stage,reason,day"
+    assert len(lines) == 5  # header + 4 failures
+    assert lines[1] == '24010,"Cheng, Lizhu",lookup,not found in database,'
+    assert lines[2] == '24011,"Smith, John",eligibility,not enrolled,'
+    assert lines[3] == '24012,"Jones, Mary",geocode,ZERO_RESULTS for \'x\','
+    assert lines[4] == (
+        '24013,"Park, Eun",one_off_conflict,one-off on auth day,2026-06-05'
+    )
+
+
+def test_write_skipped_members_csv_preserves_input_order(tmp_path):
+    """Multiple failures appear in input order."""
+    from pathlib import Path
+
+    failures = [
+        Failure(24010, "Cheng, Lizhu", "eligibility", "A", None),
+        Failure(24011, "Smith, John", "lookup", "B", None),
+        Failure(24012, "Jones, Mary", "geocode", "C", None),
+    ]
+    result = write_skipped_members_csv(
+        failures, str(tmp_path), today=date(2026, 6, 4)
+    )
+    lines = Path(result).read_text(encoding="utf-8").splitlines()
+    assert [row.split(",", 1)[0] for row in lines[1:]] == [
+        "24010", "24011", "24012",
+    ]

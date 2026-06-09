@@ -12,7 +12,7 @@ from monthly_schedule.db import (
 )
 from monthly_schedule.eligibility_context import MemberContext
 from monthly_schedule.per_day import OneOffConflict
-from monthly_schedule.travel import load_api_key, load_cache, save_cache
+from monthly_schedule.travel import load_cache, save_cache
 from gui.errors import friendly_db_error
 from gui.i18n import tr
 from new_monthly_schedule import (
@@ -22,7 +22,7 @@ from new_monthly_schedule import (
     process_member,
     resolve_output_dir,
     schedule_filename,
-    write_one_off_conflict_csv,
+    write_skipped_members_csv,
 )
 
 
@@ -42,7 +42,7 @@ class ScheduleWorker(QThread):
         out_dir,
         preview,
         db_path,
-        google_config,
+        google_api_key,
         geo_cache,
         parent=None,
     ):
@@ -56,7 +56,7 @@ class ScheduleWorker(QThread):
         self.out_dir = out_dir
         self.preview = preview
         self.db_path = db_path
-        self.google_config = google_config
+        self.google_api_key = google_api_key
         self.geo_cache = geo_cache
 
     def _emit_error(self, text: str):
@@ -74,12 +74,7 @@ class ScheduleWorker(QThread):
             )
 
     def _run_inner(self):
-        try:
-            api_key = load_api_key(self.google_config)
-        except RuntimeError as exc:
-            self._emit_error(str(exc))
-            return
-
+        api_key = self.google_api_key
         cache = load_cache(self.geo_cache)
 
         members = []
@@ -220,13 +215,13 @@ class ScheduleWorker(QThread):
         save_cache(self.geo_cache, cache)
 
         if not self.preview:
-            # Conflict CSV lives at the base output dir even in "all" mode —
-            # conflicts can span multiple plans, so a single roll-up file
+            # Skipped-members CSV lives at the base output dir even in "all"
+            # mode — skips can span multiple plans, so a single roll-up file
             # is more useful than per-plan duplicates.
-            csv_path = write_one_off_conflict_csv(failures, self.out_dir)
+            csv_path = write_skipped_members_csv(failures, self.out_dir)
             if csv_path is not None:
                 self.log_line.emit(
-                    "worker.wrote_conflict_csv",
+                    "worker.wrote_skipped_csv",
                     {"filename": os.path.basename(csv_path)},
                 )
 

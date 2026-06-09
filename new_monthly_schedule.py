@@ -19,7 +19,6 @@ from monthly_schedule.rules import get_rules_for_plan
 from monthly_schedule.rows import build_rows
 from monthly_schedule.workbook import build_workbook
 from monthly_schedule.travel import (
-    load_api_key,
     load_cache,
     save_cache,
     resolve_travel_minutes,
@@ -27,7 +26,6 @@ from monthly_schedule.travel import (
 )
 
 DEFAULT_DB = r"\\BOWERY3\Users\Shared\Access Member 5.5.26_copy.accdb"
-DEFAULT_GOOGLE_CONFIG = "google_maps.config"
 DEFAULT_GEO_CACHE = "geo_cache.json"
 
 
@@ -85,25 +83,27 @@ def format_summary(verb, success_count, total, scope, out_dir,
     return "\n".join(lines)
 
 
-def write_one_off_conflict_csv(failures, out_dir, today=None):
-    """If any failures carry stage='one_off_conflict', write
-    `one_off_conflicts_<YYYY-MM-DD>.csv` into `out_dir` with one row
-    per conflict. Return the path written, or None when there are no
-    conflict failures (the file is not created in that case)."""
-    conflict_failures = [f for f in failures if f.stage == "one_off_conflict"]
-    if not conflict_failures:
+def write_skipped_members_csv(failures, out_dir, today=None):
+    """If `failures` is non-empty, write `skipped_members_<YYYY-MM-DD>.csv`
+    into `out_dir` with one row per skipped member. Return the path
+    written, or None when `failures` is empty (file not created).
+
+    The `day` column is the ISO date from `failure.day` when set
+    (currently only `one_off_conflict` failures), empty string otherwise."""
+    if not failures:
         return None
     today = today or _date.today()
-    path = os.path.join(out_dir, f"one_off_conflicts_{today.isoformat()}.csv")
+    path = os.path.join(out_dir, f"skipped_members_{today.isoformat()}.csv")
     with open(path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["center_id", "name", "date", "reason"])
-        for f in conflict_failures:
+        writer.writerow(["center_id", "name", "stage", "reason", "day"])
+        for f in failures:
             writer.writerow([
                 f.center_id,
                 f.name,
-                f.day.isoformat() if f.day else "",
+                f.stage,
                 f.reason,
+                f.day.isoformat() if f.day else "",
             ])
     return path
 
@@ -123,7 +123,7 @@ def parse_args(argv):
     )
     parser.add_argument("--db-path", default=DEFAULT_DB)
     parser.add_argument("--output-path", default=".")
-    parser.add_argument("--google-config", default=DEFAULT_GOOGLE_CONFIG)
+    parser.add_argument("--api-key", required=True)
     parser.add_argument("--geo-cache", default=DEFAULT_GEO_CACHE)
     parser.add_argument("--preview-data", action="store_true")
     return parser.parse_args(argv)
@@ -181,11 +181,7 @@ def process_member(member, ctx, year, month, out_dir, preview,
 def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
 
-    try:
-        api_key = load_api_key(args.google_config)
-    except RuntimeError as exc:
-        print(exc, file=sys.stderr)
-        return 1
+    api_key = args.api_key
     cache = load_cache(args.geo_cache)
 
     if args.center_id is not None:
@@ -263,9 +259,9 @@ def main(argv=None):
 
     save_cache(args.geo_cache, cache)
     if not args.preview_data:
-        conflict_csv = write_one_off_conflict_csv(failures, out_dir)
-        if conflict_csv is not None:
-            print(f"Wrote conflict report: {conflict_csv}", file=sys.stderr)
+        skipped_csv = write_skipped_members_csv(failures, out_dir)
+        if skipped_csv is not None:
+            print(f"Wrote skipped members report: {skipped_csv}", file=sys.stderr)
     total = success + len(failures)
     verb = "Previewed" if args.preview_data else "Wrote"
     summary_dir = None if args.preview_data else out_dir

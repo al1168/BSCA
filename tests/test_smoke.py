@@ -30,10 +30,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
     not _odbc_available(),
     reason="Microsoft Access ODBC driver not available in this environment",
 )
-def test_one_off_conflict_writes_conflict_csv(tmp_path):
+def test_one_off_conflict_writes_skipped_csv(tmp_path):
     """End-to-end: seed the one_off_conflict scenario, run the CLI,
-    confirm `one_off_conflicts_<DATE>.csv` lands in the output dir
-    with the expected single row."""
+    confirm `skipped_members_<DATE>.csv` lands in the output dir
+    with the conflict row recorded."""
     test_db = tmp_path / "test.accdb"
     # The repository's reference template — adjust if your local
     # workflow uses a different source.
@@ -82,7 +82,7 @@ def test_one_off_conflict_writes_conflict_csv(tmp_path):
          "--year", "2026", "--month", "6",
          "--db-path", str(test_db),
          "--output-path", str(out_dir),
-         "--google-config", str(REPO_ROOT / "google_maps.config"),
+         "--api-key", "TEST_KEY_NOT_USED",
          "--geo-cache", str(tmp_path / "geo_cache.json"),
         ],
         capture_output=True, text=True,
@@ -91,9 +91,9 @@ def test_one_off_conflict_writes_conflict_csv(tmp_path):
     # The CLI returns 2 when there are any failures — the conflict counts.
     assert result.returncode == 2, result.stderr
 
-    csv_files = list(out_dir.glob("one_off_conflicts_*.csv"))
+    csv_files = list(out_dir.glob("skipped_members_*.csv"))
     assert len(csv_files) == 1, (
-        f"Expected exactly one conflict CSV, got: {csv_files}\n"
+        f"Expected exactly one skipped-members CSV, got: {csv_files}\n"
         f"stderr: {result.stderr}"
     )
     body = csv_files[0].read_text(encoding="utf-8")
