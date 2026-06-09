@@ -3,6 +3,11 @@ the 5 setup scripts in order: backup → create_supporting_tables →
 add_long_lat_to_contacts → backfill_enrollment_from_contacts →
 backfill_authorization_from_contacts → backfill_availability_from_hha.
 
+Optionally appends a 6th step (terminate_long_id_enrollments) when
+the worker is constructed with `also_terminate=True`. That step is
+opt-in because it's destructive cleanup (sets end_date=2000-01-01
+for any member whose Center ID is more than 5 digits), not setup.
+
 Each script's stdout is captured through a `LineBuffer` and forwarded
 to the `log_line` signal, so the GUI can stream progress in real time."""
 import contextlib
@@ -34,6 +39,14 @@ SETUP_STEPS: list[tuple[str, str]] = [
 ]
 
 
+# Optional opt-in step. Same shape as the SETUP_STEPS tuples; the
+# worker appends it to its local steps list when `also_terminate=True`.
+TERMINATE_STEP: tuple[str, str] = (
+    "terminate_long_id_enrollments",
+    "scripts.terminate_long_id_enrollments",
+)
+
+
 def _backup_path(db_path: str) -> str:
     """Return `<stem>.backup_<YYYY-MM-DD-HHMMSS><ext>` in the same
     folder as `db_path`. Extension preserved so Access still opens
@@ -48,14 +61,22 @@ def _backup_path(db_path: str) -> str:
 
 class SetupWorker(QThread):
     log_line = pyqtSignal(str)
-    progress = pyqtSignal(int, int)        # (done_step, total_steps=5)
+    progress = pyqtSignal(int, int)        # (done_step, total_steps)
     finished = pyqtSignal(bool, dict)      # (success, payload)
 
-    def __init__(self, db_path: str, parent=None):
+    def __init__(
+        self, db_path: str, also_terminate: bool = False, parent=None,
+    ):
         super().__init__(parent)
         self._db_path = db_path
+        self._also_terminate = also_terminate
 
     def run(self):
+        steps = list(SETUP_STEPS)
+        if self._also_terminate:
+            steps.append(TERMINATE_STEP)
+        total = len(steps)
+
         # Step 0: backup.
         backup_path = _backup_path(self._db_path)
         try:
@@ -67,9 +88,9 @@ class SetupWorker(QThread):
             return
         self.log_line.emit(f"Backed up to {backup_path}")
 
-        # Steps 1-5: chain.
-        for i, (name, module_path) in enumerate(SETUP_STEPS, start=1):
-            self.log_line.emit(f"Step {i}/{len(SETUP_STEPS)}: {name}")
+        # Chain the steps (5 by default; 6 if `also_terminate=True`).
+        for i, (name, module_path) in enumerate(steps, start=1):
+            self.log_line.emit(f"Step {i}/{total}: {name}")
             buf = LineBuffer(self.log_line.emit)
             try:
                 # import_module caches in sys.modules. That's fine for
@@ -86,16 +107,18 @@ class SetupWorker(QThread):
                 self.finished.emit(
                     False,
                     {"step": name, "error": str(exc),
-                     "backup": backup_path},
+                     "backup": backup_path, "total_steps": total},
                 )
                 return
             if rc is not None and rc != 0:
                 self.finished.emit(
                     False,
                     {"step": name, "error": f"returned exit code {rc}",
-                     "backup": backup_path},
+                     "backup": backup_path, "total_steps": total},
                 )
                 return
-            self.progress.emit(i, len(SETUP_STEPS))
+            self.progress.emit(i, total)
 
-        self.finished.emit(True, {"backup": backup_path})
+        self.finished.emit(
+            True, {"backup": backup_path, "total_steps": total},
+        )

@@ -14,7 +14,7 @@ def _qapp():
     yield app
 
 
-from setup_gui.setup_worker import SetupWorker, SETUP_STEPS
+from setup_gui.setup_worker import SetupWorker, SETUP_STEPS, TERMINATE_STEP
 
 
 def _run_to_completion(worker, timeout_ms=5000):
@@ -231,3 +231,51 @@ def test_script_stdout_streamed_through_log_line_signal(
         assert any(
             f"{name}: did the thing" in line for line in log_events
         ), f"missing chatty line for {name}"
+
+
+def test_default_does_not_run_terminate_step(tmp_path, monkeypatch):
+    """`also_terminate=False` (the default) skips terminate_long_id
+    entirely: 5 progress events, terminate's main() is never called,
+    payload reports total_steps=5."""
+    db_path = tmp_path / "members.accdb"
+    db_path.write_bytes(b"fake")
+
+    _stub_all_scripts(monkeypatch, return_code=0)
+    terminate_mock = MagicMock(return_value=0)
+    monkeypatch.setattr(f"{TERMINATE_STEP[1]}.main", terminate_mock)
+
+    worker = SetupWorker(str(db_path))
+    progress_events = []
+    worker.progress.connect(lambda d, t: progress_events.append((d, t)))
+
+    success, payload = _run_to_completion(worker)
+
+    assert success is True
+    assert payload["total_steps"] == 5
+    assert progress_events == [(1, 5), (2, 5), (3, 5), (4, 5), (5, 5)]
+    terminate_mock.assert_not_called()
+
+
+def test_also_terminate_runs_six_steps(tmp_path, monkeypatch):
+    """`also_terminate=True` appends terminate_long_id as step 6: 6
+    progress events ending in (6, 6); terminate is called with the
+    same --db argv; payload reports total_steps=6."""
+    db_path = tmp_path / "members.accdb"
+    db_path.write_bytes(b"fake")
+
+    _stub_all_scripts(monkeypatch, return_code=0)
+    terminate_mock = MagicMock(return_value=0)
+    monkeypatch.setattr(f"{TERMINATE_STEP[1]}.main", terminate_mock)
+
+    worker = SetupWorker(str(db_path), also_terminate=True)
+    progress_events = []
+    worker.progress.connect(lambda d, t: progress_events.append((d, t)))
+
+    success, payload = _run_to_completion(worker)
+
+    assert success is True
+    assert payload["total_steps"] == 6
+    assert progress_events == [
+        (1, 6), (2, 6), (3, 6), (4, 6), (5, 6), (6, 6),
+    ]
+    terminate_mock.assert_called_once_with(["--db", str(db_path)])

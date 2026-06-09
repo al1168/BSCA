@@ -4,6 +4,7 @@ import os
 
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -59,6 +60,14 @@ class MainWindow(QWidget):
         self._run_btn.clicked.connect(self._on_run_clicked)
         root.addWidget(self._run_btn)
 
+        # ── Optional: terminate long-ID enrollments ───────────
+        self._terminate_check = QCheckBox(
+            "Also terminate long-ID enrollments "
+            "(sets end_date to 2000-01-01 for any member whose "
+            "Center ID is more than 5 digits)"
+        )
+        root.addWidget(self._terminate_check)
+
         # ── Progress ──────────────────────────────────────────
         self._progress = QProgressBar()
         self._progress.setRange(0, len(SETUP_STEPS))
@@ -102,8 +111,12 @@ class MainWindow(QWidget):
         self._run_btn.setEnabled(False)
         self._browse_btn.setEnabled(False)
         self._db_edit.setEnabled(False)
+        self._terminate_check.setEnabled(False)
 
-        self._worker = SetupWorker(db_path, parent=self)
+        also_terminate = self._terminate_check.isChecked()
+        self._worker = SetupWorker(
+            db_path, also_terminate=also_terminate, parent=self,
+        )
         self._worker.log_line.connect(self._on_log_line)
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(self._on_finished)
@@ -120,10 +133,12 @@ class MainWindow(QWidget):
         self._run_btn.setEnabled(True)
         self._browse_btn.setEnabled(True)
         self._db_edit.setEnabled(True)
+        self._terminate_check.setEnabled(True)
         self._worker = None
 
         if success:
             backup = payload.get("backup", "")
+            total_steps = payload.get("total_steps", len(SETUP_STEPS))
             self._log.appendPlainText("")
             self._log.appendPlainText(
                 f"Setup completed successfully. Backup: {backup}"
@@ -131,7 +146,7 @@ class MainWindow(QWidget):
             QMessageBox.information(
                 self,
                 "Setup Complete",
-                f"All {len(SETUP_STEPS)} setup steps finished "
+                f"All {total_steps} setup steps finished "
                 f"successfully.\n\n"
                 f"A backup of your original database is at:\n{backup}",
             )
