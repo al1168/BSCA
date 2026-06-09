@@ -37,7 +37,10 @@ SETUP_STEPS: list[tuple[str, str]] = [
 def _backup_path(db_path: str) -> str:
     """Return `<stem>.backup_<YYYY-MM-DD-HHMMSS><ext>` in the same
     folder as `db_path`. Extension preserved so Access still opens
-    the backup if double-clicked."""
+    the backup if double-clicked. `db_path` is expected to be
+    absolute (the GUI's QFileDialog.getOpenFileName always returns
+    an absolute path on Windows); a relative path would place the
+    backup in the process CWD."""
     p = Path(db_path)
     ts = datetime.datetime.now().strftime("%Y-%m-%d-%H%M%S")
     return str(p.with_name(f"{p.stem}.backup_{ts}{p.suffix}"))
@@ -86,7 +89,7 @@ class SetupWorker(QThread):
                      "backup": backup_path},
                 )
                 return
-            if rc != 0:
+            if rc is not None and rc != 0:
                 self.finished.emit(
                     False,
                     {"step": name, "error": f"returned exit code {rc}",
