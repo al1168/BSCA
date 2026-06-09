@@ -7,7 +7,20 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=['pyodbc', 'openpyxl', 'requests'],
+    hiddenimports=[
+        'pyodbc',
+        'openpyxl',
+        'requests',
+        # Setup-script modules — loaded via importlib.import_module()
+        # in setup_gui/setup_worker.py, so PyInstaller's static analysis
+        # doesn't see them. Bundle them explicitly.
+        'scripts',
+        'scripts.create_supporting_tables',
+        'scripts.add_long_lat_to_contacts',
+        'scripts.backfill_enrollment_from_contacts',
+        'scripts.backfill_authorization_from_contacts',
+        'scripts.backfill_availability_from_hha',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
