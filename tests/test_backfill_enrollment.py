@@ -293,3 +293,113 @@ def test_dry_run_calls_rollback_not_commit(tmp_path, monkeypatch):
     assert rc == 0
     assert conn.rolled_back is True
     assert conn.committed is False
+
+
+# ---------------------------------------------------------------------------
+# _default_start_date
+# ---------------------------------------------------------------------------
+
+def test_default_start_date_in_june_uses_this_year_may_31():
+    """Today in June → this year's May 31 (the most recent past one)."""
+    assert backfill._default_start_date(datetime.date(2026, 6, 11)) == \
+        datetime.date(2026, 5, 31)
+
+
+def test_default_start_date_in_january_uses_prior_year_may_31():
+    """Today in January → prior year's May 31 (this year's hasn't
+    happened yet)."""
+    assert backfill._default_start_date(datetime.date(2027, 1, 15)) == \
+        datetime.date(2026, 5, 31)
+
+
+def test_default_start_date_on_may_31_uses_today():
+    """Today is exactly May 31 → uses that date (not last year's)."""
+    assert backfill._default_start_date(datetime.date(2026, 5, 31)) == \
+        datetime.date(2026, 5, 31)
+
+
+def test_default_start_date_on_may_30_uses_prior_year():
+    """Today is May 30 → this year's May 31 hasn't happened yet, fall
+    back to last year's."""
+    assert backfill._default_start_date(datetime.date(2026, 5, 30)) == \
+        datetime.date(2025, 5, 31)
+
+
+# ---------------------------------------------------------------------------
+# _is_long_id
+# ---------------------------------------------------------------------------
+
+def test_is_long_id_true_cases():
+    assert backfill._is_long_id(100000) is True       # 6 digits
+    assert backfill._is_long_id(2400600) is True      # 7 digits
+    assert backfill._is_long_id(2400600.0) is True    # DOUBLE form
+
+
+def test_is_long_id_false_cases():
+    assert backfill._is_long_id(1) is False
+    assert backfill._is_long_id(24010) is False       # 5 digits
+    assert backfill._is_long_id(99999) is False       # 5 digits
+    assert backfill._is_long_id(None) is False
+
+
+# ---------------------------------------------------------------------------
+# --terminate-long-ids integration
+# ---------------------------------------------------------------------------
+
+def test_main_default_inserts_have_null_end(tmp_path, monkeypatch):
+    """Without --terminate-long-ids, both short and long-ID inserts
+    use end_date=None (open-ended)."""
+    contacts = [(24010,), (2400600,)]
+    conn, cur = _make_fake_conn_for_contacts(contacts, [0, 0])
+
+    import pyodbc as _pyodbc
+    monkeypatch.setattr(_pyodbc, "connect", lambda cs: conn)
+
+    db_path = tmp_path / "test.accdb"
+    db_path.touch()
+
+    rc = backfill.main([
+        "--db", str(db_path),
+        "--csv-out", str(tmp_path),
+        "--quiet",
+    ])
+    assert rc == 0
+
+    inserts = [(s, p) for s, p in cur.executed
+               if s == backfill._ENROLLMENT_INSERT]
+    assert len(inserts) == 2
+    for sql, params in inserts:
+        assert params[2] is None
+
+
+def test_main_terminate_long_ids_sets_2000_end_for_long_ids(
+    tmp_path, monkeypatch,
+):
+    """With --terminate-long-ids, short-ID gets None end_date and
+    long-ID gets datetime(2000, 1, 1)."""
+    contacts = [(24010,), (2400600,)]
+    conn, cur = _make_fake_conn_for_contacts(contacts, [0, 0])
+
+    import pyodbc as _pyodbc
+    monkeypatch.setattr(_pyodbc, "connect", lambda cs: conn)
+
+    db_path = tmp_path / "test.accdb"
+    db_path.touch()
+
+    rc = backfill.main([
+        "--db", str(db_path),
+        "--csv-out", str(tmp_path),
+        "--quiet",
+        "--terminate-long-ids",
+    ])
+    assert rc == 0
+
+    inserts = [p for s, p in cur.executed
+               if s == backfill._ENROLLMENT_INSERT]
+    assert len(inserts) == 2
+    # First contact = 24010 (5 digits, short) → end_date None.
+    assert inserts[0][0] == "24010"
+    assert inserts[0][2] is None
+    # Second contact = 2400600 (7 digits, long) → end_date = datetime(2000,1,1).
+    assert inserts[1][0] == "2400600"
+    assert inserts[1][2] == datetime.datetime(2000, 1, 1)

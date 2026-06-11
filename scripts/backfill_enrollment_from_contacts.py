@@ -52,6 +52,31 @@ def _is_test_id(center_id):
     return str(int(center_id)).endswith("00")
 
 
+def _is_long_id(center_id):
+    """True if the Center ID, rendered as a base-10 integer string, is
+    more than 5 characters long. Used by the --terminate-long-ids flag
+    to insert long-ID enrollments as already-terminated."""
+    if center_id is None:
+        return False
+    return len(str(int(center_id))) > 5
+
+
+def _default_start_date(today):
+    """Return the most-recent May 31 that's on or before `today`.
+
+    Today is 2026-06-11 → 2026-05-31 (this year's May).
+    Today is 2026-04-15 → 2025-05-31 (last year's May, since this
+    year's hasn't happened yet).
+    Today is 2026-05-31 → 2026-05-31 (exact match)."""
+    candidate = datetime.date(today.year, 5, 31)
+    if candidate > today:
+        candidate = datetime.date(today.year - 1, 5, 31)
+    return candidate
+
+
+TERMINATION_DATE = datetime.date(2000, 1, 1)
+
+
 def _parse_args(argv):
     p = argparse.ArgumentParser(
         description="Backfill Enrollment from Contacts."
@@ -66,6 +91,11 @@ def _parse_args(argv):
                    help="Suppress per-row stdout; print only the summary.")
     p.add_argument("--exclude-test-members", action="store_true",
                    help="Skip members whose Center ID ends in '00'.")
+    p.add_argument("--terminate-long-ids", action="store_true",
+                   help="Insert enrollments with end_date=2000-01-01 "
+                        "for members whose Center ID is more than 5 "
+                        "digits. Same end-date marker as the "
+                        "terminate_long_id_enrollments script.")
     return p.parse_args(argv)
 
 
@@ -120,11 +150,21 @@ def main(argv=None):
     try:
         cur = conn.cursor()
         today = datetime.date.today()
+        start_date = _default_start_date(today)
+        start_dt = datetime.datetime(
+            start_date.year, start_date.month, start_date.day,
+        )
+        terminated_dt = datetime.datetime(
+            TERMINATION_DATE.year,
+            TERMINATION_DATE.month,
+            TERMINATION_DATE.day,
+        )
         stats = {
             "scanned": 0,
             "test_skipped": 0,
             "already_enrolled": 0,
             "inserted": 0,
+            "long_id_terminated": 0,
         }
         skipped_rows = []
 
@@ -145,12 +185,23 @@ def main(argv=None):
                 # Not written to skipped CSV — this is normal idempotent behavior.
                 continue
 
-            # Insert.
-            today_dt = datetime.datetime(today.year, today.month, today.day)
-            cur.execute(_ENROLLMENT_INSERT, str(cid), today_dt, None)
+            # Pick end_date: terminated for long-IDs (with the flag),
+            # NULL (open-ended) otherwise.
+            end_dt = None
+            terminated = False
+            if args.terminate_long_ids and _is_long_id(cid):
+                end_dt = terminated_dt
+                terminated = True
+                stats["long_id_terminated"] += 1
+
+            cur.execute(_ENROLLMENT_INSERT, str(cid), start_dt, end_dt)
             stats["inserted"] += 1
             if not args.quiet:
-                print(f"  INSERTED  {cid}  start={today.isoformat()}")
+                suffix = "  (TERMINATED long-ID)" if terminated else ""
+                print(
+                    f"  INSERTED  {cid}  start={start_date.isoformat()}"
+                    f"{suffix}"
+                )
 
         if args.dry_run:
             conn.rollback()
@@ -171,6 +222,10 @@ def main(argv=None):
               f"{stats['already_enrolled']}")
         print(f"  Enrollment inserted:                         "
               f"{stats['inserted']}")
+        if args.terminate_long_ids:
+            print(f"  Long-ID inserts with end_date=2000-01-01:    "
+                  f"{stats['long_id_terminated']}")
+        print(f"  Default start_date used: {start_date.isoformat()}")
         print(f"  Skipped CSV: {csv_path}")
         print(f"  Mode: {mode}")
     finally:
