@@ -1,11 +1,12 @@
-"""Create the five supporting tables in an Access .accdb that already
+"""Create the six supporting tables in an Access .accdb that already
 contains a Contacts table.
 
 Given a fresh .accdb whose only table is `Contacts`, this script
-issues five CREATE TABLE statements to bring up the `Enrollment`,
-`Authorization`, `Absences`, `Availability`, and `OneOffAvailability`
-tables — every column the scheduler and the backfill scripts read,
-including the `[Health Plan]` column on `Authorization`.
+issues six CREATE TABLE statements to bring up the `Enrollment`,
+`Authorization`, `Absences`, `Availability`, `OneOffAvailability`,
+and `EmergencyContact` tables — every column the scheduler and the
+backfill scripts read, including the `[Health Plan]` column on
+`Authorization`.
 
 The script is a one-shot DDL bootstrap. No data is touched. If a
 supporting table already exists it is skipped and the script
@@ -82,12 +83,23 @@ _CREATE_ONE_OFF_AVAILABILITY = (
     ")"
 )
 
+_CREATE_EMERGENCY_CONTACT = (
+    "CREATE TABLE [EmergencyContact] ("
+    "[ID] AUTOINCREMENT PRIMARY KEY, "
+    "[Center ID] DOUBLE, "
+    "[Full Name] TEXT(255), "
+    "[Phone Number] TEXT(50), "
+    "[Relationship] TEXT(100)"
+    ")"
+)
+
 _DDLS = [
     ("Enrollment", _CREATE_ENROLLMENT),
     ("Authorization", _CREATE_AUTHORIZATION),
     ("Absences", _CREATE_ABSENCES),
     ("Availability", _CREATE_AVAILABILITY),
     ("OneOffAvailability", _CREATE_ONE_OFF_AVAILABILITY),
+    ("EmergencyContact", _CREATE_EMERGENCY_CONTACT),
 ]
 
 
@@ -101,9 +113,10 @@ def _build_connection_string(db_path):
 def _parse_args(argv):
     p = argparse.ArgumentParser(
         description=(
-            "Create the five supporting tables (Enrollment, "
-            "Authorization, Absences, Availability, OneOffAvailability) "
-            "in an Access .accdb that already contains Contacts."
+            "Create the six supporting tables (Enrollment, "
+            "Authorization, Absences, Availability, OneOffAvailability, "
+            "EmergencyContact) in an Access .accdb that already "
+            "contains Contacts."
         )
     )
     p.add_argument("--db", required=True,

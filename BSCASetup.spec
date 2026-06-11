@@ -20,7 +20,8 @@ a = Analysis(
         'scripts.backfill_enrollment_from_contacts',
         'scripts.backfill_authorization_from_contacts',
         'scripts.backfill_availability_from_hha',
-        # Optional 6th step (opt-in via the GUI checkbox).
+        'scripts.backfill_emergency_contacts_from_contacts',
+        # Optional opt-in step (via the GUI checkbox).
         'scripts.terminate_long_id_enrollments',
     ],
     hookspath=[],

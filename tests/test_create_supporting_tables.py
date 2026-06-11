@@ -66,6 +66,14 @@ def test_create_one_off_availability_ddl():
         assert col in q
 
 
+def test_create_emergency_contact_ddl():
+    q = build._CREATE_EMERGENCY_CONTACT
+    assert "CREATE TABLE [EmergencyContact]" in q
+    assert "[ID] AUTOINCREMENT PRIMARY KEY" in q
+    for col in ("[Center ID]", "[Full Name]", "[Phone Number]", "[Relationship]"):
+        assert col in q
+
+
 def test_ddls_in_declared_order():
     assert build._DDLS == [
         ("Enrollment", build._CREATE_ENROLLMENT),
@@ -73,4 +81,5 @@ def test_ddls_in_declared_order():
         ("Absences", build._CREATE_ABSENCES),
         ("Availability", build._CREATE_AVAILABILITY),
         ("OneOffAvailability", build._CREATE_ONE_OFF_AVAILABILITY),
+        ("EmergencyContact", build._CREATE_EMERGENCY_CONTACT),
     ]

@@ -1,9 +1,10 @@
 """Background worker that prepares a fresh BSCA database by chaining
-the 5 setup scripts in order: backup → create_supporting_tables →
+the 6 setup scripts in order: backup → create_supporting_tables →
 add_long_lat_to_contacts → backfill_enrollment_from_contacts →
-backfill_authorization_from_contacts → backfill_availability_from_hha.
+backfill_authorization_from_contacts → backfill_availability_from_hha →
+backfill_emergency_contacts_from_contacts.
 
-Optionally appends a 6th step (terminate_long_id_enrollments) when
+Optionally appends a 7th step (terminate_long_id_enrollments) when
 the worker is constructed with `also_terminate=True`. That step is
 opt-in because it's destructive cleanup (sets end_date=2000-01-01
 for any member whose Center ID is more than 5 digits), not setup.
@@ -36,6 +37,8 @@ SETUP_STEPS: list[tuple[str, str]] = [
      "scripts.backfill_authorization_from_contacts"),
     ("backfill_availability_from_hha",
      "scripts.backfill_availability_from_hha"),
+    ("backfill_emergency_contacts_from_contacts",
+     "scripts.backfill_emergency_contacts_from_contacts"),
 ]
 
 
