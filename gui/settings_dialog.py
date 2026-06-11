@@ -1,6 +1,8 @@
 import os
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QApplication,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -16,6 +18,37 @@ from PyQt6.QtWidgets import (
 from monthly_schedule.db import get_member
 from gui.errors import friendly_db_error
 from gui.i18n import LanguageManager, tr
+
+
+# Known-good address used to verify Google accepts the API key. Google's
+# own HQ — should always resolve when the key + project are wired up.
+_TEST_ADDRESS = "1600 Amphitheatre Pkwy, Mountain View, CA"
+
+
+def _check_google_api_key(key: str) -> tuple[str, str]:
+    """Ping Google's Geocoding API with a known-good address.
+
+    Returns (result, detail) where result is one of:
+      "OK"            — Google accepted the key and resolved the address.
+      "INVALID"       — Google rejected the request; `detail` is Google's
+                        own error_message text.
+      "NETWORK_ERROR" — could not reach Google; `detail` is the exception
+                        message.
+    """
+    import requests  # local import — keeps Settings dialog cheap to import.
+    try:
+        r = requests.get(
+            "https://maps.googleapis.com/maps/api/geocode/json",
+            params={"address": _TEST_ADDRESS, "key": key},
+            timeout=10,
+        )
+        body = r.json()
+    except (requests.RequestException, ValueError) as exc:
+        return ("NETWORK_ERROR", str(exc))
+    status = body.get("status", "")
+    if status == "OK":
+        return ("OK", "")
+    return ("INVALID", body.get("error_message") or status or "unknown error")
 
 
 class _PathRow(QHBoxLayout):
@@ -187,10 +220,24 @@ class SettingsDialog(QDialog):
             except Exception as exc:
                 lines.append(tr("settings.test.db_fail", error=str(exc)))
 
-        if api_key:
-            lines.append(tr("settings.test.api_key_present"))
-        else:
+        if not api_key:
             lines.append(tr("settings.test.api_key_missing"))
+        else:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            try:
+                result, detail = _check_google_api_key(api_key)
+            finally:
+                QApplication.restoreOverrideCursor()
+            if result == "OK":
+                lines.append(tr("settings.test.api_key_valid"))
+            elif result == "INVALID":
+                lines.append(
+                    tr("settings.test.api_key_invalid", error=detail)
+                )
+            else:  # NETWORK_ERROR
+                lines.append(
+                    tr("settings.test.api_key_network_error", error=detail)
+                )
 
         QMessageBox.information(
             self, tr("settings.test_result_title"), "\n".join(lines)

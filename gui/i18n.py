@@ -67,8 +67,17 @@ STRINGS: dict[str, dict[str, str]] = {
         "settings.test.db_not_found": "Database: File not found — {path}",
         "settings.test.db_ok": "Database: Connected successfully.",
         "settings.test.db_fail": "Database: Connection failed — {error}",
-        "settings.test.api_key_present": "API Key: provided.",
         "settings.test.api_key_missing": "API Key: missing — enter one above.",
+        "settings.test.api_key_valid": (
+            "API Key: valid (Google accepted the test request)."
+        ),
+        "settings.test.api_key_invalid": (
+            "API Key: rejected by Google — {error}"
+        ),
+        "settings.test.api_key_network_error": (
+            "API Key: could not reach Google ({error}). "
+            "Check your internet connection."
+        ),
         # message dialogs
         "msg.missing_info.title": "Missing Info",
         "msg.missing_info.member_id": "Please enter a Member ID.",
@@ -198,8 +207,16 @@ STRINGS: dict[str, dict[str, str]] = {
         "settings.test.db_not_found": "数据库：找不到文件 — {path}",
         "settings.test.db_ok": "数据库：连接成功。",
         "settings.test.db_fail": "数据库：连接失败 — {error}",
-        "settings.test.api_key_present": "API 密钥：已填写。",
         "settings.test.api_key_missing": "API 密钥：未填写 — 请在上方输入。",
+        "settings.test.api_key_valid": (
+            "API 密钥：有效（Google 已接受测试请求）。"
+        ),
+        "settings.test.api_key_invalid": (
+            "API 密钥：被 Google 拒绝 — {error}"
+        ),
+        "settings.test.api_key_network_error": (
+            "API 密钥：无法连接到 Google（{error}）。请检查网络连接。"
+        ),
         # message dialogs
         "msg.missing_info.title": "缺少信息",
         "msg.missing_info.member_id": "请输入成员编号。",
