@@ -32,11 +32,63 @@ def test_main_missing_db_returns_2(tmp_path, capsys):
 def test_contacts_query_columns():
     q = backfill._CONTACTS_QUERY
     assert "[Center ID]" in q
+    assert "[Admission Date]" in q
     assert "[Last Name]" not in q
     assert "[First Name]" not in q
     assert "FROM [Contacts]" in q
     assert "WHERE" not in q  # full table scan
     assert "ORDER BY [Center ID]" in q
+
+
+# ---------------------------------------------------------------------------
+# _parse_admission_date
+# ---------------------------------------------------------------------------
+
+def test_parse_admission_date_all_four_spacings():
+    """`M/D/YYYY`, `MM/D/YYYY`, `M/DD/YYYY`, `MM/DD/YYYY` all parse."""
+    assert backfill._parse_admission_date("1/1/2024") == datetime.date(2024, 1, 1)
+    assert backfill._parse_admission_date("11/1/2024") == datetime.date(2024, 11, 1)
+    assert backfill._parse_admission_date("1/15/2024") == datetime.date(2024, 1, 15)
+    assert backfill._parse_admission_date("11/15/2024") == datetime.date(2024, 11, 15)
+
+
+def test_parse_admission_date_strips_whitespace():
+    assert backfill._parse_admission_date("  3/1/2024  ") == datetime.date(2024, 3, 1)
+
+
+def test_parse_admission_date_rejects_five_digit_year():
+    """Typo like `4/1/20167` is rejected (year out of sanity range)."""
+    assert backfill._parse_admission_date("4/1/20167") is None
+
+
+def test_parse_admission_date_rejects_three_digit_year():
+    """`1/1/024` doesn't match the strict %Y format."""
+    assert backfill._parse_admission_date("1/1/024") is None
+
+
+def test_parse_admission_date_rejects_year_before_1990():
+    """Sanity bound: year < 1990 → None."""
+    assert backfill._parse_admission_date("1/1/1985") is None
+
+
+def test_parse_admission_date_rejects_year_after_2100():
+    """Sanity bound: year > 2100 → None."""
+    assert backfill._parse_admission_date("1/1/2150") is None
+
+
+def test_parse_admission_date_returns_none_for_none():
+    assert backfill._parse_admission_date(None) is None
+
+
+def test_parse_admission_date_returns_none_for_empty():
+    assert backfill._parse_admission_date("") is None
+    assert backfill._parse_admission_date("   ") is None
+
+
+def test_parse_admission_date_rejects_garbage():
+    assert backfill._parse_admission_date("42024") is None
+    assert backfill._parse_admission_date("not a date") is None
+    assert backfill._parse_admission_date("2024-01-01") is None  # ISO not accepted
 
 
 def test_enrollment_count_query():
@@ -145,8 +197,8 @@ def _make_fake_conn_for_contacts(contacts_rows, count_values):
 
 def test_main_inserts_for_members_without_enrollment(tmp_path, monkeypatch):
     contacts = [
-        (12301,),
-        (12302,),
+        (12301, "1/1/2024"),
+        (12302, "2/15/2024"),
     ]
     conn, cur = _make_fake_conn_for_contacts(contacts, [0, 0])
 
@@ -168,10 +220,17 @@ def test_main_inserts_for_members_without_enrollment(tmp_path, monkeypatch):
                if s == backfill._ENROLLMENT_INSERT]
     assert len(inserts) == 2
 
-    # Verify parameters: (str(cid), datetime, None)
-    for (sql, params), (cid,) in zip(inserts, contacts):
+    # Verify parameters: (str(cid), datetime, None) and that the
+    # datetime matches the parsed admission date.
+    expected_dates = [
+        datetime.datetime(2024, 1, 1),
+        datetime.datetime(2024, 2, 15),
+    ]
+    for (sql, params), (cid, _adm), expected_dt in zip(
+        inserts, contacts, expected_dates,
+    ):
         assert params[0] == str(cid)
-        assert isinstance(params[1], datetime.datetime)
+        assert params[1] == expected_dt
         assert params[2] is None
 
     # Count queries should have been issued for both members.
@@ -183,7 +242,7 @@ def test_main_inserts_for_members_without_enrollment(tmp_path, monkeypatch):
 
 
 def test_main_skips_members_already_enrolled(tmp_path, monkeypatch):
-    contacts = [(12301,)]
+    contacts = [(12301, "1/1/2024")]
     conn, cur = _make_fake_conn_for_contacts(contacts, [1])
 
     import pyodbc as _pyodbc
@@ -214,7 +273,7 @@ def test_main_skips_members_already_enrolled(tmp_path, monkeypatch):
 
 
 def test_exclude_test_members_skips_trailing_00(tmp_path, monkeypatch, capsys):
-    contacts = [(12300,)]
+    contacts = [(12300, "1/1/2024")]
     # No COUNT queued — the member should be skipped before COUNT is called.
     conn, cur = _make_fake_conn_for_contacts(contacts, [])
 
@@ -247,7 +306,7 @@ def test_exclude_test_members_skips_trailing_00(tmp_path, monkeypatch, capsys):
 
 
 def test_exclude_test_members_default_off_includes_00_ids(tmp_path, monkeypatch):
-    contacts = [(12300,)]
+    contacts = [(12300, "1/1/2024")]
     # COUNT returns 0 -> should be inserted.
     conn, cur = _make_fake_conn_for_contacts(contacts, [0])
 
@@ -275,7 +334,7 @@ def test_exclude_test_members_default_off_includes_00_ids(tmp_path, monkeypatch)
 
 
 def test_dry_run_calls_rollback_not_commit(tmp_path, monkeypatch):
-    contacts = [(12301,)]
+    contacts = [(12301, "1/1/2024")]
     conn, cur = _make_fake_conn_for_contacts(contacts, [0])
 
     import pyodbc as _pyodbc
@@ -349,7 +408,7 @@ def test_is_long_id_false_cases():
 def test_main_default_inserts_have_null_end(tmp_path, monkeypatch):
     """Without --terminate-long-ids, both short and long-ID inserts
     use end_date=None (open-ended)."""
-    contacts = [(24010,), (2400600,)]
+    contacts = [(24010, "3/1/2024"), (2400600, "3/2/2024")]
     conn, cur = _make_fake_conn_for_contacts(contacts, [0, 0])
 
     import pyodbc as _pyodbc
@@ -377,7 +436,7 @@ def test_main_terminate_long_ids_sets_2000_end_for_long_ids(
 ):
     """With --terminate-long-ids, short-ID gets None end_date and
     long-ID gets datetime(2000, 1, 1)."""
-    contacts = [(24010,), (2400600,)]
+    contacts = [(24010, "3/1/2024"), (2400600, "3/2/2024")]
     conn, cur = _make_fake_conn_for_contacts(contacts, [0, 0])
 
     import pyodbc as _pyodbc
@@ -403,3 +462,91 @@ def test_main_terminate_long_ids_sets_2000_end_for_long_ids(
     # Second contact = 2400600 (7 digits, long) → end_date = datetime(2000,1,1).
     assert inserts[1][0] == "2400600"
     assert inserts[1][2] == datetime.datetime(2000, 1, 1)
+
+
+# ---------------------------------------------------------------------------
+# --admission integration (parsed vs fallback)
+# ---------------------------------------------------------------------------
+
+def test_main_uses_parsed_admission_date_as_start(tmp_path, monkeypatch):
+    """When admission parses, start_date is the admission date and the
+    skipped CSV stays empty."""
+    contacts = [(12301, "3/15/2024")]
+    conn, cur = _make_fake_conn_for_contacts(contacts, [0])
+
+    import pyodbc as _pyodbc
+    monkeypatch.setattr(_pyodbc, "connect", lambda cs: conn)
+
+    db_path = tmp_path / "test.accdb"
+    db_path.touch()
+
+    rc = backfill.main([
+        "--db", str(db_path),
+        "--csv-out", str(tmp_path),
+        "--quiet",
+    ])
+    assert rc == 0
+
+    inserts = [p for s, p in cur.executed if s == backfill._ENROLLMENT_INSERT]
+    assert len(inserts) == 1
+    assert inserts[0][1] == datetime.datetime(2024, 3, 15)
+
+    # Skipped CSV exists but contains only the header.
+    today_iso = datetime.date.today().isoformat()
+    csv_path = tmp_path / f"enrollment_backfill_skipped_{today_iso}.csv"
+    assert csv_path.exists()
+    lines = csv_path.read_text(encoding="utf-8-sig").splitlines()
+    assert lines[0] == ",".join(backfill._CSV_COLUMNS)
+    assert len(lines) == 1  # header only
+
+
+def test_main_falls_back_when_admission_unparseable_and_logs_to_csv(
+    tmp_path, monkeypatch,
+):
+    """Unparseable admission → start uses fallback, row appended to CSV."""
+    contacts = [
+        (12301, "1/1/2024"),       # valid
+        (12302, "junk"),            # invalid
+        (12303, None),              # NULL
+        (12304, ""),                # empty
+    ]
+    conn, cur = _make_fake_conn_for_contacts(contacts, [0, 0, 0, 0])
+
+    import pyodbc as _pyodbc
+    monkeypatch.setattr(_pyodbc, "connect", lambda cs: conn)
+
+    db_path = tmp_path / "test.accdb"
+    db_path.touch()
+
+    rc = backfill.main([
+        "--db", str(db_path),
+        "--csv-out", str(tmp_path),
+        "--quiet",
+    ])
+    assert rc == 0
+
+    inserts = [p for s, p in cur.executed if s == backfill._ENROLLMENT_INSERT]
+    assert len(inserts) == 4
+
+    # 12301: parsed
+    assert inserts[0][1] == datetime.datetime(2024, 1, 1)
+    # 12302, 12303, 12304: all fallback (same date)
+    fallback = backfill._default_start_date(datetime.date.today())
+    fallback_dt = datetime.datetime(
+        fallback.year, fallback.month, fallback.day,
+    )
+    for params in inserts[1:]:
+        assert params[1] == fallback_dt
+
+    # Skipped CSV has 3 data rows (one per fallback).
+    today_iso = datetime.date.today().isoformat()
+    csv_path = tmp_path / f"enrollment_backfill_skipped_{today_iso}.csv"
+    body = csv_path.read_text(encoding="utf-8-sig").splitlines()
+    # Header + 3 data rows
+    assert len(body) == 4
+    # Check the unparseable junk made it into a row.
+    joined = "\n".join(body)
+    assert "12302" in joined
+    assert "junk" in joined
+    assert "12303" in joined
+    assert "12304" in joined

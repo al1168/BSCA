@@ -2,12 +2,20 @@
 
 For every Contact:
   - If at least one Enrollment row exists, skip the member (idempotent).
-  - If no Enrollment row exists, INSERT one with
-    start_date = today, end_date = NULL (open-ended).
+  - If no Enrollment row exists, INSERT one with:
+      - start_date = parsed Contacts.[Admission Date] when valid,
+        otherwise the most-recent May 31 fallback.
+      - end_date = NULL (open-ended), or 2000-01-01 for long-IDs when
+        `--terminate-long-ids` is set.
 
 Designed to be safe to run repeatedly. The `--exclude-test-members`
 flag suppresses members whose Center ID ends in "00" (a convention
 the operator uses to mark test/scratch members).
+
+Members whose admission date can't be parsed (typos, NULL/empty,
+unrecognized format) are still enrolled with the fallback date, AND
+their row is appended to the skipped CSV so the operator can fix
+the source data later.
 """
 import argparse
 import csv
@@ -21,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 _CONTACTS_QUERY = (
-    "SELECT [Center ID] "
+    "SELECT [Center ID], [Admission Date] "
     "FROM [Contacts] "
     "ORDER BY [Center ID]"
 )
@@ -36,7 +44,35 @@ _ENROLLMENT_INSERT = (
     "VALUES (?, ?, ?)"
 )
 
-_CSV_COLUMNS = ["center_id", "action"]
+_CSV_COLUMNS = ["center_id", "raw_admission_date", "action"]
+
+
+# Plausible year bounds for admission dates — rejects typos like
+# "20167" or 3-digit-year forms like "024".
+_MIN_ADMISSION_YEAR = 1990
+_MAX_ADMISSION_YEAR = 2100
+
+
+def _parse_admission_date(text):
+    """Return a `datetime.date` parsed from `text`, or None when text
+    is missing or unparseable.
+
+    Accepted format: `M/D/YYYY`, `MM/D/YYYY`, `M/DD/YYYY`,
+    `MM/DD/YYYY` — i.e. anything `datetime.strptime("%m/%d/%Y")`
+    handles. The year is sanity-checked against
+    [_MIN_ADMISSION_YEAR, _MAX_ADMISSION_YEAR]."""
+    if text is None:
+        return None
+    s = str(text).strip()
+    if not s:
+        return None
+    try:
+        parsed = datetime.datetime.strptime(s, "%m/%d/%Y").date()
+    except ValueError:
+        return None
+    if not (_MIN_ADMISSION_YEAR <= parsed.year <= _MAX_ADMISSION_YEAR):
+        return None
+    return parsed
 
 
 def _build_connection_string(db_path):
@@ -100,15 +136,16 @@ def _parse_args(argv):
 
 
 def _read_contacts(conn):
-    """Yield cid (int) values.
-    Rows with NULL Center ID are skipped silently."""
+    """Yield (cid, admission_text) tuples. Rows with NULL Center ID
+    are skipped silently. `admission_text` is the raw value of
+    Contacts.[Admission Date] — None or empty when the cell is blank."""
     cur = conn.cursor()
     cur.execute(_CONTACTS_QUERY)
     for row in cur.fetchall():
-        (cid,) = row
+        cid, admission = row
         if cid is None:
             continue
-        yield int(cid)
+        yield int(cid), admission
 
 
 def _write_skipped_csv(rows, out_dir, today):
@@ -150,10 +187,7 @@ def main(argv=None):
     try:
         cur = conn.cursor()
         today = datetime.date.today()
-        start_date = _default_start_date(today)
-        start_dt = datetime.datetime(
-            start_date.year, start_date.month, start_date.day,
-        )
+        fallback_start_date = _default_start_date(today)
         terminated_dt = datetime.datetime(
             TERMINATION_DATE.year,
             TERMINATION_DATE.month,
@@ -165,10 +199,12 @@ def main(argv=None):
             "already_enrolled": 0,
             "inserted": 0,
             "long_id_terminated": 0,
+            "used_admission": 0,
+            "used_fallback": 0,
         }
         skipped_rows = []
 
-        for cid in _read_contacts(conn):
+        for cid, admission_text in _read_contacts(conn):
             stats["scanned"] += 1
 
             if args.exclude_test_members and _is_test_id(cid):
@@ -185,6 +221,31 @@ def main(argv=None):
                 # Not written to skipped CSV — this is normal idempotent behavior.
                 continue
 
+            # Pick start_date: parsed admission date, else fallback.
+            parsed = _parse_admission_date(admission_text)
+            if parsed is not None:
+                start_date = parsed
+                stats["used_admission"] += 1
+                start_source = "admission"
+            else:
+                start_date = fallback_start_date
+                stats["used_fallback"] += 1
+                start_source = "fallback"
+                skipped_rows.append({
+                    "center_id": cid,
+                    "raw_admission_date": (
+                        "" if admission_text is None else str(admission_text)
+                    ),
+                    "action": (
+                        f"inserted with fallback start_date "
+                        f"{start_date.isoformat()}"
+                    ),
+                })
+
+            start_dt = datetime.datetime(
+                start_date.year, start_date.month, start_date.day,
+            )
+
             # Pick end_date: terminated for long-IDs (with the flag),
             # NULL (open-ended) otherwise.
             end_dt = None
@@ -200,7 +261,7 @@ def main(argv=None):
                 suffix = "  (TERMINATED long-ID)" if terminated else ""
                 print(
                     f"  INSERTED  {cid}  start={start_date.isoformat()}"
-                    f"{suffix}"
+                    f"  src={start_source}{suffix}"
                 )
 
         if args.dry_run:
@@ -222,10 +283,14 @@ def main(argv=None):
               f"{stats['already_enrolled']}")
         print(f"  Enrollment inserted:                         "
               f"{stats['inserted']}")
+        print(f"    Used Contacts.[Admission Date]:            "
+              f"{stats['used_admission']}")
+        print(f"    Fell back to default start_date:           "
+              f"{stats['used_fallback']}")
         if args.terminate_long_ids:
             print(f"  Long-ID inserts with end_date=2000-01-01:    "
                   f"{stats['long_id_terminated']}")
-        print(f"  Default start_date used: {start_date.isoformat()}")
+        print(f"  Fallback start_date: {fallback_start_date.isoformat()}")
         print(f"  Skipped CSV: {csv_path}")
         print(f"  Mode: {mode}")
     finally:
