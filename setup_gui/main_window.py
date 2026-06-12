@@ -66,6 +66,7 @@ class MainWindow(QWidget):
             "(sets end_date to 2000-01-01 for any member whose "
             "Center ID is more than 5 digits)"
         )
+        self._terminate_check.setChecked(True)
         root.addWidget(self._terminate_check)
 
         # ── Progress ──────────────────────────────────────────
