@@ -86,7 +86,7 @@ def test_ddls_in_declared_order():
 
 
 def test_authorization_ddl_has_document_column():
-    """The Authorization DDL includes the [Document] TEXT(255)
-    column for storing the path/filename of the auth document."""
+    """The Authorization DDL includes the [Document] OLEOBJECT
+    column for storing the embedded PDF/DOC bytes of the auth."""
     q = build._CREATE_AUTHORIZATION
-    assert "[Document] TEXT(255)" in q
+    assert "[Document] OLEOBJECT" in q

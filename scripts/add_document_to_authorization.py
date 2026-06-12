@@ -1,16 +1,24 @@
 """Add the [Document] column to the existing Authorization table.
 
 Each Authorization row corresponds to one signed authorization
-document; the [Document] column stores the file path or filename
-of the PDF/DOC that backs it. This script is the one-shot migration
-for an `.accdb` whose Authorization table predates that column.
+document; the [Document] column stores the PDF/DOC bytes that back
+it. This script is the one-shot migration for an `.accdb` whose
+Authorization table predates that column.
 
 Idempotent: if `[Document]` already exists on Authorization, the
 script prints "already exists" and exits 0. Safe to run repeatedly.
 
-The column is added as `TEXT(255)` and is nullable — existing rows
-stay valid and the operator fills the path in later via Access UI
-or a separate ingest workflow.
+The column is added as `OLEOBJECT` (reported as `LONGBINARY` by the
+ODBC catalog). In Access this shows as the legacy "OLE Object" type
+— right-click a cell, choose Insert Object → Create from File, then
+browse to the PDF. The bytes live inside the .accdb; double-click
+later to open with the registered handler.
+
+Why not the modern ATTACHMENT type? It's a DAO/COM-only feature
+that the Access ODBC driver rejects in `ALTER TABLE ... ADD COLUMN`
+statements ("Syntax error in field definition"). If you want
+multi-file attachments per row, add the field manually via the
+Access design view.
 """
 import argparse
 import os
@@ -18,7 +26,7 @@ import sys
 
 
 _ALTER_ADD_DOCUMENT = (
-    "ALTER TABLE [Authorization] ADD COLUMN [Document] TEXT(255)"
+    "ALTER TABLE [Authorization] ADD COLUMN [Document] OLEOBJECT"
 )
 
 
@@ -95,7 +103,7 @@ def main(argv=None):
         cur.execute(_ALTER_ADD_DOCUMENT)
         conn.commit()
         if not args.quiet:
-            print("  ADDED    Authorization.[Document]  TEXT(255)")
+            print("  ADDED    Authorization.[Document]  OLEOBJECT")
         print("Added: Authorization.[Document]")
     finally:
         conn.close()

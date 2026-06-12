@@ -19,7 +19,7 @@ def test_alter_statement_shape():
     q = migration._ALTER_ADD_DOCUMENT
     assert "ALTER TABLE [Authorization]" in q
     assert "ADD COLUMN [Document]" in q
-    assert "TEXT(255)" in q
+    assert "OLEOBJECT" in q
 
 
 def test_parse_args_quiet_default_off():
