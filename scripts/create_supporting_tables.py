@@ -44,10 +44,13 @@ _CREATE_AUTHORIZATION = (
     "[effective_end] DATETIME, "
     "[auth_days] TEXT(255), "
     "[notes] MEMO, "
-    "[Health Plan] TEXT(255), "
-    "[Document] OLEOBJECT"
+    "[Health Plan] TEXT(255)"
     ")"
 )
+
+# Note: the [Document] ATTACHMENT field is added by
+# scripts/add_document_to_authorization.py via DAO. ODBC can't
+# create ATTACHMENT fields, so they can't live in this DDL.
 
 _CREATE_ABSENCES = (
     "CREATE TABLE [Absences] ("

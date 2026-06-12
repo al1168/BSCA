@@ -1,69 +1,70 @@
-"""Add the [Document] column to the existing Authorization table.
+"""Add the [Document] field to the existing Authorization table as a
+native Access ATTACHMENT field (paperclip icon in Access UI).
 
-Each Authorization row corresponds to one signed authorization
-document; the [Document] column stores the PDF/DOC bytes that back
-it. This script is the one-shot migration for an `.accdb` whose
-Authorization table predates that column.
+Why DAO instead of ODBC: the Access ODBC driver and the ACE OLEDB
+provider both reject `ALTER TABLE … ADD COLUMN [Document] ATTACHMENT`
+with "Syntax error in field definition." The ATTACHMENT data type
+is a DAO-only feature. We instantiate the DAO.DBEngine.120 COM
+component (part of the Access Database Engine that's already
+installed on any machine running this tool) and use
+TableDef.CreateField(name, dbAttachment) → Fields.Append.
 
 Idempotent: if `[Document]` already exists on Authorization, the
 script prints "already exists" and exits 0. Safe to run repeatedly.
 
-The column is added as `OLEOBJECT` (reported as `LONGBINARY` by the
-ODBC catalog). In Access this shows as the legacy "OLE Object" type
-— right-click a cell, choose Insert Object → Create from File, then
-browse to the PDF. The bytes live inside the .accdb; double-click
-later to open with the registered handler.
-
-Why not the modern ATTACHMENT type? It's a DAO/COM-only feature
-that the Access ODBC driver rejects in `ALTER TABLE ... ADD COLUMN`
-statements ("Syntax error in field definition"). If you want
-multi-file attachments per row, add the field manually via the
-Access design view.
+Requires: `pywin32` (for `win32com.client.Dispatch`) and the
+Microsoft Access Database Engine on the host (provided by Access
+itself or by the Microsoft Access Database Engine Redistributable).
 """
 import argparse
 import os
 import sys
 
 
-_ALTER_ADD_DOCUMENT = (
-    "ALTER TABLE [Authorization] ADD COLUMN [Document] OLEOBJECT"
-)
+# DAO Field Type constant for the ATTACHMENT type. From the Access
+# DAO enum DataTypeEnum.dbAttachment.
+DAO_ATTACHMENT = 101
 
 
-def _build_connection_string(db_path):
-    return (
-        "DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};"
-        f"DBQ={db_path};"
-    )
-
-
-def _column_exists(cursor, table, column):
-    """Return True if `column` exists on `table`.
-
-    Uses the pyodbc columns() metadata accessor — Access exposes
-    column metadata through ODBC. Matches column names
-    case-insensitively because Access is case-insensitive on
-    identifiers."""
+def _open_database(db_path: str):
+    """Open `db_path` via DAO.DBEngine.120 and return the Database
+    COM object. Raises RuntimeError with a friendly message if
+    pywin32 or the DAO engine isn't available."""
     try:
-        rows = cursor.columns(table=table).fetchall()
-        target = column.lower()
-        return any(r.column_name.lower() == target for r in rows)
-    except Exception:
-        # Fallback: try to SELECT the column. If it raises, the column
-        # is absent (or the table is) — both are "treat as absent".
-        try:
-            cursor.execute(f"SELECT TOP 0 [{column}] FROM [{table}]")
+        import win32com.client
+    except ImportError as exc:
+        raise RuntimeError(
+            "pywin32 is not installed. Install it with "
+            "`pip install pywin32` or rebuild this exe with pywin32 "
+            f"bundled. Original error: {exc}"
+        )
+    try:
+        engine = win32com.client.Dispatch("DAO.DBEngine.120")
+    except Exception as exc:
+        raise RuntimeError(
+            "Could not create DAO.DBEngine.120. The Microsoft Access "
+            "Database Engine must be installed (it comes with Access; "
+            "the Microsoft Access Database Engine Redistributable can "
+            f"install it standalone). Original error: {exc}"
+        )
+    return engine.OpenDatabase(db_path)
+
+
+def _field_exists(table_def, field_name: str) -> bool:
+    """Case-insensitive check for a field by name on a DAO TableDef."""
+    target = field_name.lower()
+    for fld in table_def.Fields:
+        if fld.Name.lower() == target:
             return True
-        except Exception:
-            return False
+    return False
 
 
 def _parse_args(argv):
     p = argparse.ArgumentParser(
         description=(
-            "Add the [Document] column to Authorization in an "
-            "existing BSCA .accdb. The column stores the file path "
-            "or filename of the PDF/DOC document backing the auth."
+            "Add the [Document] field to Authorization as a native "
+            "Access ATTACHMENT (paperclip) field. Uses DAO via "
+            "pywin32 because ODBC can't create ATTACHMENT fields."
         ),
     )
     p.add_argument("--db", required=True,
@@ -78,35 +79,27 @@ def main(argv=None):
     if not os.path.exists(args.db):
         print(f"ERROR: database not found: {args.db}", file=sys.stderr)
         return 2
-
-    import pyodbc
     try:
-        conn = pyodbc.connect(_build_connection_string(args.db))
-    except pyodbc.Error as exc:
-        print(
-            "ERROR: could not open the Access database. Verify the "
-            "Microsoft Access ODBC driver is installed and its "
-            "bitness matches this Python interpreter. "
-            f"Original error: {exc}",
-            file=sys.stderr,
-        )
+        db = _open_database(args.db)
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
     try:
-        cur = conn.cursor()
-        if _column_exists(cur, "Authorization", "Document"):
+        table_def = db.TableDefs("Authorization")
+        if _field_exists(table_def, "Document"):
             print(
                 "[Document] already exists on Authorization; "
                 "nothing to do."
             )
             return 0
-        cur.execute(_ALTER_ADD_DOCUMENT)
-        conn.commit()
+        field = table_def.CreateField("Document", DAO_ATTACHMENT)
+        table_def.Fields.Append(field)
         if not args.quiet:
-            print("  ADDED    Authorization.[Document]  OLEOBJECT")
+            print("  ADDED    Authorization.[Document]  ATTACHMENT")
         print("Added: Authorization.[Document]")
     finally:
-        conn.close()
+        db.Close()
     return 0
 
 

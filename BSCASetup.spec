@@ -11,6 +11,11 @@ a = Analysis(
         'pyodbc',
         'openpyxl',
         'requests',
+        # pywin32 — needed by add_document_to_authorization.py which
+        # uses DAO via COM to create the native ATTACHMENT field
+        # (ODBC can't create ATTACHMENT fields).
+        'win32com.client',
+        'pywintypes',
         # Setup-script modules — loaded via importlib.import_module()
         # in setup_gui/setup_worker.py, so PyInstaller's static analysis
         # doesn't see them. Bundle them explicitly.

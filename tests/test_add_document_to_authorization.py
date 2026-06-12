@@ -1,6 +1,6 @@
 import sys
 from pathlib import Path
-from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -9,17 +9,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from scripts import add_document_to_authorization as migration
 
 
-def test_build_connection_string():
-    cs = migration._build_connection_string(r"C:\data\file.accdb")
-    assert "Microsoft Access Driver (*.mdb, *.accdb)" in cs
-    assert r"DBQ=C:\data\file.accdb" in cs
-
-
-def test_alter_statement_shape():
-    q = migration._ALTER_ADD_DOCUMENT
-    assert "ALTER TABLE [Authorization]" in q
-    assert "ADD COLUMN [Document]" in q
-    assert "OLEOBJECT" in q
+def test_dao_attachment_constant():
+    """dbAttachment = 101 — the DAO Field.Type value for the native
+    Access ATTACHMENT type."""
+    assert migration.DAO_ATTACHMENT == 101
 
 
 def test_parse_args_quiet_default_off():
@@ -40,86 +33,91 @@ def test_main_missing_db_returns_2(tmp_path, capsys):
     assert "database not found" in capsys.readouterr().err.lower()
 
 
-class _FakeCursor:
-    """Cursor with mockable columns() / execute() / no fetch state needed."""
-    def __init__(self, existing_columns):
-        self._existing = list(existing_columns)
-        self.executed = []
-
-    def columns(self, table):
-        rows = [
-            SimpleNamespace(column_name=name)
-            for name in self._existing
-        ]
-        return SimpleNamespace(fetchall=lambda: rows)
-
-    def execute(self, sql, *params):
-        self.executed.append((sql, params))
-        return self
+def _make_table_def(field_names):
+    """Build a MagicMock TableDef whose Fields iteration yields
+    MagicMocks with a `.Name` attribute, and whose `CreateField` /
+    `Fields.Append` calls are inspectable. `side_effect` returns a
+    fresh iterator each time so multiple iterations work."""
+    fields = []
+    for name in field_names:
+        f = MagicMock()
+        f.Name = name
+        fields.append(f)
+    td = MagicMock()
+    td.Fields.__iter__.side_effect = lambda: iter(fields)
+    return td
 
 
-def test_column_exists_true_case_insensitive():
-    cur = _FakeCursor(
-        existing_columns=["Center ID", "auth_days", "Document"],
-    )
-    assert migration._column_exists(
-        cur, "Authorization", "Document",
-    ) is True
-    # Case-insensitive lookup.
-    assert migration._column_exists(
-        cur, "Authorization", "document",
-    ) is True
+def test_field_exists_case_insensitive():
+    td = _make_table_def(["Center ID", "auth_days", "Document"])
+    assert migration._field_exists(td, "Document") is True
+    assert migration._field_exists(td, "document") is True
 
 
-def test_column_exists_false_when_absent():
-    cur = _FakeCursor(
-        existing_columns=["Center ID", "auth_days", "Health Plan"],
-    )
-    assert migration._column_exists(
-        cur, "Authorization", "Document",
-    ) is False
+def test_field_exists_returns_false_when_absent():
+    td = _make_table_def(["Center ID", "auth_days", "Health Plan"])
+    assert migration._field_exists(td, "Document") is False
 
 
-class _FakeConn:
-    def __init__(self, existing_columns):
-        self._cursor = _FakeCursor(existing_columns)
-        self.committed = False
+def test_main_skips_when_field_already_exists(tmp_path, capsys, monkeypatch):
+    """If [Document] is already on the table, no CreateField / Append
+    happens and the script reports 'already exists'."""
+    td = _make_table_def(["Center ID", "Document"])
+    db = MagicMock()
+    db.TableDefs.return_value = td
 
-    def cursor(self):
-        return self._cursor
+    monkeypatch.setattr(migration, "_open_database", lambda path: db)
 
-    def commit(self):
-        self.committed = True
-
-    def close(self):
-        pass
-
-
-def test_main_skips_when_column_already_exists(tmp_path, capsys, monkeypatch):
-    fake_conn = _FakeConn(existing_columns=["Center ID", "Document"])
-    monkeypatch.setattr("pyodbc.connect", lambda cs: fake_conn)
     db_file = tmp_path / "test.accdb"
     db_file.touch()
 
     rc = migration.main(["--db", str(db_file)])
     assert rc == 0
-    assert fake_conn._cursor.executed == []  # no ALTER
-    assert fake_conn.committed is False
+    td.CreateField.assert_not_called()
+    td.Fields.Append.assert_not_called()
+    db.Close.assert_called_once()
     out = capsys.readouterr().out
     assert "already exists" in out.lower()
 
 
-def test_main_adds_column_when_absent(tmp_path, capsys, monkeypatch):
-    fake_conn = _FakeConn(existing_columns=["Center ID", "auth_days"])
-    monkeypatch.setattr("pyodbc.connect", lambda cs: fake_conn)
+def test_main_adds_attachment_field_when_absent(
+    tmp_path, capsys, monkeypatch,
+):
+    """When [Document] is missing, the script calls CreateField with
+    DAO_ATTACHMENT and appends it."""
+    td = _make_table_def(["Center ID", "auth_days"])
+    created_field = MagicMock()
+    td.CreateField.return_value = created_field
+    db = MagicMock()
+    db.TableDefs.return_value = td
+
+    monkeypatch.setattr(migration, "_open_database", lambda path: db)
+
     db_file = tmp_path / "test.accdb"
     db_file.touch()
 
     rc = migration.main(["--db", str(db_file)])
     assert rc == 0
-    # Exactly one ALTER was executed.
-    executed_sqls = [sql for sql, _ in fake_conn._cursor.executed]
-    assert executed_sqls == [migration._ALTER_ADD_DOCUMENT]
-    assert fake_conn.committed is True
+    td.CreateField.assert_called_once_with(
+        "Document", migration.DAO_ATTACHMENT,
+    )
+    td.Fields.Append.assert_called_once_with(created_field)
+    db.Close.assert_called_once()
     out = capsys.readouterr().out
     assert "Added: Authorization.[Document]" in out
+
+
+def test_main_surfaces_dao_open_error(tmp_path, capsys, monkeypatch):
+    """If _open_database raises (e.g. pywin32 missing, DAO engine not
+    installed), main returns 2 with a clear stderr message."""
+    def boom(path):
+        raise RuntimeError("DAO engine not registered")
+    monkeypatch.setattr(migration, "_open_database", boom)
+
+    db_file = tmp_path / "test.accdb"
+    db_file.touch()
+
+    rc = migration.main(["--db", str(db_file)])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "DAO engine not registered" in err

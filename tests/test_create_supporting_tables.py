@@ -85,8 +85,10 @@ def test_ddls_in_declared_order():
     ]
 
 
-def test_authorization_ddl_has_document_column():
-    """The Authorization DDL includes the [Document] OLEOBJECT
-    column for storing the embedded PDF/DOC bytes of the auth."""
+def test_authorization_ddl_omits_document_column():
+    """The [Document] field is added separately by
+    scripts/add_document_to_authorization.py via DAO. ODBC can't
+    create ATTACHMENT fields, so it must NOT appear in this DDL."""
     q = build._CREATE_AUTHORIZATION
-    assert "[Document] OLEOBJECT" in q
+    assert "[Document]" not in q
+    assert "ATTACHMENT" not in q.upper()
