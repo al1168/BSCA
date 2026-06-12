@@ -85,8 +85,8 @@ def test_ddls_in_declared_order():
     ]
 
 
-def test_authorization_ddl_has_attachment_column():
-    """The Authorization DDL includes the [Attachment] TEXT(255)
+def test_authorization_ddl_has_document_column():
+    """The Authorization DDL includes the [Document] TEXT(255)
     column for storing the path/filename of the auth document."""
     q = build._CREATE_AUTHORIZATION
-    assert "[Attachment] TEXT(255)" in q
+    assert "[Document] TEXT(255)" in q

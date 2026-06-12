@@ -17,7 +17,7 @@ a = Analysis(
         'scripts',
         'scripts.create_supporting_tables',
         'scripts.add_long_lat_to_contacts',
-        'scripts.add_attachment_to_authorization',
+        'scripts.add_document_to_authorization',
         'scripts.backfill_enrollment_from_contacts',
         'scripts.backfill_authorization_from_contacts',
         'scripts.backfill_availability_from_hha',

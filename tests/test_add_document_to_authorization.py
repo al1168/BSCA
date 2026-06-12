@@ -6,7 +6,7 @@ import pytest
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scripts import add_attachment_to_authorization as migration
+from scripts import add_document_to_authorization as migration
 
 
 def test_build_connection_string():
@@ -16,9 +16,9 @@ def test_build_connection_string():
 
 
 def test_alter_statement_shape():
-    q = migration._ALTER_ADD_ATTACHMENT
+    q = migration._ALTER_ADD_DOCUMENT
     assert "ALTER TABLE [Authorization]" in q
-    assert "ADD COLUMN [Attachment]" in q
+    assert "ADD COLUMN [Document]" in q
     assert "TEXT(255)" in q
 
 
@@ -60,14 +60,14 @@ class _FakeCursor:
 
 def test_column_exists_true_case_insensitive():
     cur = _FakeCursor(
-        existing_columns=["Center ID", "auth_days", "Attachment"],
+        existing_columns=["Center ID", "auth_days", "Document"],
     )
     assert migration._column_exists(
-        cur, "Authorization", "Attachment",
+        cur, "Authorization", "Document",
     ) is True
     # Case-insensitive lookup.
     assert migration._column_exists(
-        cur, "Authorization", "attachment",
+        cur, "Authorization", "document",
     ) is True
 
 
@@ -76,7 +76,7 @@ def test_column_exists_false_when_absent():
         existing_columns=["Center ID", "auth_days", "Health Plan"],
     )
     assert migration._column_exists(
-        cur, "Authorization", "Attachment",
+        cur, "Authorization", "Document",
     ) is False
 
 
@@ -96,7 +96,7 @@ class _FakeConn:
 
 
 def test_main_skips_when_column_already_exists(tmp_path, capsys, monkeypatch):
-    fake_conn = _FakeConn(existing_columns=["Center ID", "Attachment"])
+    fake_conn = _FakeConn(existing_columns=["Center ID", "Document"])
     monkeypatch.setattr("pyodbc.connect", lambda cs: fake_conn)
     db_file = tmp_path / "test.accdb"
     db_file.touch()
@@ -119,7 +119,7 @@ def test_main_adds_column_when_absent(tmp_path, capsys, monkeypatch):
     assert rc == 0
     # Exactly one ALTER was executed.
     executed_sqls = [sql for sql, _ in fake_conn._cursor.executed]
-    assert executed_sqls == [migration._ALTER_ADD_ATTACHMENT]
+    assert executed_sqls == [migration._ALTER_ADD_DOCUMENT]
     assert fake_conn.committed is True
     out = capsys.readouterr().out
-    assert "Added: Authorization.[Attachment]" in out
+    assert "Added: Authorization.[Document]" in out

@@ -65,7 +65,7 @@ def test_setup_steps_constant_lists_seven_scripts():
     assert names == [
         "create_supporting_tables",
         "add_long_lat_to_contacts",
-        "add_attachment_to_authorization",
+        "add_document_to_authorization",
         "backfill_enrollment_from_contacts",
         "backfill_authorization_from_contacts",
         "backfill_availability_from_hha",
@@ -168,7 +168,7 @@ def test_mid_chain_failure_stops_remaining_steps(tmp_path, monkeypatch):
     success, payload = _run_to_completion(worker)
 
     assert success is False
-    assert payload["step"] == "add_attachment_to_authorization"
+    assert payload["step"] == "add_document_to_authorization"
     assert "backup" in payload  # the backup path is still surfaced
     # Steps 1-3 ran; steps 4-7 did not.
     mocks[0].assert_called_once()

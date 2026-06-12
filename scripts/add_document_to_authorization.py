@@ -1,11 +1,11 @@
-"""Add the [Attachment] column to the existing Authorization table.
+"""Add the [Document] column to the existing Authorization table.
 
 Each Authorization row corresponds to one signed authorization
-document; the [Attachment] column stores the file path or filename
+document; the [Document] column stores the file path or filename
 of the PDF/DOC that backs it. This script is the one-shot migration
 for an `.accdb` whose Authorization table predates that column.
 
-Idempotent: if `[Attachment]` already exists on Authorization, the
+Idempotent: if `[Document]` already exists on Authorization, the
 script prints "already exists" and exits 0. Safe to run repeatedly.
 
 The column is added as `TEXT(255)` and is nullable — existing rows
@@ -17,8 +17,8 @@ import os
 import sys
 
 
-_ALTER_ADD_ATTACHMENT = (
-    "ALTER TABLE [Authorization] ADD COLUMN [Attachment] TEXT(255)"
+_ALTER_ADD_DOCUMENT = (
+    "ALTER TABLE [Authorization] ADD COLUMN [Document] TEXT(255)"
 )
 
 
@@ -53,8 +53,9 @@ def _column_exists(cursor, table, column):
 def _parse_args(argv):
     p = argparse.ArgumentParser(
         description=(
-            "Add the [Attachment] column to Authorization in an "
-            "existing BSCA .accdb."
+            "Add the [Document] column to Authorization in an "
+            "existing BSCA .accdb. The column stores the file path "
+            "or filename of the PDF/DOC document backing the auth."
         ),
     )
     p.add_argument("--db", required=True,
@@ -85,17 +86,17 @@ def main(argv=None):
 
     try:
         cur = conn.cursor()
-        if _column_exists(cur, "Authorization", "Attachment"):
+        if _column_exists(cur, "Authorization", "Document"):
             print(
-                "[Attachment] already exists on Authorization; "
+                "[Document] already exists on Authorization; "
                 "nothing to do."
             )
             return 0
-        cur.execute(_ALTER_ADD_ATTACHMENT)
+        cur.execute(_ALTER_ADD_DOCUMENT)
         conn.commit()
         if not args.quiet:
-            print("  ADDED    Authorization.[Attachment]  TEXT(255)")
-        print("Added: Authorization.[Attachment]")
+            print("  ADDED    Authorization.[Document]  TEXT(255)")
+        print("Added: Authorization.[Document]")
     finally:
         conn.close()
     return 0
