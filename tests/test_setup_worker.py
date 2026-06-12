@@ -57,14 +57,15 @@ def _stub_all_scripts(monkeypatch, return_code=0):
     return mocks
 
 
-def test_setup_steps_constant_lists_six_scripts():
+def test_setup_steps_constant_lists_seven_scripts():
     """The SETUP_STEPS constant is the canonical list of (display_name,
-    module_path) tuples for the 6 setup scripts in execution order."""
-    assert len(SETUP_STEPS) == 6
+    module_path) tuples for the 7 setup scripts in execution order."""
+    assert len(SETUP_STEPS) == 7
     names = [name for name, _path in SETUP_STEPS]
     assert names == [
         "create_supporting_tables",
         "add_long_lat_to_contacts",
+        "add_attachment_to_authorization",
         "backfill_enrollment_from_contacts",
         "backfill_authorization_from_contacts",
         "backfill_availability_from_hha",
@@ -76,7 +77,7 @@ def test_setup_steps_constant_lists_six_scripts():
 
 
 def test_happy_path_runs_all_scripts_in_order(tmp_path, monkeypatch):
-    """Backup succeeds, all 6 scripts return 0 — finished(True, ...)."""
+    """Backup succeeds, all 7 scripts return 0 — finished(True, ...)."""
     db_path = tmp_path / "members.accdb"
     db_path.write_bytes(b"fake-db-contents")
 
@@ -99,7 +100,7 @@ def test_happy_path_runs_all_scripts_in_order(tmp_path, monkeypatch):
         mock.assert_called_once_with(["--db", str(db_path)])
     # Progress fires after each successful step.
     assert progress_events == [
-        (1, 6), (2, 6), (3, 6), (4, 6), (5, 6), (6, 6),
+        (1, 7), (2, 7), (3, 7), (4, 7), (5, 7), (6, 7), (7, 7),
     ]
     # Backup file actually created on disk.
     assert Path(payload["backup"]).exists()
@@ -167,14 +168,16 @@ def test_mid_chain_failure_stops_remaining_steps(tmp_path, monkeypatch):
     success, payload = _run_to_completion(worker)
 
     assert success is False
-    assert payload["step"] == "backfill_enrollment_from_contacts"
+    assert payload["step"] == "add_attachment_to_authorization"
     assert "backup" in payload  # the backup path is still surfaced
-    # Steps 1-3 ran; steps 4-5 did not.
+    # Steps 1-3 ran; steps 4-7 did not.
     mocks[0].assert_called_once()
     mocks[1].assert_called_once()
     mocks[2].assert_called_once()
     mocks[3].assert_not_called()
     mocks[4].assert_not_called()
+    mocks[5].assert_not_called()
+    mocks[6].assert_not_called()
 
 
 def test_exception_in_script_main_is_caught(tmp_path, monkeypatch):
@@ -238,8 +241,8 @@ def test_script_stdout_streamed_through_log_line_signal(
 
 def test_default_does_not_run_terminate_step(tmp_path, monkeypatch):
     """`also_terminate=False` (the default) skips terminate_long_id
-    entirely: 6 progress events, terminate's main() is never called,
-    payload reports total_steps=6."""
+    entirely: 7 progress events, terminate's main() is never called,
+    payload reports total_steps=7."""
     db_path = tmp_path / "members.accdb"
     db_path.write_bytes(b"fake")
 
@@ -254,17 +257,17 @@ def test_default_does_not_run_terminate_step(tmp_path, monkeypatch):
     success, payload = _run_to_completion(worker)
 
     assert success is True
-    assert payload["total_steps"] == 6
+    assert payload["total_steps"] == 7
     assert progress_events == [
-        (1, 6), (2, 6), (3, 6), (4, 6), (5, 6), (6, 6),
+        (1, 7), (2, 7), (3, 7), (4, 7), (5, 7), (6, 7), (7, 7),
     ]
     terminate_mock.assert_not_called()
 
 
-def test_also_terminate_runs_seven_steps(tmp_path, monkeypatch):
-    """`also_terminate=True` appends terminate_long_id as step 7: 7
-    progress events ending in (7, 7); terminate is called with the
-    same --db argv; payload reports total_steps=7."""
+def test_also_terminate_runs_eight_steps(tmp_path, monkeypatch):
+    """`also_terminate=True` appends terminate_long_id as step 8: 8
+    progress events ending in (8, 8); terminate is called with the
+    same --db argv; payload reports total_steps=8."""
     db_path = tmp_path / "members.accdb"
     db_path.write_bytes(b"fake")
 
@@ -279,8 +282,9 @@ def test_also_terminate_runs_seven_steps(tmp_path, monkeypatch):
     success, payload = _run_to_completion(worker)
 
     assert success is True
-    assert payload["total_steps"] == 7
+    assert payload["total_steps"] == 8
     assert progress_events == [
-        (1, 7), (2, 7), (3, 7), (4, 7), (5, 7), (6, 7), (7, 7),
+        (1, 8), (2, 8), (3, 8), (4, 8), (5, 8),
+        (6, 8), (7, 8), (8, 8),
     ]
     terminate_mock.assert_called_once_with(["--db", str(db_path)])

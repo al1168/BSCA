@@ -44,7 +44,8 @@ _CREATE_AUTHORIZATION = (
     "[effective_end] DATETIME, "
     "[auth_days] TEXT(255), "
     "[notes] MEMO, "
-    "[Health Plan] TEXT(255)"
+    "[Health Plan] TEXT(255), "
+    "[Attachment] TEXT(255)"
     ")"
 )
 
