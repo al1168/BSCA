@@ -92,3 +92,10 @@ def test_authorization_ddl_omits_document_column():
     q = build._CREATE_AUTHORIZATION
     assert "[Document]" not in q
     assert "ATTACHMENT" not in q.upper()
+
+
+def test_authorization_ddl_has_created_at_column():
+    """The Authorization DDL includes [created_at] DATETIME for
+    timestamping inserts."""
+    q = build._CREATE_AUTHORIZATION
+    assert "[created_at] DATETIME" in q

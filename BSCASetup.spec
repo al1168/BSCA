@@ -23,6 +23,7 @@ a = Analysis(
         'scripts.create_supporting_tables',
         'scripts.add_long_lat_to_contacts',
         'scripts.add_document_to_authorization',
+        'scripts.add_created_at_to_authorization',
         'scripts.change_dob_to_date_in_contacts',
         'scripts.backfill_enrollment_from_contacts',
         'scripts.backfill_authorization_from_contacts',

@@ -45,8 +45,9 @@ _AUTH_UPDATE_HEALTH_PLAN = (
 _AUTH_INSERT = (
     "INSERT INTO [Authorization] "
     "([Center ID], [auth_start], [auth_end], "
-    "[effective_start], [effective_end], [auth_days], [Health Plan]) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?)"
+    "[effective_start], [effective_end], [auth_days], "
+    "[Health Plan], [created_at]) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
 )
 
 _CSV_COLUMNS = [
@@ -222,6 +223,7 @@ def _process_insert_branch(cur, center_id, sadc, auth_bgn, auth_exp,
         bgn, exp,
         auth_days_str,
         str(health_plan).strip(),
+        datetime.datetime.now(),
     )
     stats["inserted_members"] += 1
     return ("inserted", None)
