@@ -19,13 +19,23 @@ def test_travel_error_carries_stage_and_reason():
 @pytest.mark.parametrize(
     "text,expected",
     [
-        ("40.7165774,-73.9954078", (40.7165774, -73.9954078)),
-        (" 40.7 , -73.9 ", (40.7, -73.9)),
+        # Stored as 'longitude,latitude' (matching the [Long Lat]
+        # column name); returned as (lat, long).
+        ("-73.9954078,40.7165774", (40.7165774, -73.9954078)),
+        (" -73.9 , 40.7 ", (40.7, -73.9)),
         ("", None),
         (None, None),
         ("abc", None),
         ("1", None),
         ("1,2,3", None),
+        # Out-of-range latitude (>90).
+        ("-73.9,95", None),
+        # Out-of-range longitude (>180).
+        ("200,40.7", None),
+        # Note: when both swapped values happen to fall in their
+        # respective valid ranges (e.g. NYC where |lng|<90 and
+        # |lat|<180), the guard cannot detect the swap — relies on
+        # data being stored correctly in 'long,lat' order.
     ],
 )
 def test_parse_long_lat(text, expected):
@@ -213,7 +223,10 @@ def test_resolve_uses_db_long_lat_no_geocode(monkeypatch):
         lambda origin, dest, key: 9,
     )
     cache = {}
-    member = {"long_lat": "40.5,-73.5", "address": "ignored"}
+    # Stored as 'long,lat' (matching the column name); the parser
+    # returns (lat, lng) → (40.5, -73.5), which is what the route
+    # cache key is built from.
+    member = {"long_lat": "-73.5,40.5", "address": "ignored"}
     assert travel.resolve_travel_minutes(member, "K", cache) == 9
     assert cache["route"]["40.5,-73.5"] == 9
 
@@ -254,7 +267,9 @@ def test_resolve_route_cache_hit_no_route_call(monkeypatch):
         raise AssertionError("compute_route_minutes should not run")
     monkeypatch.setattr(travel, "compute_route_minutes", fail_route)
     cache = {"route": {"40.5,-73.5": 11}}
-    member = {"long_lat": "40.5,-73.5", "address": None}
+    # Stored as 'long,lat'; parsed to (lat=40.5, lng=-73.5); cache key
+    # is round-formatted as '40.5,-73.5'.
+    member = {"long_lat": "-73.5,40.5", "address": None}
     assert travel.resolve_travel_minutes(member, "K", cache) == 11
 
 

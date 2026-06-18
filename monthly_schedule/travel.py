@@ -29,15 +29,29 @@ class TravelError(Exception):
 
 
 def parse_long_lat(text):
-    """Parse a 'lat,long' string into a (lat, long) float tuple, or
-    None if absent/blank/malformed."""
+    """Parse a 'long,lat' string (matching the Contacts.[Long Lat]
+    column name — longitude first, then latitude) and return a
+    (lat, long) tuple suitable for the geocoding/routes APIs.
+
+    Returns None for absent, blank, malformed input, or values that
+    are out of valid geographic range (lat outside [-90, 90] or
+    long outside [-180, 180]). The range guard prevents silently
+    sending nonsense to Google's Routes API (which then returns
+    "no routes returned" — see members.[Long Lat] values entered in
+    'lat,long' order by mistake)."""
     if not text:
         return None
     try:
-        lat_str, long_str = str(text).split(",")
-        return (float(lat_str), float(long_str))
+        long_str, lat_str = str(text).split(",")
+        lat = float(lat_str)
+        lng = float(long_str)
     except (ValueError, AttributeError):
         return None
+    if not (-90.0 <= lat <= 90.0):
+        return None
+    if not (-180.0 <= lng <= 180.0):
+        return None
+    return (lat, lng)
 
 
 def normalize_address(text):

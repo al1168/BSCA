@@ -88,7 +88,8 @@ def _seed_member(conn, center_id: int, last: str, first: str,
                  long_lat: str | None = None) -> None:
     """Insert one Contacts row with only the columns the scheduler reads.
     Contacts.[Center ID] is DOUBLE in Access; pyodbc widens int → float.
-    Pass `long_lat` as "lat,long" to bypass geocoding (e.g. for test seeds)."""
+    Pass `long_lat` as "long,lat" (matching the column name) to bypass
+    geocoding (e.g. for test seeds)."""
     cur = conn.cursor()
     if long_lat is not None:
         cur.execute(
@@ -420,7 +421,7 @@ def _seed_one_off_conflict(conn, today: date) -> None:
     # The route entry for this coordinate must be pre-seeded in the geo
     # cache the test passes via --geo-cache (see test_smoke.py).
     _seed_member(conn, cid, "Conflict", "Sample",
-                 long_lat="40.71280,-74.00600")
+                 long_lat="-74.00600,40.71280")
 
     cur = conn.cursor()
     cur.execute(

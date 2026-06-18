@@ -62,7 +62,8 @@ def test_one_off_conflict_writes_skipped_csv(tmp_path):
     # must be unexpired so _purge_expired (called in load_cache) does not
     # evict the pre-seeded entry before the route lookup occurs.
     # Pre-seed the geo cache so the CLI never calls the Google APIs.
-    # The test member is seeded with Long Lat "40.71280,-74.00600"; the
+    # The test member is seeded with Long Lat "-74.00600,40.71280"
+    # (column-name order: long,lat); parser returns (lat, lng) so the
     # route cache key is round(lat,5),round(lng,5) = "40.7128,-74.006".
     geo_cache_path = tmp_path / "geo_cache.json"
     _far_future = time.time() + 7 * 24 * 3600  # within the 1-week TTL
