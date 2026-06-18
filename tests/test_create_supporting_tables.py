@@ -99,3 +99,10 @@ def test_authorization_ddl_has_created_at_column():
     timestamping inserts."""
     q = build._CREATE_AUTHORIZATION
     assert "[created_at] DATETIME" in q
+
+
+def test_authorization_ddl_has_member_id_column():
+    """The Authorization DDL includes [Member ID] TEXT(255) — the
+    external Medicaid-style ID copied from Contacts."""
+    q = build._CREATE_AUTHORIZATION
+    assert "[Member ID] TEXT(255)" in q

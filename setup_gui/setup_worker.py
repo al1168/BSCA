@@ -35,6 +35,8 @@ SETUP_STEPS: list[tuple[str, str]] = [
      "scripts.add_document_to_authorization"),
     ("add_created_at_to_authorization",
      "scripts.add_created_at_to_authorization"),
+    ("add_member_id_to_authorization",
+     "scripts.add_member_id_to_authorization"),
     ("change_dob_to_date_in_contacts",
      "scripts.change_dob_to_date_in_contacts"),
     ("backfill_enrollment_from_contacts",

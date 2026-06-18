@@ -28,7 +28,7 @@ from monthly_schedule.auth_days import (  # noqa: E402
 
 _CONTACTS_QUERY = (
     "SELECT [Center ID], [Last Name], [First Name], [Health Plan], "
-    "[SADC], [Auth BGN], [Auth EXP] "
+    "[SADC], [Auth BGN], [Auth EXP], [Member ID] "
     "FROM [Contacts] "
     "ORDER BY [Center ID]"
 )
@@ -46,8 +46,8 @@ _AUTH_INSERT = (
     "INSERT INTO [Authorization] "
     "([Center ID], [auth_start], [auth_end], "
     "[effective_start], [effective_end], [auth_days], "
-    "[Health Plan], [created_at]) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    "[Health Plan], [Member ID], [created_at]) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 
 _CSV_COLUMNS = [
@@ -142,10 +142,10 @@ def _read_contacts(conn):
     cur = conn.cursor()
     cur.execute(_CONTACTS_QUERY)
     for row in cur.fetchall():
-        cid, last, first, plan, sadc, bgn, exp = row
+        cid, last, first, plan, sadc, bgn, exp, member_id = row
         if cid is None:
             continue
-        yield (int(cid), last, first, plan, sadc, bgn, exp)
+        yield (int(cid), last, first, plan, sadc, bgn, exp, member_id)
 
 
 def _write_skipped_csv(rows, out_dir, today):
@@ -194,8 +194,12 @@ def _process_update_branch(cur, center_id, health_plan, stats):
 
 
 def _process_insert_branch(cur, center_id, sadc, auth_bgn, auth_exp,
-                           health_plan, stats):
+                           health_plan, stats, member_id=None):
     """Insert one Authorization row from the legacy Contacts columns.
+
+    `member_id` is Contacts.[Member ID] — the external string ID. It
+    is allowed to be NULL/blank and is stored as-is (empty string or
+    NULL); not part of the "missing" sanity check.
 
     Returns one of:
       ("inserted", None)                 — row was inserted
@@ -216,6 +220,10 @@ def _process_insert_branch(cur, center_id, sadc, auth_bgn, auth_exp,
         missing.append("Health Plan")
     if missing:
         return ("skipped_missing", missing)
+    member_id_value = (
+        None if member_id is None or str(member_id).strip() == ""
+        else str(member_id).strip()
+    )
     cur.execute(
         _AUTH_INSERT,
         str(center_id),
@@ -223,6 +231,7 @@ def _process_insert_branch(cur, center_id, sadc, auth_bgn, auth_exp,
         bgn, exp,
         auth_days_str,
         str(health_plan).strip(),
+        member_id_value,
         datetime.datetime.now(),
     )
     stats["inserted_members"] += 1
@@ -261,7 +270,8 @@ def main(argv=None):
         }
         skipped_rows = []
 
-        for cid, last, first, plan, sadc, bgn, exp in _read_contacts(conn):
+        for (cid, last, first, plan, sadc, bgn, exp,
+                member_id) in _read_contacts(conn):
             stats["scanned"] += 1
 
             if args.exclude_test_members and _is_test_id(cid):
@@ -306,6 +316,7 @@ def main(argv=None):
                 # INSERT branch.
                 result, payload = _process_insert_branch(
                     cur, cid, sadc, bgn, exp, plan, stats,
+                    member_id=member_id,
                 )
                 if result == "inserted":
                     if not args.quiet:

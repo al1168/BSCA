@@ -54,10 +54,10 @@ def test_auth_insert_query_columns():
     assert "INSERT INTO [Authorization]" in q
     for col in ("[Center ID]", "[auth_start]", "[auth_end]",
                 "[effective_start]", "[effective_end]", "[auth_days]",
-                "[Health Plan]", "[created_at]"):
+                "[Health Plan]", "[Member ID]", "[created_at]"):
         assert col in q
-    # Eight values, no trailing commas, exactly eight `?` placeholders.
-    assert q.count("?") == 8
+    # Nine values, no trailing commas, exactly nine `?` placeholders.
+    assert q.count("?") == 9
 
 
 class FakeCursor:
@@ -197,13 +197,15 @@ def test_insert_branch_happy_path():
     assert len(inserts) == 1
     _, params = inserts[0]
     # ([Center ID], auth_start, auth_end, eff_start, eff_end,
-    #  auth_days, [Health Plan], created_at)
+    #  auth_days, [Health Plan], [Member ID], created_at)
     assert params[:7] == ("24010", bgn, exp, bgn, exp, "1,3,5", "HOF")
+    # Member ID defaults to None when not passed.
+    assert params[7] is None
     # created_at is set to "now" — assert it's a fresh datetime
     # rather than pinning to an exact value.
     import datetime as _dt_mod
-    assert isinstance(params[7], _dt_mod.datetime)
-    assert (_dt_mod.datetime.now() - params[7]).total_seconds() < 5
+    assert isinstance(params[8], _dt_mod.datetime)
+    assert (_dt_mod.datetime.now() - params[8]).total_seconds() < 5
     assert stats["inserted_members"] == 1
 
 
@@ -264,9 +266,10 @@ def test_insert_branch_parses_string_dates():
         "24010", _dt(2026, 1, 1), _dt(2026, 12, 31),
         _dt(2026, 1, 1), _dt(2026, 12, 31), "1,3,5", "HOF",
     )
+    assert params[7] is None  # member_id defaults to None
     # created_at is a fresh now-timestamp.
     import datetime as _dt_mod
-    assert isinstance(params[7], _dt_mod.datetime)
+    assert isinstance(params[8], _dt_mod.datetime)
 
 
 def test_insert_branch_unparseable_date_treated_as_missing():
@@ -339,8 +342,8 @@ def test_read_contacts_skips_null_center_id():
 
         def fetchall(self):
             return [
-                (None, "Skip", "Me", "HOF", "1,3,5", None, None),
-                (24010, "Real", "One", "HOF", "1,3,5", None, None),
+                (None, "Skip", "Me", "HOF", "1,3,5", None, None, None),
+                (24010, "Real", "One", "HOF", "1,3,5", None, None, "M-001"),
             ]
 
     conn = StubConn()
@@ -442,7 +445,7 @@ def test_exclude_test_members_skips_trailing_00_before_auth_lookup(
     tmp_path, capsys, monkeypatch
 ):
     # Contact with cid=12300 (ends in 00).
-    contacts_rows = [(12300, "Doe", "John", "HOF", "1,3,5", None, None)]
+    contacts_rows = [(12300, "Doe", "John", "HOF", "1,3,5", None, None, None)]
     fake_conn = _FakeConn(contacts_rows=contacts_rows)
     monkeypatch.setattr("pyodbc.connect", lambda cs: fake_conn)
 
