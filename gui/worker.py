@@ -18,10 +18,13 @@ from gui.i18n import tr
 from new_monthly_schedule import (
     Failure,
     REASON_NOT_FOUND,
+    collect_debug_rows,
+    debug_filename,
     parse_center_ids,
     process_member,
     resolve_output_dir,
     schedule_filename,
+    write_debug_csv,
     write_skipped_members_csv,
 )
 
@@ -44,6 +47,9 @@ class ScheduleWorker(QThread):
         db_path,
         google_api_key,
         geo_cache,
+        debug=False,
+        start_day=None,
+        end_day=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -58,6 +64,9 @@ class ScheduleWorker(QThread):
         self.db_path = db_path
         self.google_api_key = google_api_key
         self.geo_cache = geo_cache
+        self.debug = debug
+        self.start_day = start_day
+        self.end_day = end_day
 
     def _emit_error(self, text: str):
         self.finished.emit(False, {"error_text": text})
@@ -128,6 +137,7 @@ class ScheduleWorker(QThread):
 
         total = len(members) + len(failures)
         success = 0
+        debug_rows = []
 
         # Eager-fetch all four supporting tables once and index by
         # center_id. Replaces 4×N ODBC connections (the per-member
@@ -168,10 +178,18 @@ class ScheduleWorker(QThread):
                         os.makedirs(member_out_dir, exist_ok=True)
                 else:
                     member_out_dir = self.out_dir
+                if self.debug and not self.preview:
+                    debug_rows.extend(
+                        collect_debug_rows(
+                            member, ctx, self.year, self.month,
+                            self.start_day, self.end_day,
+                        )
+                    )
                 ok, stage, reason, day = process_member(
                     member, ctx,
                     self.year, self.month, member_out_dir,
                     self.preview, api_key, cache,
+                    start_day=self.start_day, end_day=self.end_day,
                 )
             except OneOffConflict as exc:
                 # process_member catches OneOffConflict internally and
@@ -224,6 +242,22 @@ class ScheduleWorker(QThread):
                     "worker.wrote_skipped_csv",
                     {"filename": os.path.basename(csv_path)},
                 )
+            # Same logic for the combined debug CSV when --debug is on:
+            # one roll-up at out_dir, covering all members in the run.
+            if self.debug:
+                debug_path = os.path.join(
+                    self.out_dir,
+                    debug_filename(
+                        self.year, self.month,
+                        self.start_day, self.end_day,
+                    ),
+                )
+                written = write_debug_csv(debug_rows, debug_path)
+                if written is not None:
+                    self.log_line.emit(
+                        "worker.wrote_debug_csv",
+                        {"filename": os.path.basename(written)},
+                    )
 
         payload = {
             "verb_key": "summary.verb.previewed" if self.preview else "summary.verb.wrote",

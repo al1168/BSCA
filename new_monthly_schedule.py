@@ -13,10 +13,11 @@ from monthly_schedule.db import (
     get_enrollments, get_authorizations, get_absences, get_availability,
     get_one_offs,
 )
+from monthly_schedule.month_dates import get_month_dates
 from monthly_schedule.eligibility_context import MemberContext
 from monthly_schedule.per_day import compute_month_failure, OneOffConflict
 from monthly_schedule.rules import get_rules_for_plan
-from monthly_schedule.rows import build_rows
+from monthly_schedule.rows import build_rows, build_debug_rows
 from monthly_schedule.workbook import build_workbook
 from monthly_schedule.travel import (
     load_cache,
@@ -44,9 +45,72 @@ def parse_center_ids(raw):
     return result
 
 
-def schedule_filename(center_id, year, month):
-    """Workbook filename for a member/month."""
-    return f"Schedule_{center_id}_{year:04d}-{month:02d}.xlsx"
+def _range_suffix(start_day, end_day):
+    """`_DD-DD` suffix appended to filenames when a custom day range
+    is in effect, or empty string when both bounds are None."""
+    if start_day is None and end_day is None:
+        return ""
+    lo = 1 if start_day is None else start_day
+    hi = end_day if end_day is not None else start_day
+    return f"_{lo:02d}-{hi:02d}"
+
+
+def schedule_filename(center_id, year, month,
+                       start_day=None, end_day=None):
+    """Workbook filename for a member/month. Appends `_DD-DD` when a
+    custom day range is supplied so partial-month files don't collide
+    with full-month files."""
+    suffix = _range_suffix(start_day, end_day)
+    return f"Schedule_{center_id}_{year:04d}-{month:02d}{suffix}.xlsx"
+
+
+def debug_filename(year, month, start_day=None, end_day=None):
+    """Single combined debug-CSV filename for the run (one row per
+    member-day across all scheduled members). Appends `_DD-DD` when a
+    custom range is supplied so the debug + schedule files match."""
+    suffix = _range_suffix(start_day, end_day)
+    return f"Debug_{year:04d}-{month:02d}{suffix}.csv"
+
+
+def write_debug_csv(rows, path):
+    """Write the combined per-day diagnostic rows for the whole run.
+
+    `rows` is a list of dicts with keys: center_id, name, date, day,
+    scheduled, reason. `scheduled` is rendered as 'yes'/'no' for
+    readability when opened in Excel. Returns the path written, or
+    None when `rows` is empty (file not created)."""
+    if not rows:
+        return None
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(
+            ["center_id", "name", "date", "day", "scheduled", "reason"]
+        )
+        for row in rows:
+            writer.writerow([
+                row["center_id"],
+                row["name"],
+                row["date"].isoformat(),
+                row["day"],
+                "yes" if row["scheduled"] else "no",
+                row["reason"],
+            ])
+    return path
+
+
+def collect_debug_rows(member, ctx, year, month,
+                       start_day=None, end_day=None):
+    """Build the run-level debug rows for one member: each row from
+    build_debug_rows annotated with center_id + 'Last, First' name."""
+    from monthly_schedule.rules import get_rules_for_plan
+    rules = dict(get_rules_for_plan(member["health_plan"]))
+    name = f"{member['last_name']}, {member['first_name']}"
+    return [
+        {"center_id": member["center_id"], "name": name, **r}
+        for r in build_debug_rows(
+            year, month, ctx, rules, start_day, end_day
+        )
+    ]
 
 
 def resolve_output_dir(base, plan_code, year, month):
@@ -126,16 +190,34 @@ def parse_args(argv):
     parser.add_argument("--api-key", required=True)
     parser.add_argument("--geo-cache", default=DEFAULT_GEO_CACHE)
     parser.add_argument("--preview-data", action="store_true")
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Also write a per-day diagnostic CSV next to each schedule.",
+    )
+    parser.add_argument(
+        "--start-day", type=int, default=None,
+        help="First day of the month to schedule (1..31). Defaults to 1.",
+    )
+    parser.add_argument(
+        "--end-day", type=int, default=None,
+        help=(
+            "Last day of the month to schedule (1..31). Defaults to the "
+            "last day of the month."
+        ),
+    )
     return parser.parse_args(argv)
 
 
 def process_member(member, ctx, year, month, out_dir, preview,
-                   api_key, cache):
+                   api_key, cache, start_day=None, end_day=None):
     """Run the per-member pipeline. Returns (ok, stage, reason, day).
     On success ok is True and stage/reason/day are None. On failure
     stage is one of 'eligibility'/'geocode'/'route'/'one_off_conflict'/
-    'generate'/'write' with the reason; day is set for one_off_conflict."""
-    failure = compute_month_failure(year, month, ctx)
+    'generate'/'write' with the reason; day is set for one_off_conflict.
+    When start_day/end_day are supplied, only the inclusive sub-range
+    of the month is scheduled."""
+    failure = compute_month_failure(year, month, ctx, start_day, end_day)
     if failure is not None:
         return (False, "eligibility", failure, None)
 
@@ -152,7 +234,9 @@ def process_member(member, ctx, year, month, out_dir, preview,
                                     travel_minutes + buf_hi)
         rules["dropoff_trail_min"] = (travel_minutes + buf_lo,
                                       travel_minutes + buf_hi)
-        rows = build_rows(year, month, ctx, rules, rng)
+        rows = build_rows(
+            year, month, ctx, rules, rng, start_day, end_day
+        )
     except OneOffConflict as exc:
         return (False, "one_off_conflict", exc.reason, exc.day)
     except Exception as exc:  # reported in the run summary
@@ -168,7 +252,10 @@ def process_member(member, ctx, year, month, out_dir, preview,
         return (True, None, None, None)
 
     path = os.path.join(
-        out_dir, schedule_filename(member["center_id"], year, month)
+        out_dir,
+        schedule_filename(
+            member["center_id"], year, month, start_day, end_day
+        ),
     )
     try:
         build_workbook(member, rows, path)
@@ -180,6 +267,17 @@ def process_member(member, ctx, year, month, out_dir, preview,
 
 def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
+
+    # Validate the day range up front so the user gets a clean error
+    # instead of a traceback once per member.
+    if args.start_day is not None or args.end_day is not None:
+        try:
+            get_month_dates(
+                args.year, args.month, args.start_day, args.end_day
+            )
+        except ValueError as exc:
+            print(exc, file=sys.stderr)
+            return 2
 
     api_key = args.api_key
     cache = load_cache(args.geo_cache)
@@ -234,6 +332,7 @@ def main(argv=None):
         os.makedirs(out_dir, exist_ok=True)
 
     success = 0
+    debug_rows = []
     for member in members:
         ctx = MemberContext(
             enrollments=get_enrollments(member["center_id"], args.db_path),
@@ -242,9 +341,17 @@ def main(argv=None):
             availabilities=get_availability(member["center_id"], args.db_path),
             one_offs=get_one_offs(member["center_id"], args.db_path),
         )
+        if args.debug and not args.preview_data:
+            debug_rows.extend(
+                collect_debug_rows(
+                    member, ctx, args.year, args.month,
+                    args.start_day, args.end_day,
+                )
+            )
         ok, stage, reason, day = process_member(
             member, ctx, args.year, args.month, out_dir,
             args.preview_data, api_key, cache,
+            start_day=args.start_day, end_day=args.end_day,
         )
         if ok:
             success += 1
@@ -262,6 +369,17 @@ def main(argv=None):
         skipped_csv = write_skipped_members_csv(failures, out_dir)
         if skipped_csv is not None:
             print(f"Wrote skipped members report: {skipped_csv}", file=sys.stderr)
+        if args.debug:
+            debug_path = os.path.join(
+                out_dir,
+                debug_filename(
+                    args.year, args.month,
+                    args.start_day, args.end_day,
+                ),
+            )
+            written = write_debug_csv(debug_rows, debug_path)
+            if written is not None:
+                print(f"Wrote debug report: {written}", file=sys.stderr)
     total = success + len(failures)
     verb = "Previewed" if args.preview_data else "Wrote"
     summary_dir = None if args.preview_data else out_dir

@@ -14,6 +14,16 @@ REASON_NOT_ENROLLED = "not enrolled during this month"
 REASON_NO_AUTH = "no active authorization for this month"
 REASON_ABSENT_MONTH = "absent for the entire month"
 
+# Per-day rejection reasons surfaced by compute_day_eligibility().
+# Stable strings so the debug CSV and i18n table can key off them.
+REASON_DAY_NOT_ENROLLED = "not enrolled on this day"
+REASON_DAY_NO_AUTH = "no active authorization on this day"
+REASON_DAY_WRONG_WEEKDAY = "weekday not in authorized days"
+REASON_DAY_ABSENT = "absent on this day"
+REASON_DAY_WINDOW_TOO_NARROW = (
+    "availability window too narrow for a valid session"
+)
+
 
 class OneOffConflict(Exception):
     """Raised by compute_day_eligibility when a one-off availability row
@@ -33,23 +43,27 @@ class DayEligibility:
 
     `arrival_window` is None when the plan's default applies; a tuple of
     (lo_minutes, hi_minutes) when an Availability rule has narrowed it.
+    `reason` is None when eligible=True, otherwise one of the
+    REASON_DAY_* constants explaining the rejection (used by the debug
+    CSV).
     """
     eligible: bool
     arrival_window: Optional[Tuple[int, int]] = None
+    reason: Optional[str] = None
 
 
 def compute_day_eligibility(day: date, ctx, plan_rules) -> DayEligibility:
     """Run the ordered eligibility checks for one calendar day."""
     if not ctx.is_enrolled(day):
-        return DayEligibility(eligible=False)
+        return DayEligibility(eligible=False, reason=REASON_DAY_NOT_ENROLLED)
 
     auth = ctx.active_authorization(day)
     if auth is None:
-        return DayEligibility(eligible=False)
+        return DayEligibility(eligible=False, reason=REASON_DAY_NO_AUTH)
 
     authorized = get_authorized_weekdays(auth["auth_days"])
     if day.isoweekday() not in authorized:
-        return DayEligibility(eligible=False)
+        return DayEligibility(eligible=False, reason=REASON_DAY_WRONG_WEEKDAY)
 
     one_offs = ctx.one_offs_for(day)
     if one_offs:
@@ -67,7 +81,7 @@ def compute_day_eligibility(day: date, ctx, plan_rules) -> DayEligibility:
         avail = one_offs[0]
     else:
         if ctx.is_absent(day):
-            return DayEligibility(eligible=False)
+            return DayEligibility(eligible=False, reason=REASON_DAY_ABSENT)
         avail = ctx.availability_for(day)
         if avail is None:
             return DayEligibility(eligible=True)
@@ -81,14 +95,18 @@ def compute_day_eligibility(day: date, ctx, plan_rules) -> DayEligibility:
     lo = max(plan_lo, avail_lo)
     hi = min(plan_hi, avail_hi - session_min_lower)
     if lo > hi:
-        return DayEligibility(eligible=False)
+        return DayEligibility(
+            eligible=False, reason=REASON_DAY_WINDOW_TOO_NARROW
+        )
     return DayEligibility(eligible=True, arrival_window=(lo, hi))
 
 
-def compute_month_failure(year: int, month: int, ctx):
-    """Return a whole-member failure reason string for this month, or None
-    if the member has at least one eligible day."""
-    days = list(get_month_dates(year, month))
+def compute_month_failure(year: int, month: int, ctx,
+                           start_day=None, end_day=None):
+    """Return a whole-member failure reason string for the requested
+    range (defaults to the full month), or None if the member has at
+    least one eligible day in that range."""
+    days = list(get_month_dates(year, month, start_day, end_day))
 
     if not any(ctx.is_enrolled(d) for d in days):
         return REASON_NOT_ENROLLED

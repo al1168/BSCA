@@ -40,11 +40,15 @@ STRINGS: dict[str, dict[str, str]] = {
         "when.month.10": "October",
         "when.month.11": "November",
         "when.month.12": "December",
+        "when.range_check": "Custom day range",
+        "when.range_from": "From day:",
+        "when.range_to": "To day:",
         # save to
         "save.title": "Save To",
         "save.change": "Change…",
         # options
         "opts.preview": "Preview only (don't save files)",
+        "opts.debug": "Debug (write per-day reason CSV next to each schedule)",
         "opts.generate": "Generate Schedule",
         "opts.open_folder": "Open Output Folder",
         # settings dialog
@@ -100,10 +104,15 @@ STRINGS: dict[str, dict[str, str]] = {
             "Open Settings and enter your Google Maps API key before generating."
         ),
         "msg.completed_errors.title": "Completed with errors",
+        "msg.invalid_range.title": "Invalid Day Range",
+        "msg.invalid_range.body": (
+            "The 'From day' must be on or before the 'To day'."
+        ),
         # worker log lines
         "worker.preview": "Preview: {id} ({last}, {first})",
         "worker.wrote": "Wrote {filename}",
         "worker.wrote_skipped_csv": "Wrote skipped members report: {filename}",
+        "worker.wrote_debug_csv": "Wrote debug report: {filename}",
         "worker.no_members": "No members found in the database.",
         "worker.no_members_for_plan": "No members found for plan {plan}.",
         "worker.cannot_create_folder": "Cannot create output folder: {error}",
@@ -181,11 +190,15 @@ STRINGS: dict[str, dict[str, str]] = {
         "when.month.10": "十月",
         "when.month.11": "十一月",
         "when.month.12": "十二月",
+        "when.range_check": "自定义日期范围",
+        "when.range_from": "从：",
+        "when.range_to": "到：",
         # save to
         "save.title": "保存到",
         "save.change": "更改…",
         # options
         "opts.preview": "仅预览（不保存文件）",
+        "opts.debug": "调试（在每个日程旁写入每日原因 CSV）",
         "opts.generate": "生成日程表",
         "opts.open_folder": "打开输出文件夹",
         # settings dialog
@@ -239,10 +252,13 @@ STRINGS: dict[str, dict[str, str]] = {
             "请打开设置并输入您的 Google 地图 API 密钥，然后再生成。"
         ),
         "msg.completed_errors.title": "完成但有错误",
+        "msg.invalid_range.title": "日期范围无效",
+        "msg.invalid_range.body": "“起始日”必须不晚于“截止日”。",
         # worker log lines
         "worker.preview": "预览：{id}（{last}，{first}）",
         "worker.wrote": "已写入 {filename}",
         "worker.wrote_skipped_csv": "已写入跳过成员报告：{filename}",
+        "worker.wrote_debug_csv": "已写入调试报告：{filename}",
         "worker.no_members": "数据库中找不到成员。",
         "worker.no_members_for_plan": "计划 {plan} 中找不到成员。",
         "worker.cannot_create_folder": "无法创建输出文件夹：{error}",

@@ -1,3 +1,4 @@
+import calendar
 import datetime
 import os
 import subprocess
@@ -162,7 +163,9 @@ class MainWindow(QWidget):
 
         # ── WHEN ───────────────────────────────────────────────────
         self._when_box = QGroupBox()
-        when_layout = QHBoxLayout(self._when_box)
+        when_outer = QVBoxLayout(self._when_box)
+        when_layout = QHBoxLayout()
+        when_outer.addLayout(when_layout)
         self._month_label_widget = QLabel()
         when_layout.addWidget(self._month_label_widget)
         self._month_combo = QComboBox()
@@ -179,6 +182,36 @@ class MainWindow(QWidget):
         self._year_spin.setFixedWidth(80)
         when_layout.addWidget(self._year_spin)
         when_layout.addStretch()
+
+        # Custom day-range row (hidden until the checkbox is ticked).
+        range_row = QHBoxLayout()
+        self._range_check = QCheckBox()
+        self._range_check.toggled.connect(self._on_range_toggled)
+        range_row.addWidget(self._range_check)
+        self._range_from_label = QLabel()
+        range_row.addWidget(self._range_from_label)
+        self._range_from_spin = QSpinBox()
+        self._range_from_spin.setRange(1, 31)
+        self._range_from_spin.setValue(1)
+        self._range_from_spin.setFixedWidth(56)
+        self._range_from_spin.setEnabled(False)
+        range_row.addWidget(self._range_from_spin)
+        self._range_to_label = QLabel()
+        range_row.addWidget(self._range_to_label)
+        self._range_to_spin = QSpinBox()
+        self._range_to_spin.setRange(1, 31)
+        self._range_to_spin.setValue(31)
+        self._range_to_spin.setFixedWidth(56)
+        self._range_to_spin.setEnabled(False)
+        range_row.addWidget(self._range_to_spin)
+        range_row.addStretch()
+        when_outer.addLayout(range_row)
+
+        # Keep the spin-box maxima in sync with the selected month/year
+        # so a user can't pick April 31 or Feb 29 in a non-leap year.
+        self._month_combo.currentIndexChanged.connect(self._update_range_max)
+        self._year_spin.valueChanged.connect(self._update_range_max)
+        self._update_range_max()
         root.addWidget(self._when_box)
 
         # ── SAVE TO ────────────────────────────────────────────────
@@ -196,6 +229,8 @@ class MainWindow(QWidget):
         # ── Options ────────────────────────────────────────────────
         self._preview_check = QCheckBox()
         root.addWidget(self._preview_check)
+        self._debug_check = QCheckBox()
+        root.addWidget(self._debug_check)
 
         # ── Generate ───────────────────────────────────────────────
         self._generate_btn = QPushButton()
@@ -252,11 +287,15 @@ class MainWindow(QWidget):
         self._year_label_widget.setText(tr("when.year_label"))
         for i in range(12):
             self._month_combo.setItemText(i, tr(f"when.month.{i + 1}"))
+        self._range_check.setText(tr("when.range_check"))
+        self._range_from_label.setText(tr("when.range_from"))
+        self._range_to_label.setText(tr("when.range_to"))
 
         self._save_box.setTitle(tr("save.title"))
         self._change_btn.setText(tr("save.change"))
 
         self._preview_check.setText(tr("opts.preview"))
+        self._debug_check.setText(tr("opts.debug"))
         self._generate_btn.setText(tr("opts.generate"))
         self._open_folder_btn.setText(tr("opts.open_folder"))
 
@@ -265,6 +304,24 @@ class MainWindow(QWidget):
     def _on_who_changed(self, btn_id: int, checked: bool):
         if checked:
             self._who_stack.setCurrentIndex(btn_id)
+
+    def _on_range_toggled(self, checked: bool):
+        self._range_from_spin.setEnabled(checked)
+        self._range_to_spin.setEnabled(checked)
+
+    def _update_range_max(self, *_):
+        """Cap the From/To spin boxes at the actual last day of the
+        selected month so April 31 / Feb 29 in non-leap years can't be
+        entered. Triggered when month or year changes."""
+        year = self._year_spin.value()
+        month = self._month_combo.currentIndex() + 1
+        last_day = calendar.monthrange(year, month)[1]
+        self._range_from_spin.setMaximum(last_day)
+        self._range_to_spin.setMaximum(last_day)
+        if self._range_to_spin.value() > last_day:
+            self._range_to_spin.setValue(last_day)
+        if self._range_from_spin.value() > last_day:
+            self._range_from_spin.setValue(last_day)
 
     def _on_language_changed(self, index: int):
         lang = self._lang_combo.itemData(index)
@@ -354,6 +411,15 @@ class MainWindow(QWidget):
                 )
                 return False
 
+        if self._range_check.isChecked():
+            if self._range_from_spin.value() > self._range_to_spin.value():
+                QMessageBox.warning(
+                    self,
+                    tr("msg.invalid_range.title"),
+                    tr("msg.invalid_range.body"),
+                )
+                return False
+
         return True
 
     def _run(self):
@@ -365,6 +431,13 @@ class MainWindow(QWidget):
         year = self._year_spin.value()
         month = self._month_combo.currentIndex() + 1
         preview = self._preview_check.isChecked()
+        debug = self._debug_check.isChecked()
+        if self._range_check.isChecked():
+            start_day = self._range_from_spin.value()
+            end_day = self._range_to_spin.value()
+        else:
+            start_day = None
+            end_day = None
 
         center_id = int(self._single_id.text()) if mode == "single" else None
         center_ids = (
@@ -395,6 +468,9 @@ class MainWindow(QWidget):
             db_path=self._settings["db_path"],
             google_api_key=self._settings["google_api_key"],
             geo_cache=self._settings["geo_cache"],
+            debug=debug,
+            start_day=start_day,
+            end_day=end_day,
         )
         self._worker.progress.connect(self._on_progress)
         self._worker.log_line.connect(self._on_log_line)

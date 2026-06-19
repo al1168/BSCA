@@ -471,6 +471,121 @@ def test_write_skipped_members_csv_includes_all_stages(tmp_path):
     )
 
 
+# ---------------------------------------------------------------------------
+# Custom day range
+# ---------------------------------------------------------------------------
+
+
+def test_range_suffix_added_to_schedule_filename():
+    assert cli.schedule_filename(24010, 2026, 5, 1, 19) == \
+        "Schedule_24010_2026-05_01-19.xlsx"
+
+
+def test_no_range_omits_filename_suffix():
+    assert cli.schedule_filename(24010, 2026, 5) == \
+        "Schedule_24010_2026-05.xlsx"
+
+
+def test_debug_filename_with_range():
+    assert cli.debug_filename(2026, 5, 1, 19) == "Debug_2026-05_01-19.csv"
+
+
+def test_debug_filename_without_range():
+    assert cli.debug_filename(2026, 5) == "Debug_2026-05.csv"
+
+
+def test_cli_range_writes_to_range_suffixed_file(monkeypatch, tmp_path):
+    """--start-day/--end-day produce a schedule with the suffixed name."""
+    monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
+    rc = cli.main(
+        ["--center-id", "24010", "--year", "2026", "--month", "5",
+         "--output-path", str(tmp_path),
+         "--start-day", "1", "--end-day", "19"]
+    )
+    assert rc == 0
+    assert (tmp_path / "Schedule_24010_2026-05_01-19.xlsx").exists()
+    assert not (tmp_path / "Schedule_24010_2026-05.xlsx").exists()
+
+
+def test_cli_range_invalid_returns_2(monkeypatch, tmp_path, capsys):
+    """end-day past the last day of the month exits cleanly with rc=2."""
+    monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
+    rc = cli.main(
+        ["--center-id", "24010", "--year", "2026", "--month", "4",
+         "--output-path", str(tmp_path),
+         "--end-day", "31"]  # April has 30 days
+    )
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "end_day 31 exceeds last day of 2026-04" in err
+
+
+def test_cli_range_feb_29_non_leap_year_returns_2(
+        monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
+    rc = cli.main(
+        ["--center-id", "24010", "--year", "2026", "--month", "2",
+         "--output-path", str(tmp_path),
+         "--end-day", "29"]
+    )
+    assert rc == 2
+    assert "exceeds last day" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# --debug flag writes a per-member diagnostic CSV
+# ---------------------------------------------------------------------------
+
+
+def test_debug_flag_writes_combined_debug_csv(monkeypatch, tmp_path):
+    """--debug produces ONE combined Debug_<YYYY-MM>.csv with rows for
+    every scheduled member, not a separate file per member."""
+    monkeypatch.setattr(
+        cli, "get_members_by_plan",
+        lambda code, db: [FAKE_MEMBER, FAKE_MEMBER_2],
+    )
+    rc = cli.main(
+        ["--plan", "hof", "--year", "2026", "--month", "5",
+         "--output-path", str(tmp_path), "--debug"]
+    )
+    assert rc == 0
+    sub = tmp_path / "HOF_2026-05"
+    debug_path = sub / "Debug_2026-05.csv"
+    assert debug_path.exists()
+    # No per-member Debug_<id>_*.csv files.
+    assert not list(sub.glob("Debug_24010_*.csv"))
+    assert not list(sub.glob("Debug_24011_*.csv"))
+    lines = debug_path.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "center_id,name,date,day,scheduled,reason"
+    # auth_days "1.3.4.5" → Mon/Wed/Thu/Fri in May 2026 = 17 days × 2 members
+    assert len(lines) - 1 == 34
+    # Each row should be tagged with one of the two member IDs.
+    ids = {line.split(",", 1)[0] for line in lines[1:]}
+    assert ids == {"24010", "24011"}
+
+
+def test_debug_flag_off_does_not_write_debug_csv(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
+    rc = cli.main(
+        ["--center-id", "24010", "--year", "2026", "--month", "5",
+         "--output-path", str(tmp_path)]
+    )
+    assert rc == 0
+    assert not (tmp_path / "Debug_2026-05.csv").exists()
+
+
+def test_debug_flag_with_preview_writes_no_files(monkeypatch, tmp_path):
+    """--debug + --preview-data: still no files written (preview wins)."""
+    monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
+    rc = cli.main(
+        ["--center-id", "24010", "--year", "2026", "--month", "5",
+         "--output-path", str(tmp_path), "--debug", "--preview-data"]
+    )
+    assert rc == 0
+    assert not (tmp_path / "Debug_2026-05.csv").exists()
+    assert not (tmp_path / "Schedule_24010_2026-05.xlsx").exists()
+
+
 def test_write_skipped_members_csv_preserves_input_order(tmp_path):
     """Multiple failures appear in input order."""
     from pathlib import Path

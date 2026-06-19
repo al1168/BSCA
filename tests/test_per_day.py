@@ -50,30 +50,44 @@ def test_eligible_day_no_availability_rule():
 
 
 def test_ineligible_not_enrolled():
+    from monthly_schedule.per_day import REASON_DAY_NOT_ENROLLED
     result = compute_day_eligibility(
         date(2026, 5, 4), _ctx(enrolled=False), PLAN_RULES
     )
     assert result.eligible is False
+    assert result.reason == REASON_DAY_NOT_ENROLLED
 
 
 def test_ineligible_no_authorization():
+    from monthly_schedule.per_day import REASON_DAY_NO_AUTH
     result = compute_day_eligibility(
         date(2026, 5, 4), _ctx(authorized=None), PLAN_RULES
     )
     assert result.eligible is False
+    assert result.reason == REASON_DAY_NO_AUTH
 
 
 def test_ineligible_wrong_weekday():
+    from monthly_schedule.per_day import REASON_DAY_WRONG_WEEKDAY
     # 2026-05-05 is a Tuesday (isoweekday 2) → NOT in "1,3,5"
     result = compute_day_eligibility(date(2026, 5, 5), _ctx(), PLAN_RULES)
     assert result.eligible is False
+    assert result.reason == REASON_DAY_WRONG_WEEKDAY
 
 
 def test_ineligible_absent():
+    from monthly_schedule.per_day import REASON_DAY_ABSENT
     result = compute_day_eligibility(
         date(2026, 5, 4), _ctx(absent=True), PLAN_RULES
     )
     assert result.eligible is False
+    assert result.reason == REASON_DAY_ABSENT
+
+
+def test_eligible_has_no_reason():
+    result = compute_day_eligibility(date(2026, 5, 4), _ctx(), PLAN_RULES)
+    assert result.eligible is True
+    assert result.reason is None
 
 
 def test_availability_rule_narrows_window():
