@@ -226,8 +226,9 @@ class _SmartFakeConn:
 def test_default_fill_inserts_8_to_4_for_every_weekday(
     tmp_path, monkeypatch, capsys
 ):
-    """A member with no HHA and no existing Availability gets 7 default
-    08:00-16:00 rows (one per weekday Mon-Sun)."""
+    """A member with no HHA and no existing Availability gets 5 default
+    08:00-16:00 rows — one per weekday Mon-Fri. Sat/Sun are skipped
+    because the center does not operate on weekends."""
     fake = _SmartFakeConn(
         contacts_rows=[],
         all_member_ids=[24010],
@@ -245,14 +246,38 @@ def test_default_fill_inserts_8_to_4_for_every_weekday(
         params for sql, params in fake._cursor.executed
         if sql == backfill._AVAIL_INSERT
     ]
-    assert len(inserts) == 7
-    assert sorted({p[2] for p in inserts}) == [1, 2, 3, 4, 5, 6, 7]
+    assert len(inserts) == 5
+    assert sorted({p[2] for p in inserts}) == [1, 2, 3, 4, 5]
     for cid_str, _today, _day, start_t, end_t in inserts:
         assert cid_str == "24010"
         assert start_t == backfill._hhmm_to_time("08:00")
         assert end_t == backfill._hhmm_to_time("16:00")
     out = capsys.readouterr().out
-    assert "Default 8-4 rows inserted (post-HHA):  7" in out
+    assert "Default 8-4 rows inserted (post-HHA):  5" in out
+
+
+def test_default_fill_skips_weekends(tmp_path, monkeypatch):
+    """No default rows are inserted for Saturday (6) or Sunday (7)."""
+    fake = _SmartFakeConn(
+        contacts_rows=[],
+        all_member_ids=[24010],
+        existing_avail=[],
+    )
+    monkeypatch.setattr("pyodbc.connect", lambda cs: fake)
+    db_file = tmp_path / "x.accdb"
+    db_file.touch()
+
+    rc = backfill.main([
+        "--db", str(db_file), "--csv-out", str(tmp_path),
+    ])
+    assert rc == 0
+    inserts = [
+        params for sql, params in fake._cursor.executed
+        if sql == backfill._AVAIL_INSERT
+    ]
+    days = {p[2] for p in inserts}
+    assert 6 not in days  # Saturday
+    assert 7 not in days  # Sunday
 
 
 def test_default_fill_skips_days_with_existing_rows(
@@ -278,7 +303,7 @@ def test_default_fill_skips_days_with_existing_rows(
         if sql == backfill._AVAIL_INSERT
     ]
     days_inserted = sorted({p[2] for p in inserts})
-    assert days_inserted == [1, 3, 5, 6, 7]  # Tue & Thu skipped
+    assert days_inserted == [1, 3, 5]  # Tue & Thu skipped; Sat/Sun not seeded
 
 
 def test_default_fill_respects_exclude_test_members(
@@ -306,7 +331,7 @@ def test_default_fill_respects_exclude_test_members(
     ]
     cids_inserted = {p[0] for p in inserts}
     assert cids_inserted == {"24010"}
-    assert len(inserts) == 7
+    assert len(inserts) == 5
 
 
 def test_default_fill_runs_after_hha_contacts_query(

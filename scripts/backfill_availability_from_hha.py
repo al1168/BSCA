@@ -119,11 +119,13 @@ def _seed_default_availability(cur, today, exclude_test, stats):
     """Insert a default 8:00-16:00 Availability row for every
     (member, weekday) pair that has no open row yet.
 
-    Runs AFTER the HHA pass so any weekday HHA narrowed to an earlier
-    end-time keeps that narrower row (the OPEN-row check sees it and
-    skips). Unmentioned weekdays get the default. The scheduler still
-    gates per-day by Authorization.auth_days, so non-authorized
-    weekday defaults are inert.
+    Only Monday through Friday — the center does not operate on
+    weekends, so seeding Sat/Sun rows is noise. Runs AFTER the HHA
+    pass so any weekday HHA narrowed to an earlier end-time keeps
+    that narrower row (the OPEN-row check sees it and skips).
+    Unmentioned weekdays get the default. The scheduler still gates
+    per-day by Authorization.auth_days, so a default row on a
+    non-authorized weekday is inert.
     """
     cur.execute(_ALL_MEMBER_IDS_QUERY)
     member_ids = [
@@ -134,7 +136,7 @@ def _seed_default_availability(cur, today, exclude_test, stats):
     for cid in member_ids:
         if exclude_test and _is_test_id(cid):
             continue
-        for day in range(1, 8):  # ISO weekday: 1=Mon ... 7=Sun
+        for day in range(1, 6):  # ISO weekday: 1=Mon ... 5=Fri
             cur.execute(_AVAIL_OPEN_QUERY, str(cid), day)
             if cur.fetchone() is not None:
                 continue
