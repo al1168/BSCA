@@ -9,6 +9,16 @@ DEFAULTS = {
     "geo_cache": "geo_cache.json",
     "output_path": ".",
     "language": "en",
+    # Default-for-everyone scheduling rules. Tuples are stored as lists
+    # so they round-trip cleanly through JSON; rules.get_rules_for_plan
+    # converts the ranges back to tuples at use site.
+    "schedule_rules": {
+        "arrival_window": ["08:00", "11:00"],
+        "session_span_min": [210, 245],
+        "travel_buffer_min": [1, 5],
+        "time_in_drift_min": [2, 2],
+        "time_out_drift_min": [2, 2],
+    },
 }
 
 
@@ -21,9 +31,19 @@ def load() -> dict:
         with open(_SETTINGS_FILE, encoding="utf-8") as f:
             data = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        return dict(DEFAULTS)
+        # dict() copies top-level keys; schedule_rules needs its own
+        # copy so a caller mutating it doesn't poison DEFAULTS.
+        result = dict(DEFAULTS)
+        result["schedule_rules"] = dict(DEFAULTS["schedule_rules"])
+        return result
 
     merged = {**DEFAULTS, **data}
+    # schedule_rules: deep-merge so a file with only some of the keys
+    # still gets defaults for the rest (forward-compatible).
+    saved_rules = data.get("schedule_rules") or {}
+    merged["schedule_rules"] = {
+        **DEFAULTS["schedule_rules"], **saved_rules
+    }
     if _migrate_legacy_google_config(merged):
         try:
             save(merged)

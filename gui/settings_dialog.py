@@ -1,17 +1,20 @@
 import os
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTime
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QSpinBox,
+    QTimeEdit,
     QVBoxLayout,
 )
 
@@ -122,6 +125,84 @@ class _ApiKeyRow(QHBoxLayout):
         self.edit.setText(v)
 
 
+def _time_from_hhmm(text: str) -> QTime:
+    """'HH:MM' -> QTime, falling back to midnight on malformed input."""
+    try:
+        h, m = text.split(":")
+        return QTime(int(h), int(m))
+    except (ValueError, AttributeError):
+        return QTime(0, 0)
+
+
+def _hhmm(t: QTime) -> str:
+    return f"{t.hour():02d}:{t.minute():02d}"
+
+
+def _minutes_to_qtime(total: int) -> QTime:
+    """Treat `total` (minutes) as a duration and render as QTime so the
+    visit-length spinbox can use a familiar HH:MM picker."""
+    return QTime(total // 60, total % 60)
+
+
+def _qtime_to_minutes(t: QTime) -> int:
+    return t.hour() * 60 + t.minute()
+
+
+class _RangeSpins(QHBoxLayout):
+    """Two side-by-side QSpinBoxes for a (min, max) integer range."""
+
+    def __init__(self, lo: int, hi: int,
+                 spin_min: int = 0, spin_max: int = 60):
+        super().__init__()
+        self.setContentsMargins(0, 0, 0, 0)
+        self.lo_spin = QSpinBox()
+        self.lo_spin.setRange(spin_min, spin_max)
+        self.lo_spin.setValue(lo)
+        self.lo_spin.setFixedWidth(64)
+        self.hi_spin = QSpinBox()
+        self.hi_spin.setRange(spin_min, spin_max)
+        self.hi_spin.setValue(hi)
+        self.hi_spin.setFixedWidth(64)
+        self.dash = QLabel(" – ")
+        self.addWidget(self.lo_spin)
+        self.addWidget(self.dash)
+        self.addWidget(self.hi_spin)
+        self.addStretch()
+
+    def value(self):
+        return (self.lo_spin.value(), self.hi_spin.value())
+
+
+class _RangeTimes(QHBoxLayout):
+    """Two side-by-side QTimeEdits for a (lo HH:MM, hi HH:MM) range."""
+
+    def __init__(self, lo: QTime, hi: QTime):
+        super().__init__()
+        self.setContentsMargins(0, 0, 0, 0)
+        self.lo_edit = QTimeEdit()
+        self.lo_edit.setDisplayFormat("HH:mm")
+        self.lo_edit.setTime(lo)
+        self.lo_edit.setFixedWidth(82)
+        self.hi_edit = QTimeEdit()
+        self.hi_edit.setDisplayFormat("HH:mm")
+        self.hi_edit.setTime(hi)
+        self.hi_edit.setFixedWidth(82)
+        self.dash = QLabel(" – ")
+        self.addWidget(self.lo_edit)
+        self.addWidget(self.dash)
+        self.addWidget(self.hi_edit)
+        self.addStretch()
+
+    def hhmm_value(self):
+        return (_hhmm(self.lo_edit.time()), _hhmm(self.hi_edit.time()))
+
+    def minutes_value(self):
+        return (
+            _qtime_to_minutes(self.lo_edit.time()),
+            _qtime_to_minutes(self.hi_edit.time()),
+        )
+
+
 class SettingsDialog(QDialog):
     def __init__(self, settings: dict, parent=None, first_run: bool = False):
         super().__init__(parent)
@@ -165,6 +246,44 @@ class SettingsDialog(QDialog):
         form.addRow(self._cache_label, self._cache_row)
         layout.addLayout(form)
 
+        # ── Scheduling Rules ─────────────────────────────────────
+        rules = settings.get("schedule_rules") or {}
+        self._rules_group = QGroupBox()
+        rules_form = QFormLayout(self._rules_group)
+        rules_form.setVerticalSpacing(8)
+
+        arr_lo, arr_hi = rules.get("arrival_window", ["08:00", "11:00"])
+        self._arrival_row = _RangeTimes(
+            _time_from_hhmm(arr_lo), _time_from_hhmm(arr_hi),
+        )
+        self._arrival_label = QLabel()
+        rules_form.addRow(self._arrival_label, self._arrival_row)
+
+        sess_lo, sess_hi = rules.get("session_span_min", [210, 245])
+        self._session_row = _RangeTimes(
+            _minutes_to_qtime(int(sess_lo)),
+            _minutes_to_qtime(int(sess_hi)),
+        )
+        self._session_label = QLabel()
+        rules_form.addRow(self._session_label, self._session_row)
+
+        tb_lo, tb_hi = rules.get("travel_buffer_min", [1, 5])
+        self._travel_row = _RangeSpins(int(tb_lo), int(tb_hi))
+        self._travel_label = QLabel()
+        rules_form.addRow(self._travel_label, self._travel_row)
+
+        ti_lo, ti_hi = rules.get("time_in_drift_min", [2, 2])
+        self._time_in_row = _RangeSpins(int(ti_lo), int(ti_hi))
+        self._time_in_label = QLabel()
+        rules_form.addRow(self._time_in_label, self._time_in_row)
+
+        to_lo, to_hi = rules.get("time_out_drift_min", [2, 2])
+        self._time_out_row = _RangeSpins(int(to_lo), int(to_hi))
+        self._time_out_label = QLabel()
+        rules_form.addRow(self._time_out_label, self._time_out_row)
+
+        layout.addWidget(self._rules_group)
+
         self._test_btn = None
         if not first_run:
             self._test_btn = QPushButton()
@@ -201,6 +320,12 @@ class SettingsDialog(QDialog):
         self._cache_row.retranslate()
         if self._test_btn is not None:
             self._test_btn.setText(tr("settings.test_connection"))
+        self._rules_group.setTitle(tr("settings.rules.title"))
+        self._arrival_label.setText(tr("settings.rules.arrival"))
+        self._session_label.setText(tr("settings.rules.session"))
+        self._travel_label.setText(tr("settings.rules.travel_buffer"))
+        self._time_in_label.setText(tr("settings.rules.time_in"))
+        self._time_out_label.setText(tr("settings.rules.time_out"))
 
     def _test_connection(self):
         db_path = self._db_row.value()
@@ -244,11 +369,41 @@ class SettingsDialog(QDialog):
         )
 
     def _save(self):
+        arrival = self._arrival_row.hhmm_value()
+        session = self._session_row.minutes_value()
+        travel = self._travel_row.value()
+        time_in = self._time_in_row.value()
+        time_out = self._time_out_row.value()
+        # Guardrail: each min must be <= its max. On any violation we
+        # warn but still save (clamping by swapping would silently
+        # change user intent; better to ask them to fix it).
+        ranges = [
+            ("arrival_window", arrival),
+            ("session_span_min", session),
+            ("travel_buffer_min", travel),
+            ("time_in_drift_min", time_in),
+            ("time_out_drift_min", time_out),
+        ]
+        for _, (lo, hi) in ranges:
+            if lo > hi:
+                QMessageBox.warning(
+                    self,
+                    tr("settings.rules.invalid_range.title"),
+                    tr("settings.rules.invalid_range.body"),
+                )
+                return
         self._result = {
             "db_path": self._db_row.value(),
             "output_path": self._out_row.value(),
             "google_api_key": self._key_row.value(),
             "geo_cache": self._cache_row.value(),
+            "schedule_rules": {
+                "arrival_window": list(arrival),
+                "session_span_min": list(session),
+                "travel_buffer_min": list(travel),
+                "time_in_drift_min": list(time_in),
+                "time_out_drift_min": list(time_out),
+            },
         }
         self.accept()
 

@@ -61,6 +61,23 @@ STRINGS: dict[str, dict[str, str]] = {
         "settings.output_label": "Output Folder",
         "settings.api_key_label": "Google Maps API Key",
         "settings.cache_label": "Travel Cache File",
+        "settings.rules.title": "Scheduling Rules",
+        "settings.rules.arrival": "Arrival window (earliest – latest):",
+        "settings.rules.session": "Visit length min – max (HH:MM):",
+        "settings.rules.travel_buffer": (
+            "Travel buffer min – max (extra minutes on top of Google):"
+        ),
+        "settings.rules.time_in": (
+            "Time-In offset min – max (minutes after Arrival):"
+        ),
+        "settings.rules.time_out": (
+            "Time-Out offset min – max (minutes before Departure):"
+        ),
+        "settings.rules.invalid_range.title": "Invalid Range",
+        "settings.rules.invalid_range.body": (
+            "Each minimum value must be on or before its maximum. "
+            "Please fix the highlighted range before saving."
+        ),
         "settings.browse": "Browse…",
         "settings.test_connection": "Test Connection",
         "settings.api_key.show": "Show",
@@ -210,6 +227,22 @@ STRINGS: dict[str, dict[str, str]] = {
         "settings.output_label": "输出文件夹",
         "settings.api_key_label": "Google 地图 API 密钥",
         "settings.cache_label": "出行缓存文件",
+        "settings.rules.title": "排班规则",
+        "settings.rules.arrival": "到达时间窗口（最早 – 最晚）：",
+        "settings.rules.session": "访问时长 最短 – 最长（时:分）：",
+        "settings.rules.travel_buffer": (
+            "出行缓冲 最少 – 最多（在 Google 行程时间上加的额外分钟）："
+        ),
+        "settings.rules.time_in": (
+            "签到偏移 最少 – 最多（到达后多少分钟）："
+        ),
+        "settings.rules.time_out": (
+            "签出偏移 最少 – 最多（离开前多少分钟）："
+        ),
+        "settings.rules.invalid_range.title": "范围无效",
+        "settings.rules.invalid_range.body": (
+            "每个最小值必须不大于其最大值。请先修正高亮显示的范围再保存。"
+        ),
         "settings.browse": "浏览…",
         "settings.test_connection": "测试连接",
         "settings.api_key.show": "显示",

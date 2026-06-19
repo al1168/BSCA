@@ -85,6 +85,7 @@ def test_one_off_conflict_writes_skipped_csv(tmp_path):
          "--output-path", str(out_dir),
          "--api-key", "TEST_KEY_NOT_USED",
          "--geo-cache", str(tmp_path / "geo_cache.json"),
+         "--time-cache", str(tmp_path / "time_cache.json"),
         ],
         capture_output=True, text=True,
     )

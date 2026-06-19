@@ -101,11 +101,14 @@ def write_debug_csv(rows, path):
 
 
 def collect_debug_rows(member, ctx, year, month,
-                       start_day=None, end_day=None):
+                       start_day=None, end_day=None,
+                       schedule_rules_overrides=None):
     """Build the run-level debug rows for one member: each row from
     build_debug_rows annotated with center_id + 'Last, First' name."""
     from monthly_schedule.rules import get_rules_for_plan
-    rules = dict(get_rules_for_plan(member["health_plan"]))
+    rules = dict(get_rules_for_plan(
+        member["health_plan"], schedule_rules_overrides
+    ))
     name = f"{member['last_name']}, {member['first_name']}"
     return [
         {"center_id": member["center_id"], "name": name, **r}
@@ -221,14 +224,17 @@ def parse_args(argv):
 
 def process_member(member, ctx, year, month, out_dir, preview,
                    api_key, cache, start_day=None, end_day=None,
-                   time_cache=None):
+                   time_cache=None, schedule_rules_overrides=None):
     """Run the per-member pipeline. Returns (ok, stage, reason, day).
     On success ok is True and stage/reason/day are None. On failure
     stage is one of 'eligibility'/'geocode'/'route'/'one_off_conflict'/
     'generate'/'write' with the reason; day is set for one_off_conflict.
     When start_day/end_day are supplied, only the inclusive sub-range
     of the month is scheduled. When `time_cache` is supplied, daily
-    times are reused across runs (idempotency for partial schedules)."""
+    times are reused across runs (idempotency for partial schedules).
+    `schedule_rules_overrides` is the user's settings-configured rules
+    (arrival_window, session_span_min, travel_buffer_min, etc.) that
+    replace the built-in defaults."""
     failure = compute_month_failure(year, month, ctx, start_day, end_day)
     if failure is not None:
         return (False, "eligibility", failure, None)
@@ -240,7 +246,9 @@ def process_member(member, ctx, year, month, out_dir, preview,
 
     rng = random.Random()
     try:
-        rules = dict(get_rules_for_plan(member["health_plan"]))
+        rules = dict(get_rules_for_plan(
+            member["health_plan"], schedule_rules_overrides
+        ))
         buf_lo, buf_hi = rules.get("travel_buffer_min", (5, 15))
         rules["pickup_lead_min"] = (travel_minutes + buf_lo,
                                     travel_minutes + buf_hi)

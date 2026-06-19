@@ -73,6 +73,41 @@ def test_load_drops_google_config_when_file_empty(settings_file, tmp_path):
     assert on_disk["google_api_key"] == ""
 
 
+def test_fresh_install_has_default_schedule_rules(settings_file):
+    from gui import app_settings
+    s = app_settings.load()
+    rules = s["schedule_rules"]
+    assert rules["arrival_window"] == ["08:00", "11:00"]
+    assert rules["session_span_min"] == [210, 245]
+    assert rules["travel_buffer_min"] == [1, 5]
+    assert rules["time_in_drift_min"] == [2, 2]
+    assert rules["time_out_drift_min"] == [2, 2]
+
+
+def test_partial_schedule_rules_fills_in_defaults(settings_file):
+    """A settings file with only some rule keys still gets the rest
+    from defaults, so adding a new knob in code is forward-compatible."""
+    settings_file.write_text(json.dumps({
+        "schedule_rules": {"arrival_window": ["07:00", "10:00"]},
+    }))
+    from gui import app_settings
+    s = app_settings.load()
+    rules = s["schedule_rules"]
+    assert rules["arrival_window"] == ["07:00", "10:00"]
+    assert rules["session_span_min"] == [210, 245]  # default
+    assert rules["travel_buffer_min"] == [1, 5]     # default
+
+
+def test_defaults_not_mutated_after_load(settings_file):
+    """Caller mutating their schedule_rules dict must not leak back
+    into the global DEFAULTS table."""
+    from gui import app_settings
+    s = app_settings.load()
+    s["schedule_rules"]["arrival_window"] = ["99:99", "99:99"]
+    fresh = app_settings.load()
+    assert fresh["schedule_rules"]["arrival_window"] == ["08:00", "11:00"]
+
+
 def test_load_existing_key_wins_over_legacy_path(settings_file, tmp_path):
     cfg_path = tmp_path / "google_maps.config"
     cfg_path.write_text("file-key", encoding="utf-8")

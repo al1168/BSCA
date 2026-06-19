@@ -51,6 +51,7 @@ class ScheduleWorker(QThread):
         debug=False,
         start_day=None,
         end_day=None,
+        schedule_rules=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -68,6 +69,7 @@ class ScheduleWorker(QThread):
         self.debug = debug
         self.start_day = start_day
         self.end_day = end_day
+        self.schedule_rules = schedule_rules
 
     def _emit_error(self, text: str):
         self.finished.emit(False, {"error_text": text})
@@ -193,6 +195,7 @@ class ScheduleWorker(QThread):
                         collect_debug_rows(
                             member, ctx, self.year, self.month,
                             self.start_day, self.end_day,
+                            schedule_rules_overrides=self.schedule_rules,
                         )
                     )
                 ok, stage, reason, day = process_member(
@@ -201,6 +204,7 @@ class ScheduleWorker(QThread):
                     self.preview, api_key, cache,
                     start_day=self.start_day, end_day=self.end_day,
                     time_cache=time_cache,
+                    schedule_rules_overrides=self.schedule_rules,
                 )
             except OneOffConflict as exc:
                 # process_member catches OneOffConflict internally and

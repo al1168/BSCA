@@ -18,12 +18,27 @@ SCHEDULE_RULES = {
 }
 
 
-def get_rules_for_plan(health_plan):
+def get_rules_for_plan(health_plan, overrides=None):
     """Return the rules dict for the member's plan, falling back to
-    'Default' when the plan has no specific entry."""
+    'Default' when the plan has no specific entry.
+
+    `overrides` is an optional dict of user-configured values that
+    replace the built-in defaults (e.g., the GUI's Scheduling Rules
+    section in Settings). Ranges that arrive as lists (from JSON)
+    are converted to tuples so callers' tuple-unpacking still works.
+    """
     if health_plan and health_plan in SCHEDULE_RULES:
-        return SCHEDULE_RULES[health_plan]
-    return SCHEDULE_RULES["Default"]
+        base = SCHEDULE_RULES[health_plan]
+    else:
+        base = SCHEDULE_RULES["Default"]
+    if not overrides:
+        return base
+    merged = dict(base)
+    for key, value in overrides.items():
+        if value is None:
+            continue
+        merged[key] = tuple(value) if isinstance(value, list) else value
+    return merged
 
 
 def parse_hhmm(text):

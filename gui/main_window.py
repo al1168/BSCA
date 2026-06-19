@@ -471,6 +471,7 @@ class MainWindow(QWidget):
             debug=debug,
             start_day=start_day,
             end_day=end_day,
+            schedule_rules=self._settings.get("schedule_rules"),
         )
         self._worker.progress.connect(self._on_progress)
         self._worker.log_line.connect(self._on_log_line)
