@@ -13,6 +13,7 @@ from monthly_schedule.db import (
 from monthly_schedule.eligibility_context import MemberContext
 from monthly_schedule.per_day import OneOffConflict
 from monthly_schedule.travel import load_cache, save_cache
+from monthly_schedule.time_cache import load_time_cache, save_time_cache
 from gui.errors import friendly_db_error
 from gui.i18n import tr
 from new_monthly_schedule import (
@@ -85,6 +86,15 @@ class ScheduleWorker(QThread):
     def _run_inner(self):
         api_key = self.google_api_key
         cache = load_cache(self.geo_cache)
+        # Time cache lives next to geo_cache so users get persistence
+        # automatically without touching settings. Idempotency for
+        # partial schedules: rerunning May for a member previously
+        # scheduled May 1-19 reuses the printed times.
+        time_cache_path = os.path.join(
+            os.path.dirname(os.path.abspath(self.geo_cache)),
+            "time_cache.json",
+        )
+        time_cache = load_time_cache(time_cache_path)
 
         members = []
         failures = []
@@ -190,6 +200,7 @@ class ScheduleWorker(QThread):
                     self.year, self.month, member_out_dir,
                     self.preview, api_key, cache,
                     start_day=self.start_day, end_day=self.end_day,
+                    time_cache=time_cache,
                 )
             except OneOffConflict as exc:
                 # process_member catches OneOffConflict internally and
@@ -231,6 +242,8 @@ class ScheduleWorker(QThread):
             self.progress.emit(i + 1, len(members))
 
         save_cache(self.geo_cache, cache)
+        if not self.preview:
+            save_time_cache(time_cache_path, time_cache)
 
         if not self.preview:
             # Skipped-members CSV lives at the base output dir even in "all"

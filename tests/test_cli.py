@@ -56,6 +56,8 @@ def _stub_travel(monkeypatch):
     monkeypatch.setattr(cli, "parse_args", _parse_args_with_key)
     monkeypatch.setattr(cli, "load_cache", lambda path: {})
     monkeypatch.setattr(cli, "save_cache", lambda path, cache: None)
+    monkeypatch.setattr(cli, "load_time_cache", lambda path: {})
+    monkeypatch.setattr(cli, "save_time_cache", lambda path, cache: None)
     monkeypatch.setattr(
         cli, "resolve_travel_minutes",
         lambda member, api_key, cache: 10,
@@ -518,6 +520,81 @@ def test_cli_range_invalid_returns_2(monkeypatch, tmp_path, capsys):
     assert rc == 2
     err = capsys.readouterr().err
     assert "end_day 31 exceeds last day of 2026-04" in err
+
+
+def test_partial_then_full_run_reuses_cached_times(
+        monkeypatch, tmp_path):
+    """Run May 1-19 with --time-cache, then May 1-31 with the SAME
+    cache. Days 1-19 must come back with the exact times they had on
+    the partial run; days 20-31 are freshly generated."""
+    import openpyxl
+
+    # The fixture stubs load_time_cache/save_time_cache. This test
+    # specifically needs the real disk persistence to verify cache
+    # round-trip, so put the real implementations back.
+    from monthly_schedule.time_cache import (
+        load_time_cache as _real_load,
+        save_time_cache as _real_save,
+    )
+    monkeypatch.setattr(cli, "load_time_cache", _real_load)
+    monkeypatch.setattr(cli, "save_time_cache", _real_save)
+    monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
+    cache_path = tmp_path / "tc.json"
+    partial_dir = tmp_path / "partial"
+    partial_dir.mkdir()
+    rc = cli.main(
+        ["--center-id", "24010", "--year", "2026", "--month", "5",
+         "--output-path", str(partial_dir),
+         "--start-day", "1", "--end-day", "19",
+         "--time-cache", str(cache_path)]
+    )
+    assert rc == 0
+    partial_wb = openpyxl.load_workbook(
+        str(partial_dir / "Schedule_24010_2026-05_01-19.xlsx")
+    )
+    partial_sheet = partial_wb.active
+
+    # Capture each Date → arrival cell from the Attendance/Trans table.
+    # The Pickup time is in the transportation table starting at col F.
+    from monthly_schedule.workbook import (
+        RIGHT_FIRST_COL, HEADER_ROWS,
+    )
+    table_header_row = 1 + HEADER_ROWS
+    partial_times = {}
+    for r in range(table_header_row + 1, partial_sheet.max_row + 1):
+        date_cell = partial_sheet.cell(row=r, column=RIGHT_FIRST_COL).value
+        pickup = partial_sheet.cell(row=r, column=RIGHT_FIRST_COL + 2).value
+        if not isinstance(date_cell, date) or not pickup:
+            continue
+        partial_times[date_cell] = pickup
+
+    # Re-run for the full month; days 1-19 should match.
+    full_dir = tmp_path / "full"
+    full_dir.mkdir()
+    rc = cli.main(
+        ["--center-id", "24010", "--year", "2026", "--month", "5",
+         "--output-path", str(full_dir),
+         "--time-cache", str(cache_path)]
+    )
+    assert rc == 0
+    full_wb = openpyxl.load_workbook(
+        str(full_dir / "Schedule_24010_2026-05.xlsx")
+    )
+    full_sheet = full_wb.active
+
+    matched = 0
+    for r in range(table_header_row + 1, full_sheet.max_row + 1):
+        date_cell = full_sheet.cell(row=r, column=RIGHT_FIRST_COL).value
+        pickup = full_sheet.cell(row=r, column=RIGHT_FIRST_COL + 2).value
+        if not isinstance(date_cell, date):
+            continue
+        if date_cell in partial_times:
+            assert pickup == partial_times[date_cell], (
+                f"{date_cell}: full-run pickup {pickup} "
+                f"differs from partial-run {partial_times[date_cell]}"
+            )
+            matched += 1
+    assert matched == len(partial_times) > 0
 
 
 def test_cli_range_feb_29_non_leap_year_returns_2(

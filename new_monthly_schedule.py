@@ -25,9 +25,11 @@ from monthly_schedule.travel import (
     resolve_travel_minutes,
     TravelError,
 )
+from monthly_schedule.time_cache import load_time_cache, save_time_cache
 
 DEFAULT_DB = r"\\BOWERY3\Users\Shared\Access Member 5.5.26_copy.accdb"
 DEFAULT_GEO_CACHE = "geo_cache.json"
+DEFAULT_TIME_CACHE = "time_cache.json"
 
 
 def parse_center_ids(raw):
@@ -189,6 +191,14 @@ def parse_args(argv):
     parser.add_argument("--output-path", default=".")
     parser.add_argument("--api-key", required=True)
     parser.add_argument("--geo-cache", default=DEFAULT_GEO_CACHE)
+    parser.add_argument(
+        "--time-cache", default=DEFAULT_TIME_CACHE,
+        help=(
+            "Path to the per-day generated-times cache. Times for a "
+            "given (member, date) are reused across runs so partial-"
+            "schedule reruns don't reshuffle the printed times."
+        ),
+    )
     parser.add_argument("--preview-data", action="store_true")
     parser.add_argument(
         "--debug",
@@ -210,13 +220,15 @@ def parse_args(argv):
 
 
 def process_member(member, ctx, year, month, out_dir, preview,
-                   api_key, cache, start_day=None, end_day=None):
+                   api_key, cache, start_day=None, end_day=None,
+                   time_cache=None):
     """Run the per-member pipeline. Returns (ok, stage, reason, day).
     On success ok is True and stage/reason/day are None. On failure
     stage is one of 'eligibility'/'geocode'/'route'/'one_off_conflict'/
     'generate'/'write' with the reason; day is set for one_off_conflict.
     When start_day/end_day are supplied, only the inclusive sub-range
-    of the month is scheduled."""
+    of the month is scheduled. When `time_cache` is supplied, daily
+    times are reused across runs (idempotency for partial schedules)."""
     failure = compute_month_failure(year, month, ctx, start_day, end_day)
     if failure is not None:
         return (False, "eligibility", failure, None)
@@ -235,7 +247,11 @@ def process_member(member, ctx, year, month, out_dir, preview,
         rules["dropoff_trail_min"] = (travel_minutes + buf_lo,
                                       travel_minutes + buf_hi)
         rows = build_rows(
-            year, month, ctx, rules, rng, start_day, end_day
+            year, month, ctx, rules, rng, start_day, end_day,
+            time_cache=time_cache,
+            center_id=member["center_id"],
+            plan=str(member.get("health_plan") or "").strip().upper() or None,
+            travel_minutes=travel_minutes,
         )
     except OneOffConflict as exc:
         return (False, "one_off_conflict", exc.reason, exc.day)
@@ -281,6 +297,7 @@ def main(argv=None):
 
     api_key = args.api_key
     cache = load_cache(args.geo_cache)
+    time_cache = load_time_cache(args.time_cache)
 
     if args.center_id is not None:
         plan_code = None
@@ -352,6 +369,7 @@ def main(argv=None):
             member, ctx, args.year, args.month, out_dir,
             args.preview_data, api_key, cache,
             start_day=args.start_day, end_day=args.end_day,
+            time_cache=time_cache,
         )
         if ok:
             success += 1
@@ -366,6 +384,7 @@ def main(argv=None):
 
     save_cache(args.geo_cache, cache)
     if not args.preview_data:
+        save_time_cache(args.time_cache, time_cache)
         skipped_csv = write_skipped_members_csv(failures, out_dir)
         if skipped_csv is not None:
             print(f"Wrote skipped members report: {skipped_csv}", file=sys.stderr)

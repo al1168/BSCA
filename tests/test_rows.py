@@ -174,6 +174,62 @@ def test_debug_rows_records_window_too_narrow():
     assert monday["reason"] == REASON_DAY_WINDOW_TOO_NARROW
 
 
+def test_build_rows_uses_time_cache_when_hit(monkeypatch):
+    """A cache hit short-circuits build_daily_schedule and reuses the
+    cached times verbatim — this is the idempotency property that lets
+    a partial-month rerun produce the same printed times."""
+    from monthly_schedule import rows as rows_mod
+
+    # Pre-seed: every Monday in May 2026 has the same fixed times.
+    fixed = {
+        "pickup": "08:32", "arrival": "08:45", "time_in": "08:47",
+        "time_out": "12:47", "departure": "12:49", "dropoff": "13:02",
+    }
+    time_cache = {"members": {"1": {}}}
+    from monthly_schedule.time_cache import store_times
+    for day in (4, 11, 18, 25):
+        store_times(
+            time_cache, 1, date(2026, 5, day), fixed, "HOF", 7,
+        )
+
+    # If build_daily_schedule is invoked on a cached Monday, that's a
+    # bug — fail loudly.
+    def boom(*a, **k):
+        raise AssertionError(
+            "build_daily_schedule should not run on cached days"
+        )
+    monkeypatch.setattr(rows_mod, "build_daily_schedule", boom)
+
+    out = rows_mod.build_rows(
+        2026, 5, _ctx_full_month("1"), PLAN_RULES, random.Random(0),
+        time_cache=time_cache, center_id=1, plan="HOF", travel_minutes=7,
+    )
+    mondays = [r for r in out if r["day"] == "Mon"]
+    assert len(mondays) == 4
+    for row in mondays:
+        for k, v in fixed.items():
+            assert row[k] == v
+
+
+def test_build_rows_stores_into_time_cache_on_miss():
+    """A cache miss generates fresh times AND writes them into the
+    cache so a subsequent run reuses them."""
+    from monthly_schedule.time_cache import lookup_times
+    time_cache = {}
+    rows = build_rows(
+        2026, 5, _ctx_full_month("1"), PLAN_RULES, random.Random(0),
+        time_cache=time_cache, center_id=1, plan="HOF", travel_minutes=7,
+    )
+    monday = next(r for r in rows if r["date"] == date(2026, 5, 4))
+    hit = lookup_times(
+        time_cache, 1, date(2026, 5, 4), "HOF", 7,
+        (480, 660),
+    )
+    assert hit is not None
+    assert hit["arrival"] == monday["arrival"]
+    assert hit["pickup"] == monday["pickup"]
+
+
 def test_debug_rows_catches_one_off_conflict():
     # Duplicate one-offs would normally raise; debug rows catches per-day
     # so the CSV always completes.
