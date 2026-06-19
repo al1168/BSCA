@@ -41,6 +41,16 @@ _AVAIL_INSERT = (
     "VALUES (?, ?, NULL, ?, ?, ?)"
 )
 
+# Used by the post-HHA default-fill pass: for every member × every
+# weekday with no open Availability row, INSERT one of these.
+_DEFAULT_AVAIL_START = "08:00"
+_DEFAULT_AVAIL_END = "16:00"
+
+_ALL_MEMBER_IDS_QUERY = (
+    "SELECT DISTINCT [Center ID] FROM [Contacts] "
+    "WHERE [Center ID] IS NOT NULL"
+)
+
 
 def _is_test_id(center_id):
     """True if the Center ID, rendered as a base-10 integer, ends in '00'.
@@ -103,6 +113,36 @@ def _apply_row(cur, center_id, parsed, today, stats):
                 by_day[d] = end_hhmm
     for d, end_hhmm in by_day.items():
         _apply_clause_to_db(cur, center_id, d, end_hhmm, today, stats)
+
+
+def _seed_default_availability(cur, today, exclude_test, stats):
+    """Insert a default 8:00-16:00 Availability row for every
+    (member, weekday) pair that has no open row yet.
+
+    Runs AFTER the HHA pass so any weekday HHA narrowed to an earlier
+    end-time keeps that narrower row (the OPEN-row check sees it and
+    skips). Unmentioned weekdays get the default. The scheduler still
+    gates per-day by Authorization.auth_days, so non-authorized
+    weekday defaults are inert.
+    """
+    cur.execute(_ALL_MEMBER_IDS_QUERY)
+    member_ids = [
+        int(row[0]) for row in cur.fetchall() if row[0] is not None
+    ]
+    start_t = _hhmm_to_time(_DEFAULT_AVAIL_START)
+    end_t = _hhmm_to_time(_DEFAULT_AVAIL_END)
+    for cid in member_ids:
+        if exclude_test and _is_test_id(cid):
+            continue
+        for day in range(1, 8):  # ISO weekday: 1=Mon ... 7=Sun
+            cur.execute(_AVAIL_OPEN_QUERY, str(cid), day)
+            if cur.fetchone() is not None:
+                continue
+            cur.execute(
+                _AVAIL_INSERT,
+                str(cid), today, day, start_t, end_t,
+            )
+            stats["default_inserted"] += 1
 
 
 _CSV_COLUMNS = [
@@ -202,6 +242,7 @@ def main(argv=None):
             "inserted": 0,
             "clauses_after_close": 0,
             "multi_clause_same_day": 0,
+            "default_inserted": 0,
         }
         ambiguous_rows = []
 
@@ -245,6 +286,13 @@ def main(argv=None):
                        "SKIPPED")
                 print(f"  {tag:8s} {cid}  {hha[:60]!r}")
 
+        # After HHA: seed default 8:00-16:00 for any (member, weekday)
+        # the HHA pass didn't already cover. This runs before commit
+        # so --dry-run rolls these inserts back too.
+        _seed_default_availability(
+            cur, today, args.exclude_test_members, stats,
+        )
+
         if args.dry_run:
             conn.rollback()
             mode = "DRY-RUN (no changes committed)"
@@ -275,6 +323,10 @@ def main(argv=None):
         print(f"  Rows fully or partially ambiguous:     {stats['ambiguous']}")
         print(f"  Availability rows updated:             {stats['updated']}")
         print(f"  Availability rows inserted:            {stats['inserted']}")
+        print(
+            f"  Default 8-4 rows inserted (post-HHA):  "
+            f"{stats['default_inserted']}"
+        )
         print(
             f"  Clauses skipped (HHA_start >= 16:00):  "
             f"{stats['clauses_after_close']}"

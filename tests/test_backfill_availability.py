@@ -136,3 +136,218 @@ def test_exclude_test_members_skips_trailing_00_before_parse(
     assert "TEST-SKIP 12300" in out
 
     assert fake_conn.committed is True
+
+
+# ---------------------------------------------------------------------------
+# Post-HHA default-fill: every (member, weekday) without an open
+# Availability row gets a default 08:00-16:00 entry.
+# ---------------------------------------------------------------------------
+
+
+import datetime as _dt
+
+
+class _SmartFakeCursor:
+    """SQL-aware cursor for default-fill tests.
+
+    Dispatches fetchall/fetchone by the most recently executed SQL so
+    we can simulate distinct return values for _CONTACTS_QUERY,
+    _ALL_MEMBER_IDS_QUERY, and _AVAIL_OPEN_QUERY in a single run.
+    """
+
+    def __init__(self, contacts_rows, all_member_ids, existing_avail):
+        self._contacts_rows = list(contacts_rows)
+        self._all_member_ids = list(all_member_ids)
+        self._existing_avail = set(existing_avail)
+        self._last_sql = None
+        self._last_params = None
+        self.executed = []
+
+    def execute(self, sql, *params):
+        self.executed.append((sql, params))
+        self._last_sql = sql
+        self._last_params = params
+        return self
+
+    def fetchall(self):
+        if self._last_sql == backfill._CONTACTS_QUERY:
+            self._last_sql = None
+            return self._contacts_rows
+        if self._last_sql == backfill._ALL_MEMBER_IDS_QUERY:
+            self._last_sql = None
+            return [(mid,) for mid in self._all_member_ids]
+        return []
+
+    def fetchone(self):
+        if self._last_sql == backfill._AVAIL_OPEN_QUERY:
+            cid_str, day = self._last_params
+            try:
+                cid = int(cid_str)
+            except (TypeError, ValueError):
+                return None
+            if (cid, day) in self._existing_avail:
+                # pyodbc returns (id, avail_end_as_datetime); avail_end's
+                # .time() must be > 08:00 so the "only shorten" path
+                # doesn't fire from the HHA loop tests.
+                return (
+                    1,
+                    _dt.datetime.combine(
+                        _dt.date(1899, 12, 30), _dt.time(16, 0)
+                    ),
+                )
+            return None
+        return None
+
+
+class _SmartFakeConn:
+    def __init__(self, contacts_rows=None, all_member_ids=None,
+                 existing_avail=None):
+        self._cursor = _SmartFakeCursor(
+            contacts_rows or [],
+            all_member_ids or [],
+            existing_avail or [],
+        )
+        self.committed = False
+        self.rolled_back = False
+
+    def cursor(self):
+        return self._cursor
+
+    def commit(self):
+        self.committed = True
+
+    def rollback(self):
+        self.rolled_back = True
+
+    def close(self):
+        pass
+
+
+def test_default_fill_inserts_8_to_4_for_every_weekday(
+    tmp_path, monkeypatch, capsys
+):
+    """A member with no HHA and no existing Availability gets 7 default
+    08:00-16:00 rows (one per weekday Mon-Sun)."""
+    fake = _SmartFakeConn(
+        contacts_rows=[],
+        all_member_ids=[24010],
+        existing_avail=[],
+    )
+    monkeypatch.setattr("pyodbc.connect", lambda cs: fake)
+    db_file = tmp_path / "x.accdb"
+    db_file.touch()
+
+    rc = backfill.main([
+        "--db", str(db_file), "--csv-out", str(tmp_path),
+    ])
+    assert rc == 0
+    inserts = [
+        params for sql, params in fake._cursor.executed
+        if sql == backfill._AVAIL_INSERT
+    ]
+    assert len(inserts) == 7
+    assert sorted({p[2] for p in inserts}) == [1, 2, 3, 4, 5, 6, 7]
+    for cid_str, _today, _day, start_t, end_t in inserts:
+        assert cid_str == "24010"
+        assert start_t == backfill._hhmm_to_time("08:00")
+        assert end_t == backfill._hhmm_to_time("16:00")
+    out = capsys.readouterr().out
+    assert "Default 8-4 rows inserted (post-HHA):  7" in out
+
+
+def test_default_fill_skips_days_with_existing_rows(
+    tmp_path, monkeypatch
+):
+    """Days already covered by HHA or manual entry keep their narrower
+    row — the default fill does NOT overwrite them."""
+    fake = _SmartFakeConn(
+        contacts_rows=[],
+        all_member_ids=[24010],
+        existing_avail=[(24010, 2), (24010, 4)],  # Tue, Thu already set
+    )
+    monkeypatch.setattr("pyodbc.connect", lambda cs: fake)
+    db_file = tmp_path / "x.accdb"
+    db_file.touch()
+
+    rc = backfill.main([
+        "--db", str(db_file), "--csv-out", str(tmp_path),
+    ])
+    assert rc == 0
+    inserts = [
+        params for sql, params in fake._cursor.executed
+        if sql == backfill._AVAIL_INSERT
+    ]
+    days_inserted = sorted({p[2] for p in inserts})
+    assert days_inserted == [1, 3, 5, 6, 7]  # Tue & Thu skipped
+
+
+def test_default_fill_respects_exclude_test_members(
+    tmp_path, monkeypatch
+):
+    """--exclude-test-members applies to default-fill too — Center IDs
+    ending in '00' get neither HHA processing nor default seeding."""
+    fake = _SmartFakeConn(
+        contacts_rows=[],
+        all_member_ids=[12300, 24010],
+        existing_avail=[],
+    )
+    monkeypatch.setattr("pyodbc.connect", lambda cs: fake)
+    db_file = tmp_path / "x.accdb"
+    db_file.touch()
+
+    rc = backfill.main([
+        "--db", str(db_file), "--csv-out", str(tmp_path),
+        "--exclude-test-members",
+    ])
+    assert rc == 0
+    inserts = [
+        params for sql, params in fake._cursor.executed
+        if sql == backfill._AVAIL_INSERT
+    ]
+    cids_inserted = {p[0] for p in inserts}
+    assert cids_inserted == {"24010"}
+    assert len(inserts) == 7
+
+
+def test_default_fill_runs_after_hha_contacts_query(
+    tmp_path, monkeypatch
+):
+    """The default-fill SELECT for all member IDs runs AFTER the HHA
+    Contacts query, so any rows the HHA pass inserts are visible to
+    the existence check."""
+    fake = _SmartFakeConn(
+        contacts_rows=[(24010, "Doe", "Jane", None)],  # No HHA text
+        all_member_ids=[24010],
+        existing_avail=[],
+    )
+    monkeypatch.setattr("pyodbc.connect", lambda cs: fake)
+    db_file = tmp_path / "x.accdb"
+    db_file.touch()
+
+    rc = backfill.main([
+        "--db", str(db_file), "--csv-out", str(tmp_path),
+    ])
+    assert rc == 0
+    sqls = [sql for sql, _ in fake._cursor.executed]
+    contacts_idx = sqls.index(backfill._CONTACTS_QUERY)
+    member_ids_idx = sqls.index(backfill._ALL_MEMBER_IDS_QUERY)
+    assert contacts_idx < member_ids_idx
+
+
+def test_default_fill_dry_run_rolls_back(tmp_path, monkeypatch):
+    """--dry-run rolls back default-fill inserts along with HHA changes."""
+    fake = _SmartFakeConn(
+        contacts_rows=[],
+        all_member_ids=[24010],
+        existing_avail=[],
+    )
+    monkeypatch.setattr("pyodbc.connect", lambda cs: fake)
+    db_file = tmp_path / "x.accdb"
+    db_file.touch()
+
+    rc = backfill.main([
+        "--db", str(db_file), "--csv-out", str(tmp_path), "--dry-run",
+    ])
+    assert rc == 0
+    assert fake.rolled_back is True
+    assert fake.committed is False
