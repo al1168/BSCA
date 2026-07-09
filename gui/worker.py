@@ -46,7 +46,6 @@ class ScheduleWorker(QThread):
         year,
         month,
         out_dir,
-        preview,
         db_path,
         google_api_key,
         geo_cache,
@@ -65,7 +64,6 @@ class ScheduleWorker(QThread):
         self.year = year
         self.month = month
         self.out_dir = out_dir
-        self.preview = preview
         self.db_path = db_path
         self.google_api_key = google_api_key
         self.geo_cache = geo_cache
@@ -145,14 +143,13 @@ class ScheduleWorker(QThread):
             self._emit_error(friendly_db_error(str(exc)))
             return
 
-        if not self.preview:
-            try:
-                os.makedirs(self.out_dir, exist_ok=True)
-            except OSError as exc:
-                self._emit_error(
-                    tr("worker.cannot_create_folder", error=str(exc))
-                )
-                return
+        try:
+            os.makedirs(self.out_dir, exist_ok=True)
+        except OSError as exc:
+            self._emit_error(
+                tr("worker.cannot_create_folder", error=str(exc))
+            )
+            return
 
         total = len(members) + len(failures)
         success = 0
@@ -196,11 +193,10 @@ class ScheduleWorker(QThread):
                             self.separate_by_plan,
                         ),
                     )
-                    if not self.preview:
-                        os.makedirs(member_out_dir, exist_ok=True)
+                    os.makedirs(member_out_dir, exist_ok=True)
                 else:
                     member_out_dir = self.out_dir
-                if self.debug and not self.preview:
+                if self.debug:
                     member_debug_rows = collect_debug_rows(
                         member, ctx, self.year, self.month,
                         self.start_day, self.end_day,
@@ -222,7 +218,7 @@ class ScheduleWorker(QThread):
                 ok, stage, reason, day = process_member(
                     member, ctx,
                     self.year, self.month, member_out_dir,
-                    self.preview, api_key, cache,
+                    api_key, cache,
                     start_day=self.start_day, end_day=self.end_day,
                     time_cache=time_cache,
                     schedule_rules_overrides=self.schedule_rules,
@@ -242,24 +238,14 @@ class ScheduleWorker(QThread):
                 day = None
             if ok:
                 success += 1
-                if self.preview:
-                    self.log_line.emit(
-                        "worker.preview",
-                        {
-                            "id": member["center_id"],
-                            "last": member["last_name"],
-                            "first": member["first_name"],
-                        },
-                    )
-                else:
-                    fname = schedule_filename(
-                        member["center_id"], self.year, self.month,
-                        self.start_day, self.end_day,
-                    )
-                    generated_paths.append(
-                        os.path.join(member_out_dir, fname)
-                    )
-                    self.log_line.emit("worker.wrote", {"filename": fname})
+                fname = schedule_filename(
+                    member["center_id"], self.year, self.month,
+                    self.start_day, self.end_day,
+                )
+                generated_paths.append(
+                    os.path.join(member_out_dir, fname)
+                )
+                self.log_line.emit("worker.wrote", {"filename": fname})
             else:
                 failures.append(
                     Failure(
@@ -271,25 +257,42 @@ class ScheduleWorker(QThread):
             self.progress.emit(i + 1, len(members))
 
         save_cache(self.geo_cache, cache)
-        if not self.preview:
-            save_time_cache(time_cache_path, time_cache)
+        save_time_cache(time_cache_path, time_cache)
 
-        if not self.preview:
-            # Skipped-members CSV lives at the base output dir even in "all"
-            # mode — skips can span multiple plans, so a single roll-up file
-            # is more useful than per-plan duplicates.
-            csv_path = write_skipped_members_csv(failures, self.out_dir)
-            if csv_path is not None:
-                self.log_line.emit(
-                    "worker.wrote_skipped_csv",
-                    {"filename": os.path.basename(csv_path)},
-                )
-            # Per-member debug CSVs are written inside the loop, next to
-            # each member's schedule.
+        # Skipped-members CSV lives at the base output dir even in "all"
+        # mode — skips can span multiple plans, so a single roll-up file
+        # is more useful than per-plan duplicates.
+        def _warn_fallback(primary, actual):
+            self.log_line.emit(
+                "worker.skipped_csv_fallback",
+                {
+                    "primary": os.path.basename(primary),
+                    "filename": os.path.basename(actual),
+                },
+            )
+        try:
+            csv_path = write_skipped_members_csv(
+                failures, self.out_dir, on_fallback=_warn_fallback
+            )
+        except PermissionError as exc:
+            # Every candidate name is locked (e.g. open in Excel). The
+            # failures still appear in the on-screen summary, so warn
+            # and finish the run instead of crashing the worker.
+            csv_path = None
+            self.log_line.emit(
+                "worker.skipped_csv_failed", {"error": str(exc)}
+            )
+        if csv_path is not None:
+            self.log_line.emit(
+                "worker.wrote_skipped_csv",
+                {"filename": os.path.basename(csv_path)},
+            )
+        # Per-member debug CSVs are written inside the loop, next to
+        # each member's schedule.
 
         payload = {
             "generated_paths": generated_paths,
-            "verb_key": "summary.verb.previewed" if self.preview else "summary.verb.wrote",
+            "verb_key": "summary.verb.wrote",
             "success": success,
             "total": total,
             "scope": {
@@ -298,7 +301,7 @@ class ScheduleWorker(QThread):
                 "year": self.year,
                 "month": self.month,
             },
-            "out_dir": None if self.preview else self.out_dir,
+            "out_dir": self.out_dir,
             "failures": [
                 {
                     "center_id": f.center_id,

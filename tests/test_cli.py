@@ -75,19 +75,6 @@ def _stub_travel(monkeypatch):
     monkeypatch.setattr(cli, "get_one_offs", lambda cid, db: [])
 
 
-def test_preview_data_returns_zero_and_prints(monkeypatch, capsys):
-    monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
-    rc = cli.main(
-        ["--center-id", "24010", "--year", "2026", "--month", "5",
-         "--preview-data"]
-    )
-    assert rc == 0
-    out = capsys.readouterr().out
-    assert "2026-05-01" in out
-    assert out.count("\n") >= 31  # one line per day
-    assert "=== ID 24010 (Cheng, Lizhu) ===" in out
-
-
 def test_no_member_returns_2(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(cli, "get_member", lambda cid, db: None)
     rc = cli.main(
@@ -114,8 +101,7 @@ def test_invalid_month_rejected(monkeypatch):
     import pytest
     with pytest.raises(SystemExit):
         cli.main(
-            ["--center-id", "24010", "--year", "2026", "--month", "13",
-             "--preview-data"]
+            ["--center-id", "24010", "--year", "2026", "--month", "13"]
         )
 
 
@@ -123,8 +109,7 @@ def test_missing_db_returns_1(monkeypatch, capsys):
     def _raise(cid, db):
         raise FileNotFoundError("Database not found: X")
     monkeypatch.setattr(cli, "get_member", _raise)
-    rc = cli.main(["--center-id", "24010", "--year", "2026", "--month", "5",
-                   "--preview-data"])
+    rc = cli.main(["--center-id", "24010", "--year", "2026", "--month", "5"])
     assert rc == 1
     assert "Database not found" in capsys.readouterr().err
 
@@ -133,19 +118,20 @@ def test_driver_error_returns_1(monkeypatch, capsys):
     def _raise(cid, db):
         raise RuntimeError("Could not open the Access database. ...")
     monkeypatch.setattr(cli, "get_member", _raise)
-    rc = cli.main(["--center-id", "24010", "--year", "2026", "--month", "5",
-                   "--preview-data"])
+    rc = cli.main(["--center-id", "24010", "--year", "2026", "--month", "5"])
     assert rc == 1
     assert "Could not open the Access database" in capsys.readouterr().err
 
 
-def test_main_reads_sys_argv_when_argv_none(monkeypatch):
+def test_main_reads_sys_argv_when_argv_none(monkeypatch, tmp_path):
     """Exercises the argv is None branch (real CLI invocation path)."""
     monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
+    monkeypatch.setattr(cli, "build_workbook", lambda *a, **k: None)
     monkeypatch.setattr(
         cli.sys, "argv",
         ["new_monthly_schedule.py", "--center-id", "24010",
-         "--year", "2026", "--month", "5", "--preview-data"],
+         "--year", "2026", "--month", "5",
+         "--output-path", str(tmp_path)],
     )
     assert cli.main() == 0
 
@@ -190,11 +176,6 @@ def test_format_summary_all_success_headline_only():
     s = cli.format_summary("Wrote", 2, 2, "2026-05", "out", [])
     assert s == "Wrote 2 of 2 member(s) for 2026-05 into out; 0 failed."
     assert "Failures:" not in s
-
-
-def test_format_summary_preview_no_outdir():
-    s = cli.format_summary("Previewed", 1, 1, "2026-05", None, [])
-    assert s == "Previewed 1 of 1 member(s) for 2026-05; 0 failed."
 
 
 def test_format_summary_with_failures_lists_them():
@@ -300,23 +281,6 @@ def test_plan_no_members(monkeypatch, tmp_path, capsys):
     assert not (tmp_path / "HOF_2026-05").exists()
 
 
-def test_preview_batch_prints_headers_no_files(
-        monkeypatch, tmp_path, capsys):
-    monkeypatch.setattr(
-        cli, "get_members_by_plan",
-        lambda code, db: [FAKE_MEMBER, FAKE_MEMBER_2],
-    )
-    rc = cli.main(
-        ["--plan", "hof", "--year", "2026", "--month", "5",
-         "--output-path", str(tmp_path), "--preview-data"]
-    )
-    assert rc == 0
-    out = capsys.readouterr().out
-    assert "=== ID 24010 (Cheng, Lizhu) ===" in out
-    assert "=== ID 24011 (Smith, John) ===" in out
-    assert not (tmp_path / "HOF_2026-05").exists()
-
-
 def test_write_failure_reported_in_summary(
         monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
@@ -336,18 +300,23 @@ def test_write_failure_reported_in_summary(
 
 
 def test_travel_minutes_applied_to_pickup_and_dropoff(
-        monkeypatch, capsys):
+        monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
     monkeypatch.setattr(
         cli, "resolve_travel_minutes",
         lambda member, api_key, cache: 7,
     )
+    captured = {}
+
+    def _capture(member, rows, path, **kwargs):
+        captured["rows"] = rows
+    monkeypatch.setattr(cli, "build_workbook", _capture)
+
     rc = cli.main(
         ["--center-id", "24010", "--year", "2026", "--month", "5",
-         "--preview-data"]
+         "--output-path", str(tmp_path)]
     )
     assert rc == 0
-    out = capsys.readouterr().out
 
     def to_min(hhmm):
         h, m = hhmm.split(":")
@@ -358,10 +327,7 @@ def test_travel_minutes_applied_to_pickup_and_dropoff(
     travel_minutes = 7
 
     seen = False
-    for line in out.splitlines():
-        if not line.startswith("{"):
-            continue
-        row = eval(line)  # printed dict literal
+    for row in captured["rows"]:
         if row["arrival"] == "":
             continue
         lead = to_min(row["arrival"]) - to_min(row["pickup"])
@@ -471,6 +437,115 @@ def test_write_skipped_members_csv_includes_all_stages(tmp_path):
     assert lines[4] == (
         '24013,"Park, Eun",one_off_conflict,one-off on auth day,2026-06-05'
     )
+
+
+def test_write_skipped_members_csv_falls_back_when_primary_locked(tmp_path):
+    """When the primary file can't be opened for writing (typically because
+    the CSV from an earlier run today is open in Excel), the report is
+    written to `skipped_members_<date>_1.csv` instead and `on_fallback`
+    receives both paths. A directory squatting on the primary name raises
+    PermissionError on Windows, same as Excel's lock."""
+    (tmp_path / "skipped_members_2026-06-04.csv").mkdir()
+    failures = [
+        Failure(24010, "Cheng, Lizhu", "lookup", "not found", None),
+    ]
+    calls = []
+    result = write_skipped_members_csv(
+        failures, str(tmp_path), today=date(2026, 6, 4),
+        on_fallback=lambda primary, actual: calls.append((primary, actual)),
+    )
+    expected_path = tmp_path / "skipped_members_2026-06-04_1.csv"
+    assert result == str(expected_path)
+    lines = expected_path.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "center_id,name,stage,reason,day"
+    assert len(lines) == 2
+    assert calls == [
+        (str(tmp_path / "skipped_members_2026-06-04.csv"),
+         str(expected_path)),
+    ]
+
+
+def test_write_skipped_members_csv_tries_next_fallback_name(tmp_path):
+    """If the first fallback name is also locked, the next one is used."""
+    (tmp_path / "skipped_members_2026-06-04.csv").mkdir()
+    (tmp_path / "skipped_members_2026-06-04_1.csv").mkdir()
+    failures = [
+        Failure(24010, "Cheng, Lizhu", "lookup", "not found", None),
+    ]
+    result = write_skipped_members_csv(
+        failures, str(tmp_path), today=date(2026, 6, 4)
+    )
+    expected_path = tmp_path / "skipped_members_2026-06-04_2.csv"
+    assert result == str(expected_path)
+    assert expected_path.exists()
+
+
+def test_write_skipped_members_csv_raises_when_all_names_locked(tmp_path):
+    """Primary plus every fallback name locked -> PermissionError."""
+    (tmp_path / "skipped_members_2026-06-04.csv").mkdir()
+    for n in range(1, 10):
+        (tmp_path / f"skipped_members_2026-06-04_{n}.csv").mkdir()
+    failures = [
+        Failure(24010, "Cheng, Lizhu", "lookup", "not found", None),
+    ]
+    with pytest.raises(PermissionError):
+        write_skipped_members_csv(
+            failures, str(tmp_path), today=date(2026, 6, 4)
+        )
+
+
+def test_cli_warns_and_falls_back_when_skipped_csv_locked(
+        monkeypatch, tmp_path, capsys):
+    """When the primary skipped-members CSV is locked (e.g. open in
+    Excel), main() warns on stderr and writes the report under the `_1`
+    fallback name instead of crashing."""
+    monkeypatch.setattr(cli, "get_member", lambda cid, db: None)
+    today = date.today().isoformat()
+    (tmp_path / f"skipped_members_{today}.csv").mkdir()
+    rc = cli.main(
+        ["--center-id", "24010", "--year", "2026", "--month", "5",
+         "--output-path", str(tmp_path)]
+    )
+    assert rc == 2
+    err = capsys.readouterr().err
+    fallback = tmp_path / f"skipped_members_{today}_1.csv"
+    assert fallback.exists()
+    assert "open in Excel" in err
+    assert f"skipped_members_{today}_1.csv" in err
+    assert "Failures:" in err
+
+
+def test_cli_warns_when_skipped_csv_unwritable(
+        monkeypatch, tmp_path, capsys):
+    """When every candidate CSV name is locked, main() warns on stderr
+    and still prints the failure summary instead of crashing."""
+    monkeypatch.setattr(cli, "get_member", lambda cid, db: None)
+    today = date.today().isoformat()
+    (tmp_path / f"skipped_members_{today}.csv").mkdir()
+    for n in range(1, 10):
+        (tmp_path / f"skipped_members_{today}_{n}.csv").mkdir()
+    rc = cli.main(
+        ["--center-id", "24010", "--year", "2026", "--month", "5",
+         "--output-path", str(tmp_path)]
+    )
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "could not write the skipped members report" in err
+    assert "Failures:" in err
+
+
+def test_write_skipped_members_csv_no_callback_when_primary_writable(tmp_path):
+    """`on_fallback` is not called when the primary name is used."""
+    failures = [
+        Failure(24010, "Cheng, Lizhu", "lookup", "not found", None),
+    ]
+    calls = []
+    result = write_skipped_members_csv(
+        failures, str(tmp_path), today=date(2026, 6, 4),
+        on_fallback=lambda primary, actual: calls.append((primary, actual)),
+    )
+    assert result == str(tmp_path / "skipped_members_2026-06-04.csv")
+    assert calls == []
 
 
 # ---------------------------------------------------------------------------
@@ -667,18 +742,6 @@ def test_debug_flag_off_does_not_write_debug_csv(monkeypatch, tmp_path):
     )
     assert rc == 0
     assert not list(tmp_path.glob("Debug_*.csv"))
-
-
-def test_debug_flag_with_preview_writes_no_files(monkeypatch, tmp_path):
-    """--debug + --preview-data: still no files written (preview wins)."""
-    monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
-    rc = cli.main(
-        ["--center-id", "24010", "--year", "2026", "--month", "5",
-         "--output-path", str(tmp_path), "--debug", "--preview-data"]
-    )
-    assert rc == 0
-    assert not list(tmp_path.glob("Debug_*.csv"))
-    assert not (tmp_path / "Schedule_24010_2026-05.xlsx").exists()
 
 
 def test_write_skipped_members_csv_preserves_input_order(tmp_path):

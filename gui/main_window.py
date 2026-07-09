@@ -231,8 +231,6 @@ class MainWindow(QWidget):
         root.addWidget(self._save_box)
 
         # ── Options ────────────────────────────────────────────────
-        self._preview_check = QCheckBox()
-        root.addWidget(self._preview_check)
         self._debug_check = QCheckBox()
         root.addWidget(self._debug_check)
         # All-Members only: split output into per-MLTC folders. Default
@@ -268,8 +266,8 @@ class MainWindow(QWidget):
         self._open_folder_btn.clicked.connect(self._open_output_folder)
         root.addWidget(self._open_folder_btn)
 
-        # Appears after a successful (non-preview) run; prints every
-        # generated schedule to the default printer (never debug CSVs).
+        # Appears after a successful run; prints every generated
+        # schedule to the default printer (never debug CSVs).
         self._print_btn = QPushButton()
         self._print_btn.setVisible(False)
         self._print_btn.clicked.connect(self._print_schedules)
@@ -309,7 +307,6 @@ class MainWindow(QWidget):
         self._save_box.setTitle(tr("save.title"))
         self._change_btn.setText(tr("save.change"))
 
-        self._preview_check.setText(tr("opts.preview"))
         self._debug_check.setText(tr("opts.debug"))
         self._mltc_folders_check.setText(tr("opts.mltc_folders"))
         self._generate_btn.setText(tr("opts.generate"))
@@ -463,15 +460,14 @@ class MainWindow(QWidget):
             )
             return False
 
-        if not self._preview_check.isChecked():
-            out = self._settings.get("output_path", "").strip()
-            if not out:
-                QMessageBox.warning(
-                    self,
-                    tr("msg.missing_info.title"),
-                    tr("msg.missing_info.output_folder"),
-                )
-                return False
+        out = self._settings.get("output_path", "").strip()
+        if not out:
+            QMessageBox.warning(
+                self,
+                tr("msg.missing_info.title"),
+                tr("msg.missing_info.output_folder"),
+            )
+            return False
 
         if self._range_check.isChecked():
             if self._range_from_spin.value() > self._range_to_spin.value():
@@ -492,7 +488,6 @@ class MainWindow(QWidget):
         mode = ["single", "multiple", "plan", "all"][mode_id]
         year = self._year_spin.value()
         month = self._month_combo.currentIndex() + 1
-        preview = self._preview_check.isChecked()
         debug = self._debug_check.isChecked()
         separate_by_plan = self._mltc_folders_check.isChecked()
         if self._range_check.isChecked():
@@ -528,7 +523,6 @@ class MainWindow(QWidget):
             year=year,
             month=month,
             out_dir=out_dir,
-            preview=preview,
             db_path=self._settings["db_path"],
             google_api_key=self._settings["google_api_key"],
             geo_cache=self._settings["geo_cache"],
@@ -558,11 +552,10 @@ class MainWindow(QWidget):
         self._log.appendPlainText("")
         self._log.appendPlainText(summary)
         self._generate_btn.setEnabled(True)
-        preview = self._preview_check.isChecked()
         self._last_generated = payload.get("generated_paths", []) or []
         # Show the folder/print buttons whenever at least one schedule was
         # written — even on a partial run where some members were skipped.
-        if not preview and self._last_generated:
+        if self._last_generated:
             self._open_folder_btn.setVisible(True)
             self._print_btn.setVisible(True)
         if not success:

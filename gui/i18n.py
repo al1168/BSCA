@@ -47,7 +47,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "save.title": "Save To",
         "save.change": "Change…",
         # options
-        "opts.preview": "Preview only (don't save files)",
         "opts.debug": "Debug (write per-day reason CSV next to each schedule)",
         "opts.mltc_folders": (
             "All Members: separate output into per-MLTC folders "
@@ -143,15 +142,21 @@ STRINGS: dict[str, dict[str, str]] = {
             "The 'From day' must be on or before the 'To day'."
         ),
         # worker log lines
-        "worker.preview": "Preview: {id} ({last}, {first})",
         "worker.wrote": "Wrote {filename}",
         "worker.wrote_skipped_csv": "Wrote skipped members report: {filename}",
+        "worker.skipped_csv_fallback": (
+            "Warning: {primary} is locked (open in Excel?) — saved the "
+            "skipped members report as {filename} instead."
+        ),
+        "worker.skipped_csv_failed": (
+            "Warning: could not write the skipped members report "
+            "({error}). The skipped members are listed in the summary."
+        ),
         "worker.wrote_debug_csv": "Wrote debug report: {filename}",
         "worker.no_members": "No members found in the database.",
         "worker.no_members_for_plan": "No members found for plan {plan}.",
         "worker.cannot_create_folder": "Cannot create output folder: {error}",
         # run summary
-        "summary.verb.previewed": "Previewed",
         "summary.verb.wrote": "Wrote",
         "summary.headline": "{verb} {success} of {total} member(s) for {scope}",
         "summary.into": " into {dir}",
@@ -231,7 +236,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "save.title": "保存到",
         "save.change": "更改…",
         # options
-        "opts.preview": "仅预览（不保存文件）",
         "opts.debug": "调试（在每个日程旁写入每日原因 CSV）",
         "opts.mltc_folders": "所有成员：按 MLTC 分文件夹输出（关闭＝统一放入一个 月份_年份_Timesheets 文件夹）",
         "opts.generate": "生成日程表",
@@ -319,15 +323,21 @@ STRINGS: dict[str, dict[str, str]] = {
         "msg.invalid_range.title": "日期范围无效",
         "msg.invalid_range.body": "“起始日”必须不晚于“截止日”。",
         # worker log lines
-        "worker.preview": "预览：{id}（{last}，{first}）",
         "worker.wrote": "已写入 {filename}",
         "worker.wrote_skipped_csv": "已写入跳过成员报告：{filename}",
+        "worker.skipped_csv_fallback": (
+            "警告：{primary} 已被占用（可能在 Excel 中打开）——"
+            "已将跳过成员报告另存为 {filename}。"
+        ),
+        "worker.skipped_csv_failed": (
+            "警告：无法写入跳过成员报告（{error}）。"
+            "被跳过的成员已在摘要中列出。"
+        ),
         "worker.wrote_debug_csv": "已写入调试报告：{filename}",
         "worker.no_members": "数据库中找不到成员。",
         "worker.no_members_for_plan": "计划 {plan} 中找不到成员。",
         "worker.cannot_create_folder": "无法创建输出文件夹：{error}",
         # run summary
-        "summary.verb.previewed": "已预览",
         "summary.verb.wrote": "已写入",
         "summary.headline": "{verb} {scope} 的 {total} 名成员中的 {success} 名",
         "summary.into": "，至 {dir}",

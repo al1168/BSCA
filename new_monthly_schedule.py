@@ -178,29 +178,51 @@ def format_summary(verb, success_count, total, scope, out_dir,
     return "\n".join(lines)
 
 
-def write_skipped_members_csv(failures, out_dir, today=None):
+def write_skipped_members_csv(failures, out_dir, today=None,
+                              on_fallback=None):
     """If `failures` is non-empty, write `skipped_members_<YYYY-MM-DD>.csv`
     into `out_dir` with one row per skipped member. Return the path
     written, or None when `failures` is empty (file not created).
+
+    When the primary file is locked (typically the CSV from an earlier run
+    today left open in Excel), retry as `skipped_members_<date>_1.csv`
+    through `_9.csv`; `on_fallback(primary_path, actual_path)` is called
+    once when a fallback name is used. Raises PermissionError only when
+    every candidate name is locked.
 
     The `day` column is the ISO date from `failure.day` when set
     (currently only `one_off_conflict` failures), empty string otherwise."""
     if not failures:
         return None
     today = today or _date.today()
-    path = os.path.join(out_dir, f"skipped_members_{today.isoformat()}.csv")
-    with open(path, "w", newline="", encoding="utf-8") as fh:
-        writer = csv.writer(fh)
-        writer.writerow(["center_id", "name", "stage", "reason", "day"])
-        for f in failures:
-            writer.writerow([
-                f.center_id,
-                f.name,
-                f.stage,
-                f.reason,
-                f.day.isoformat() if f.day else "",
-            ])
-    return path
+    stem = f"skipped_members_{today.isoformat()}"
+    primary = os.path.join(out_dir, f"{stem}.csv")
+    candidates = [primary] + [
+        os.path.join(out_dir, f"{stem}_{n}.csv") for n in range(1, 10)
+    ]
+    last_error = None
+    for path in candidates:
+        try:
+            with open(path, "w", newline="", encoding="utf-8") as fh:
+                writer = csv.writer(fh)
+                writer.writerow(
+                    ["center_id", "name", "stage", "reason", "day"]
+                )
+                for f in failures:
+                    writer.writerow([
+                        f.center_id,
+                        f.name,
+                        f.stage,
+                        f.reason,
+                        f.day.isoformat() if f.day else "",
+                    ])
+        except PermissionError as exc:
+            last_error = exc
+            continue
+        if path != primary and on_fallback is not None:
+            on_fallback(primary, path)
+        return path
+    raise last_error
 
 
 def parse_args(argv):
@@ -228,7 +250,6 @@ def parse_args(argv):
             "schedule reruns don't reshuffle the printed times."
         ),
     )
-    parser.add_argument("--preview-data", action="store_true")
     parser.add_argument(
         "--debug",
         action="store_true",
@@ -248,7 +269,7 @@ def parse_args(argv):
     return parser.parse_args(argv)
 
 
-def process_member(member, ctx, year, month, out_dir, preview,
+def process_member(member, ctx, year, month, out_dir,
                    api_key, cache, start_day=None, end_day=None,
                    time_cache=None, schedule_rules_overrides=None):
     """Run the per-member pipeline. Returns (ok, stage, reason, day).
@@ -291,15 +312,6 @@ def process_member(member, ctx, year, month, out_dir, preview,
         return (False, "one_off_conflict", exc.reason, exc.day)
     except Exception as exc:  # reported in the run summary
         return (False, "generate", f"{type(exc).__name__} — {exc}", None)
-
-    if preview:
-        print(
-            f"=== ID {member['center_id']} "
-            f"({member['last_name']}, {member['first_name']}) ==="
-        )
-        for row in rows:
-            print({**row, "date": str(row["date"])})
-        return (True, None, None, None)
 
     path = os.path.join(
         out_dir,
@@ -386,8 +398,7 @@ def main(argv=None):
     out_dir = resolve_output_dir(
         args.output_path, plan_code, args.year, args.month
     )
-    if not args.preview_data:
-        os.makedirs(out_dir, exist_ok=True)
+    os.makedirs(out_dir, exist_ok=True)
 
     success = 0
     for member in members:
@@ -398,7 +409,7 @@ def main(argv=None):
             availabilities=get_availability(member["center_id"], args.db_path),
             one_offs=get_one_offs(member["center_id"], args.db_path),
         )
-        if args.debug and not args.preview_data:
+        if args.debug:
             member_debug_rows = collect_debug_rows(
                 member, ctx, args.year, args.month,
                 args.start_day, args.end_day,
@@ -415,7 +426,7 @@ def main(argv=None):
                 print(f"Wrote debug report: {written}", file=sys.stderr)
         ok, stage, reason, day = process_member(
             member, ctx, args.year, args.month, out_dir,
-            args.preview_data, api_key, cache,
+            api_key, cache,
             start_day=args.start_day, end_day=args.end_day,
             time_cache=time_cache,
         )
@@ -431,14 +442,30 @@ def main(argv=None):
             )
 
     save_cache(args.geo_cache, cache)
-    if not args.preview_data:
-        save_time_cache(args.time_cache, time_cache)
-        skipped_csv = write_skipped_members_csv(failures, out_dir)
-        if skipped_csv is not None:
-            print(f"Wrote skipped members report: {skipped_csv}", file=sys.stderr)
+    save_time_cache(args.time_cache, time_cache)
+    def _warn_fallback(primary, actual):
+        print(
+            f"Warning: {os.path.basename(primary)} is locked "
+            "(open in Excel?); saved the skipped members report as "
+            f"{os.path.basename(actual)} instead.",
+            file=sys.stderr,
+        )
+    try:
+        skipped_csv = write_skipped_members_csv(
+            failures, out_dir, on_fallback=_warn_fallback
+        )
+    except PermissionError as exc:
+        skipped_csv = None
+        print(
+            "Warning: could not write the skipped members report "
+            f"({exc}); the skipped members are listed below.",
+            file=sys.stderr,
+        )
+    if skipped_csv is not None:
+        print(f"Wrote skipped members report: {skipped_csv}", file=sys.stderr)
     total = success + len(failures)
-    verb = "Previewed" if args.preview_data else "Wrote"
-    summary_dir = None if args.preview_data else out_dir
+    verb = "Wrote"
+    summary_dir = out_dir
     print(
         format_summary(verb, success, total, scope, summary_dir,
                        failures),
