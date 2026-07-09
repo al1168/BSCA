@@ -42,9 +42,11 @@ _AVAIL_INSERT = (
 )
 
 # Used by the post-HHA default-fill pass: for every member × every
-# weekday with no open Availability row, INSERT one of these.
+# weekday with no open Availability row, INSERT one of these. The end
+# is a morning cutoff so the scheduler's random placement lands sessions
+# in the morning by default; afternoon members are widened by hand.
 _DEFAULT_AVAIL_START = "08:00"
-_DEFAULT_AVAIL_END = "16:00"
+_DEFAULT_AVAIL_END = "13:00"
 
 _ALL_MEMBER_IDS_QUERY = (
     "SELECT DISTINCT [Center ID] FROM [Contacts] "
@@ -116,7 +118,7 @@ def _apply_row(cur, center_id, parsed, today, stats):
 
 
 def _seed_default_availability(cur, today, exclude_test, stats):
-    """Insert a default 8:00-16:00 Availability row for every
+    """Insert a default 8:00-13:00 Availability row for every
     (member, weekday) pair that has no open row yet.
 
     Covers Monday through Sunday. Runs AFTER the HHA pass so any
@@ -287,7 +289,7 @@ def main(argv=None):
                        "SKIPPED")
                 print(f"  {tag:8s} {cid}  {hha[:60]!r}")
 
-        # After HHA: seed default 8:00-16:00 for any (member, weekday)
+        # After HHA: seed default 8:00-13:00 for any (member, weekday)
         # the HHA pass didn't already cover. This runs before commit
         # so --dry-run rolls these inserts back too.
         _seed_default_availability(
@@ -325,7 +327,7 @@ def main(argv=None):
         print(f"  Availability rows updated:             {stats['updated']}")
         print(f"  Availability rows inserted:            {stats['inserted']}")
         print(
-            f"  Default 8-4 rows inserted (post-HHA):  "
+            f"  Default 8-1 rows inserted (post-HHA):  "
             f"{stats['default_inserted']}"
         )
         print(

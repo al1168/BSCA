@@ -140,7 +140,7 @@ def test_exclude_test_members_skips_trailing_00_before_parse(
 
 # ---------------------------------------------------------------------------
 # Post-HHA default-fill: every (member, weekday) without an open
-# Availability row gets a default 08:00-16:00 entry.
+# Availability row gets a default 08:00-13:00 entry.
 # ---------------------------------------------------------------------------
 
 
@@ -223,11 +223,11 @@ class _SmartFakeConn:
         pass
 
 
-def test_default_fill_inserts_8_to_4_for_every_weekday(
+def test_default_fill_inserts_8_to_1_for_every_weekday(
     tmp_path, monkeypatch, capsys
 ):
     """A member with no HHA and no existing Availability gets 7 default
-    08:00-16:00 rows — one per weekday Mon-Sun."""
+    08:00-13:00 rows — one per weekday Mon-Sun."""
     fake = _SmartFakeConn(
         contacts_rows=[],
         all_member_ids=[24010],
@@ -250,9 +250,9 @@ def test_default_fill_inserts_8_to_4_for_every_weekday(
     for cid_str, _today, _day, start_t, end_t in inserts:
         assert cid_str == "24010"
         assert start_t == backfill._hhmm_to_time("08:00")
-        assert end_t == backfill._hhmm_to_time("16:00")
+        assert end_t == backfill._hhmm_to_time("13:00")
     out = capsys.readouterr().out
-    assert "Default 8-4 rows inserted (post-HHA):  7" in out
+    assert "Default 8-1 rows inserted (post-HHA):  7" in out
 
 
 def test_default_fill_skips_days_with_existing_rows(
