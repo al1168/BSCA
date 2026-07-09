@@ -39,6 +39,27 @@ def test_create_authorization_ddl():
         assert col in q
 
 
+def test_create_transport_authorization_ddl():
+    q = build._CREATE_TRANSPORT_AUTHORIZATION
+    assert "CREATE TABLE [TransportAuthorization]" in q
+    assert "[ID] AUTOINCREMENT PRIMARY KEY" in q
+    # Full mirror of Authorization, including the auth_number column
+    # (sourced from Contacts.[TRANS Auth] by the backfill).
+    for col in ("[Center ID]", "[auth_start]", "[auth_end]",
+                "[effective_start]", "[effective_end]", "[auth_days]",
+                "[notes]", "[Health Plan]", "[Member ID]",
+                "[auth_number] TEXT(255)", "[created_at]"):
+        assert col in q
+
+
+def test_create_auth_edge_ddl():
+    q = build._CREATE_AUTH_EDGE
+    assert "CREATE TABLE [AuthEdge]" in q
+    assert "[ID] AUTOINCREMENT PRIMARY KEY" in q
+    assert "[authorization_id] LONG" in q
+    assert "[transport_authorization_id] LONG" in q
+
+
 def test_create_absences_ddl():
     q = build._CREATE_ABSENCES
     assert "CREATE TABLE [Absences]" in q
@@ -78,10 +99,12 @@ def test_ddls_in_declared_order():
     assert build._DDLS == [
         ("Enrollment", build._CREATE_ENROLLMENT),
         ("Authorization", build._CREATE_AUTHORIZATION),
+        ("TransportAuthorization", build._CREATE_TRANSPORT_AUTHORIZATION),
         ("Absences", build._CREATE_ABSENCES),
         ("Availability", build._CREATE_AVAILABILITY),
         ("OneOffAvailability", build._CREATE_ONE_OFF_AVAILABILITY),
         ("EmergencyContact", build._CREATE_EMERGENCY_CONTACT),
+        ("AuthEdge", build._CREATE_AUTH_EDGE),
     ]
 
 
@@ -106,3 +129,10 @@ def test_authorization_ddl_has_member_id_column():
     external Medicaid-style ID copied from Contacts."""
     q = build._CREATE_AUTHORIZATION
     assert "[Member ID] TEXT(255)" in q
+
+
+def test_authorization_ddl_has_auth_number_column():
+    """The Authorization DDL includes [auth_number] TEXT(255) — the
+    authorization number copied from Contacts.[SADC Auth]."""
+    q = build._CREATE_AUTHORIZATION
+    assert "[auth_number] TEXT(255)" in q

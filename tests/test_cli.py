@@ -321,7 +321,7 @@ def test_write_failure_reported_in_summary(
         monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
 
-    def boom(member, rows, path):
+    def boom(member, rows, path, **kwargs):
         raise PermissionError("denied")
     monkeypatch.setattr(cli, "build_workbook", boom)
     rc = cli.main(
@@ -489,11 +489,25 @@ def test_no_range_omits_filename_suffix():
 
 
 def test_debug_filename_with_range():
-    assert cli.debug_filename(2026, 5, 1, 19) == "Debug_2026-05_01-19.csv"
+    assert (cli.debug_filename(24010, 2026, 5, 1, 19)
+            == "Debug_24010_2026-05_01-19.csv")
 
 
 def test_debug_filename_without_range():
-    assert cli.debug_filename(2026, 5) == "Debug_2026-05.csv"
+    assert cli.debug_filename(24010, 2026, 5) == "Debug_24010_2026-05.csv"
+
+
+def test_all_members_subdir_single_folder():
+    # Default: everyone shares one month-named folder, plan-independent.
+    assert cli.all_members_subdir(2026, 6, "HOF", False) == "June_2026_Timesheets"
+    assert cli.all_members_subdir(2026, 6, None, False) == "June_2026_Timesheets"
+
+
+def test_all_members_subdir_per_plan():
+    # Opt-in: one folder per MLTC, matching the old behavior.
+    assert cli.all_members_subdir(2026, 6, "hof", True) == "HOF_2026-06"
+    assert cli.all_members_subdir(2026, 6, None, True) == "_NoPlan_2026-06"
+    assert cli.all_members_subdir(2026, 6, "   ", True) == "_NoPlan_2026-06"
 
 
 def test_cli_range_writes_to_range_suffixed_file(monkeypatch, tmp_path):
@@ -614,9 +628,9 @@ def test_cli_range_feb_29_non_leap_year_returns_2(
 # ---------------------------------------------------------------------------
 
 
-def test_debug_flag_writes_combined_debug_csv(monkeypatch, tmp_path):
-    """--debug produces ONE combined Debug_<YYYY-MM>.csv with rows for
-    every scheduled member, not a separate file per member."""
+def test_debug_flag_writes_per_member_debug_csvs(monkeypatch, tmp_path):
+    """--debug produces one Debug_<center_id>_<YYYY-MM>.csv per member
+    (no combined file)."""
     monkeypatch.setattr(
         cli, "get_members_by_plan",
         lambda code, db: [FAKE_MEMBER, FAKE_MEMBER_2],
@@ -627,18 +641,22 @@ def test_debug_flag_writes_combined_debug_csv(monkeypatch, tmp_path):
     )
     assert rc == 0
     sub = tmp_path / "HOF_2026-05"
-    debug_path = sub / "Debug_2026-05.csv"
-    assert debug_path.exists()
-    # No per-member Debug_<id>_*.csv files.
-    assert not list(sub.glob("Debug_24010_*.csv"))
-    assert not list(sub.glob("Debug_24011_*.csv"))
-    lines = debug_path.read_text(encoding="utf-8").splitlines()
-    assert lines[0] == "center_id,name,date,day,scheduled,reason"
-    # auth_days "1.3.4.5" → Mon/Wed/Thu/Fri in May 2026 = 17 days × 2 members
-    assert len(lines) - 1 == 34
-    # Each row should be tagged with one of the two member IDs.
-    ids = {line.split(",", 1)[0] for line in lines[1:]}
-    assert ids == {"24010", "24011"}
+    # No combined file.
+    assert not (sub / "Debug_2026-05.csv").exists()
+    # One file per member, each with its own rows.
+    for cid in ("24010", "24011"):
+        path = sub / f"Debug_{cid}_2026-05.csv"
+        assert path.exists()
+        lines = path.read_text(encoding="utf-8").splitlines()
+        assert lines[0] == (
+            "center_id,name,date,day,scheduled,reason,"
+            "availability,availability_source,absent,auth_days,"
+            "placement_window,max_length"
+        )
+        # auth_days "1.3.4.5" → Mon/Wed/Thu/Fri in May 2026 = 17 days.
+        assert len(lines) - 1 == 17
+        ids = {line.split(",", 1)[0] for line in lines[1:]}
+        assert ids == {cid}
 
 
 def test_debug_flag_off_does_not_write_debug_csv(monkeypatch, tmp_path):
@@ -648,7 +666,7 @@ def test_debug_flag_off_does_not_write_debug_csv(monkeypatch, tmp_path):
          "--output-path", str(tmp_path)]
     )
     assert rc == 0
-    assert not (tmp_path / "Debug_2026-05.csv").exists()
+    assert not list(tmp_path.glob("Debug_*.csv"))
 
 
 def test_debug_flag_with_preview_writes_no_files(monkeypatch, tmp_path):
@@ -659,7 +677,7 @@ def test_debug_flag_with_preview_writes_no_files(monkeypatch, tmp_path):
          "--output-path", str(tmp_path), "--debug", "--preview-data"]
     )
     assert rc == 0
-    assert not (tmp_path / "Debug_2026-05.csv").exists()
+    assert not list(tmp_path.glob("Debug_*.csv"))
     assert not (tmp_path / "Schedule_24010_2026-05.xlsx").exists()
 
 

@@ -15,6 +15,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Border, Side, Alignment, Font
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.pagebreak import Break
+from openpyxl.worksheet.page import PageMargins
 
 from monthly_schedule.health_plan import display_plan
 
@@ -24,7 +25,13 @@ _THIN = Side(style="thin")
 _BOX = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
 _RULE = Border(bottom=_THIN)
 _CENTER = Alignment(horizontal="center", vertical="center")
-_BOLD = Font(bold=True)
+_FONT_SIZE = 12                        # slightly larger than the 11pt default
+_BOLD = Font(bold=True, size=_FONT_SIZE)
+_REGULAR = Font(size=_FONT_SIZE)
+_ROW_HEIGHT = 18                       # taller than ~15pt default, but
+                                       # still fits a full month on one
+                                       # page so Excel doesn't shrink-to-
+                                       # fit (which drops thin grid lines)
 
 TABLE1_HEADERS = ["Date", "Day", "Time-In", "Time-Out"]
 TABLE1_KEYS = ["time_in", "time_out"]
@@ -45,18 +52,38 @@ _WIDTH_FACTOR = 1.15
 _WIDTH_PAD = 2
 _WIDTH_MIN = 4
 _WIDTH_MAX = 40
-_LEFT_MIN_WIDTH = 16                    # Attendance (left) column floor
+# Per-column width floors for the Attendance (left) table, keyed by
+# column index (1=Date, 2=Day, 3=Time-In, 4=Time-Out). Day uses the
+# default floor so it autosizes narrow (like the transport Day column);
+# Time-In/Time-Out are widened to fill the space it gives up.
+_LEFT_COL_FLOORS = {1: 16, 2: _WIDTH_MIN, 3: 24, 4: 24}
 _SIG_LINE_MIN = 22                      # min total Signature rule width
 _DATE_LINE_MIN = 14                     # min total Date rule width
+
+
+_RIGHT = Alignment(horizontal="right", vertical="center")
 
 
 def _member_name(member):
     return f"{member['last_name']}, {member['first_name']}"
 
 
-def _write_header_block(ws, start_row, first_col, last_col, member):
+def format_auth_label(weekdays):
+    """Render a set of weekday ints as 'Auth: 1.3.5' in weekday order
+    (1=Mon..7=Sun), dot-separated. Empty/None -> '' (no label)."""
+    if not weekdays:
+        return ""
+    days = ".".join(str(d) for d in sorted(weekdays) if 1 <= d <= 7)
+    return f"Auth: {days}" if days else ""
+
+
+def _write_header_block(ws, start_row, first_col, last_col, member,
+                        auth_label=None):
     """Write the 3 header lines, each merged across [first_col,
-    last_col]. Returns the first free row after the block."""
+    last_col]. When `auth_label` is given, the ID/Name line (offset 2 —
+    the row directly above the table) splits: ID/Name keeps the left and
+    most of the row, with the right-aligned authorized-days label in the
+    rightmost column(s). Returns the first free row after the block."""
     lines = (
         COMPANY_NAME,
         f"MLTC: {display_plan(member['health_plan'])}",
@@ -65,15 +92,34 @@ def _write_header_block(ws, start_row, first_col, last_col, member):
             f"Name: {_member_name(member)}"
         ),
     )
+    # Auth block = the rightmost column(s): 2 for the wider transport
+    # table, 1 for the attendance table, so the ID/Name text keeps room.
+    span = last_col - first_col + 1
+    auth_first = last_col - (2 if span > 4 else 1) + 1
     for offset, text in enumerate(lines):
         row = start_row + offset
         cell = ws.cell(row=row, column=first_col, value=text)
-        if offset == 0:
-            cell.font = _BOLD
-        ws.merge_cells(
-            start_row=row, start_column=first_col,
-            end_row=row, end_column=last_col,
-        )
+        cell.font = _BOLD                          # all header lines bold
+        if offset == 2 and auth_label:
+            # ID/Name over the left block, auth right-aligned at far
+            # right — directly on top of the table.
+            ws.merge_cells(
+                start_row=row, start_column=first_col,
+                end_row=row, end_column=auth_first - 1,
+            )
+            auth_cell = ws.cell(row=row, column=auth_first, value=auth_label)
+            auth_cell.font = _BOLD
+            auth_cell.alignment = _RIGHT
+            if auth_first < last_col:
+                ws.merge_cells(
+                    start_row=row, start_column=auth_first,
+                    end_row=row, end_column=last_col,
+                )
+        else:
+            ws.merge_cells(
+                start_row=row, start_column=first_col,
+                end_row=row, end_column=last_col,
+            )
     return start_row + HEADER_ROWS
 
 
@@ -100,42 +146,61 @@ def _write_table(ws, start_row, first_col, headers, keys, rows):
             cell = ws.cell(row=r, column=first_col + col_off)
             cell.alignment = _CENTER
             cell.border = _BOX
+            cell.font = _REGULAR
         r += 1
     return r
+
+
+def _write_ruled_label(ws, row, label, label_col, rule_cols):
+    """Write `label` into `label_col`, then merge it together with
+    `rule_cols` into one cell and run a bottom-border rule under the
+    whole span. The label therefore sits on its own extended write-on
+    line (no gap between the label and the line)."""
+    cols = (label_col,) + tuple(rule_cols)
+    lo, hi = min(cols), max(cols)
+    label_cell = ws.cell(row=row, column=label_col, value=label)
+    label_cell.font = _REGULAR
+    for col in range(lo, hi + 1):
+        ws.cell(row=row, column=col).border = _RULE
+    ws.merge_cells(
+        start_row=row, start_column=lo, end_row=row, end_column=hi,
+    )
 
 
 def _write_footer(ws, data_last_row, first_col, last_col, caption,
                   sig_label_col, sig_rule_cols,
                   date_label_col, date_rule_cols):
     """After a blank spacer row: a bold caption merged across
-    [first_col, last_col], then a Signature/Date row with
-    bottom-bordered blank rule cells. Row layout:
+    [first_col, last_col], then a Signature/Date row where each label
+    shares one merged, bottom-bordered cell with its write-on line.
+    Row layout:
       data_last_row + 1  -> blank spacer (nothing written)
       data_last_row + 2  -> caption
-      data_last_row + 3  -> Signature/Date line
+      data_last_row + 3  -> blank spacer  ┐ two cells of space between
+      data_last_row + 4  -> blank spacer  ┘ the caption and the line
+      data_last_row + 5  -> Signature/Date line
     """
     cap_row = data_last_row + 2
-    sig_row = data_last_row + 3
+    sig_row = data_last_row + 5
     cap = ws.cell(row=cap_row, column=first_col, value=caption)
     cap.font = _BOLD
     ws.merge_cells(
         start_row=cap_row, start_column=first_col,
         end_row=cap_row, end_column=last_col,
     )
-    ws.cell(row=sig_row, column=sig_label_col, value="Signature:")
-    for col in sig_rule_cols:
-        ws.cell(row=sig_row, column=col).border = _RULE
-    ws.cell(row=sig_row, column=date_label_col, value="Date:")
-    for col in date_rule_cols:
-        ws.cell(row=sig_row, column=col).border = _RULE
+    _write_ruled_label(ws, sig_row, "Signature:",
+                       sig_label_col, sig_rule_cols)
+    _write_ruled_label(ws, sig_row, "Date:",
+                       date_label_col, date_rule_cols)
 
 
 def _autosize_columns(ws, table_header_row, last_row):
     """Width per data column = longest value/label in it (rows from
     the table-header row down through `last_row`; merged header lines
     and the footer are excluded by the caller's bound). Left
-    (Attendance) columns get the `_LEFT_MIN_WIDTH` floor so that
-    table fills the page; the spacer column is fixed."""
+    (Attendance) columns use the per-column `_LEFT_COL_FLOORS` so the
+    table fills the page while the Day column stays narrow; the spacer
+    column is fixed."""
     data_cols = (
         list(range(LEFT_FIRST_COL,
                     LEFT_FIRST_COL + len(TABLE1_HEADERS)))
@@ -149,7 +214,8 @@ def _autosize_columns(ws, table_header_row, last_row):
             if value is None:
                 continue
             longest = max(longest, len(str(value)))
-        floor = _LEFT_MIN_WIDTH if col < SPACER_COL else _WIDTH_MIN
+        floor = (_LEFT_COL_FLOORS.get(col, _WIDTH_MIN)
+                 if col < SPACER_COL else _WIDTH_MIN)
         width = longest * _WIDTH_FACTOR + _WIDTH_PAD
         width = min(_WIDTH_MAX, max(floor, width))
         ws.column_dimensions[get_column_letter(col)].width = width
@@ -175,8 +241,12 @@ def _ensure_line_min(ws, rule_cols, line_min):
         ws.column_dimensions[letter].width += add
 
 
-def build_workbook(member, rows, output_path):
-    """Write the side-by-side workbook to output_path; return it."""
+def build_workbook(member, rows, output_path, auth_weekdays=None):
+    """Write the side-by-side workbook to output_path; return it.
+
+    `auth_weekdays` (optional) is a set of weekday ints (1=Mon..7=Sun)
+    the member is authorized for; when given it is shown right-aligned
+    in the top-right of each table header (e.g. 'Auth: Mon Fri Sun')."""
     wb = Workbook()
     ws = wb.active
     ws.title = "Schedule"
@@ -184,10 +254,11 @@ def build_workbook(member, rows, output_path):
     left_last_col = LEFT_FIRST_COL + len(TABLE1_HEADERS) - 1   # D
     right_last_col = RIGHT_FIRST_COL + len(TABLE2_HEADERS) - 1  # K
 
+    auth_label = format_auth_label(auth_weekdays)
     _write_header_block(ws, 1, LEFT_FIRST_COL, left_last_col,
-                        member)
+                        member, auth_label=auth_label)
     _write_header_block(ws, 1, RIGHT_FIRST_COL, right_last_col,
-                        member)
+                        member, auth_label=auth_label)
     table_header_row = 1 + HEADER_ROWS                         # 4
 
     end_left = _write_table(ws, table_header_row, LEFT_FIRST_COL,
@@ -208,7 +279,7 @@ def build_workbook(member, rows, output_path):
         sig_label_col=6, sig_rule_cols=(7, 8),
         date_label_col=9, date_rule_cols=(10, 11),
     )
-    footer_last_row = last_data_row + 3
+    footer_last_row = last_data_row + 5
 
     # column page break after spacer col E -> Table 1 | Table 2 pages
     ws.col_breaks.append(Break(id=SPACER_COL))
@@ -221,12 +292,24 @@ def build_workbook(member, rows, output_path):
     ws.page_setup.fitToWidth = 0
     ws.page_setup.fitToHeight = 1
     ws.sheet_properties.pageSetUpPr.fitToPage = True
+    # Tight margins so a full month (taller rows + larger font) still
+    # fits one page at ~100% — avoids the shrink-to-fit that makes Excel
+    # drop the thin grid lines.
+    ws.page_margins = PageMargins(
+        left=0.3, right=0.3, top=0.3, bottom=0.3, header=0.2, footer=0.2,
+    )
 
     _autosize_columns(ws, table_header_row, last_data_row)
-    _ensure_line_min(ws, (2,), _SIG_LINE_MIN)      # left signature (B)
-    _ensure_line_min(ws, (4,), _DATE_LINE_MIN)     # left date (D)
+    # Footer write-on lines span the full merged label+rule cells; grow
+    # those spans (not the narrow Day column) to guarantee a usable line.
+    _ensure_line_min(ws, (1, 2), _SIG_LINE_MIN)    # left signature (A:B)
+    _ensure_line_min(ws, (3, 4), _DATE_LINE_MIN)   # left date (C:D)
     _ensure_line_min(ws, (7, 8), _SIG_LINE_MIN)    # right signature
     _ensure_line_min(ws, (10, 11), _DATE_LINE_MIN)  # right date (J,K)
+
+    # Taller rows across the whole printed area for legibility.
+    for r in range(1, footer_last_row + 1):
+        ws.row_dimensions[r].height = _ROW_HEIGHT
 
     wb.save(output_path)
     return output_path

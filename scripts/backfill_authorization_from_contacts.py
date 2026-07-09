@@ -28,7 +28,8 @@ from monthly_schedule.auth_days import (  # noqa: E402
 
 _CONTACTS_QUERY = (
     "SELECT [Center ID], [Last Name], [First Name], [Health Plan], "
-    "[SADC], [Auth BGN], [Auth EXP], [Member ID] "
+    "[SADC], [Auth BGN], [Auth EXP], [Member ID], [SADC Auth], "
+    "[TRANS Auth] "
     "FROM [Contacts] "
     "ORDER BY [Center ID]"
 )
@@ -46,9 +47,40 @@ _AUTH_INSERT = (
     "INSERT INTO [Authorization] "
     "([Center ID], [auth_start], [auth_end], "
     "[effective_start], [effective_end], [auth_days], "
-    "[Health Plan], [Member ID], [created_at]) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "[Health Plan], [Member ID], [auth_number], [created_at]) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
+
+# TransportAuthorization is a full mirror of Authorization; the only
+# value that differs is [auth_number], which comes from Contacts.
+# [TRANS Auth] instead of [SADC Auth].
+_TRANSPORT_INSERT = (
+    "INSERT INTO [TransportAuthorization] "
+    "([Center ID], [auth_start], [auth_end], "
+    "[effective_start], [effective_end], [auth_days], "
+    "[Health Plan], [Member ID], [auth_number], [created_at]) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+)
+
+# Link an Authorization row to its paired TransportAuthorization row.
+_EDGE_INSERT = (
+    "INSERT INTO [AuthEdge] "
+    "([authorization_id], [transport_authorization_id]) "
+    "VALUES (?, ?)"
+)
+
+# Access returns the most recent autonumber on the connection here.
+_IDENTITY_QUERY = "SELECT @@IDENTITY"
+
+
+def _last_identity(cur):
+    """Return the autonumber of the row just inserted on this
+    connection. Access's `@@IDENTITY` is connection-scoped, so this must
+    be queried immediately after the INSERT and before any further
+    INSERT on the same cursor."""
+    cur.execute(_IDENTITY_QUERY)
+    row = cur.fetchone()
+    return row[0] if row else None
 
 _CSV_COLUMNS = [
     "center_id", "last_name", "first_name",
@@ -138,14 +170,17 @@ def _parse_args(argv):
 
 def _read_contacts(conn):
     """Yield (cid:int, last, first, health_plan, sadc, auth_bgn,
-    auth_exp) tuples. Rows with NULL Center ID are skipped silently."""
+    auth_exp, member_id, sadc_auth, trans_auth) tuples. Rows with NULL
+    Center ID are skipped silently."""
     cur = conn.cursor()
     cur.execute(_CONTACTS_QUERY)
     for row in cur.fetchall():
-        cid, last, first, plan, sadc, bgn, exp, member_id = row
+        (cid, last, first, plan, sadc, bgn, exp,
+         member_id, sadc_auth, trans_auth) = row
         if cid is None:
             continue
-        yield (int(cid), last, first, plan, sadc, bgn, exp, member_id)
+        yield (int(cid), last, first, plan, sadc, bgn, exp,
+               member_id, sadc_auth, trans_auth)
 
 
 def _write_skipped_csv(rows, out_dir, today):
@@ -194,12 +229,21 @@ def _process_update_branch(cur, center_id, health_plan, stats):
 
 
 def _process_insert_branch(cur, center_id, sadc, auth_bgn, auth_exp,
-                           health_plan, stats, member_id=None):
+                           health_plan, stats, member_id=None,
+                           sadc_auth=None, trans_auth=None):
     """Insert one Authorization row from the legacy Contacts columns.
 
-    `member_id` is Contacts.[Member ID] — the external string ID. It
-    is allowed to be NULL/blank and is stored as-is (empty string or
-    NULL); not part of the "missing" sanity check.
+    `member_id` is Contacts.[Member ID] and `sadc_auth` is
+    Contacts.[SADC Auth] (the authorization number). Both are external
+    strings, allowed to be NULL/blank and stored as-is (NULL when
+    blank); neither is part of the "missing" sanity check.
+
+    `trans_auth` is Contacts.[TRANS Auth] (the transportation
+    authorization number). When it is non-blank, a paired
+    TransportAuthorization row is inserted — a full mirror of the
+    Authorization row with [auth_number] set to TRANS Auth — and an
+    AuthEdge row links the two rows' autonumber IDs. A blank TRANS Auth
+    creates no transport row and no edge.
 
     Returns one of:
       ("inserted", None)                 — row was inserted
@@ -224,6 +268,10 @@ def _process_insert_branch(cur, center_id, sadc, auth_bgn, auth_exp,
         None if member_id is None or str(member_id).strip() == ""
         else str(member_id).strip()
     )
+    auth_number_value = (
+        None if sadc_auth is None or str(sadc_auth).strip() == ""
+        else str(sadc_auth).strip()
+    )
     cur.execute(
         _AUTH_INSERT,
         str(center_id),
@@ -232,9 +280,33 @@ def _process_insert_branch(cur, center_id, sadc, auth_bgn, auth_exp,
         auth_days_str,
         str(health_plan).strip(),
         member_id_value,
+        auth_number_value,
         datetime.datetime.now(),
     )
     stats["inserted_members"] += 1
+
+    # Paired TransportAuthorization + edge, only when TRANS Auth exists.
+    trans_auth_value = (
+        None if trans_auth is None or str(trans_auth).strip() == ""
+        else str(trans_auth).strip()
+    )
+    if trans_auth_value is not None:
+        auth_id = _last_identity(cur)
+        cur.execute(
+            _TRANSPORT_INSERT,
+            str(center_id),
+            bgn, exp,
+            bgn, exp,
+            auth_days_str,
+            str(health_plan).strip(),
+            member_id_value,
+            trans_auth_value,
+            datetime.datetime.now(),
+        )
+        transport_id = _last_identity(cur)
+        cur.execute(_EDGE_INSERT, auth_id, transport_id)
+        stats["transport_inserted_members"] += 1
+
     return ("inserted", None)
 
 
@@ -266,12 +338,13 @@ def main(argv=None):
             "noop_members": 0,
             "skipped_no_plan_members": 0,
             "inserted_members": 0,
+            "transport_inserted_members": 0,
             "skipped_missing_members": 0,
         }
         skipped_rows = []
 
         for (cid, last, first, plan, sadc, bgn, exp,
-                member_id) in _read_contacts(conn):
+                member_id, sadc_auth, trans_auth) in _read_contacts(conn):
             stats["scanned"] += 1
 
             if args.exclude_test_members and _is_test_id(cid):
@@ -316,7 +389,8 @@ def main(argv=None):
                 # INSERT branch.
                 result, payload = _process_insert_branch(
                     cur, cid, sadc, bgn, exp, plan, stats,
-                    member_id=member_id,
+                    member_id=member_id, sadc_auth=sadc_auth,
+                    trans_auth=trans_auth,
                 )
                 if result == "inserted":
                     if not args.quiet:
@@ -363,6 +437,8 @@ def main(argv=None):
               f"{stats['skipped_no_plan_members']}")
         print(f"  No-auth members: Authorization inserted:     "
               f"{stats['inserted_members']}")
+        print(f"  No-auth members: TransportAuthorization made: "
+              f"{stats['transport_inserted_members']}")
         print(f"  No-auth members: skipped (missing legacy):   "
               f"{stats['skipped_missing_members']}")
         print(f"  Skipped CSV: {csv_path}")

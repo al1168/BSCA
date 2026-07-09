@@ -4,3 +4,5 @@ pytest==8.3.3
 requests==2.32.3
 PyQt6>=6.6.0
 pyinstaller>=6.0.0
+# DAO ATTACHMENT setup scripts and printing schedules via Excel COM.
+pywin32>=306; sys_platform == "win32"

@@ -1,22 +1,21 @@
 # How Times Are Currently Calculated
 
-A brief overview of the placeholder time generation in
-`new_monthly_schedule.py`. Times are **synthetic** — randomly drawn
-within configured windows, not read from the database. The database
-only supplies member identity and authorized weekdays.
+A brief overview of the time generation in `new_monthly_schedule.py`.
+The specific clock times are **synthetic** — randomly drawn within the
+day's placement window — but that window is shaped by real database
+data: the member's authorized weekdays, recurring/one-off availability,
+and absences.
 
 ## 1. Which days get times
 
-`monthly_schedule/rows.py` walks every calendar day of the month. For
-each day, `monthly_schedule/eligibility.py:is_day_eligible` returns
-true only if the day's ISO weekday is in the member's authorized set
-(parsed from the `SADC` column, encoding `1=Mon … 7=Sun`).
+`monthly_schedule/rows.py` walks every calendar day of the month and
+asks `monthly_schedule/per_day.py:compute_day_eligibility` whether the
+day is eligible (enrollment, authorization, authorized weekday,
+one-off/recurring availability, absence, and a wide-enough placement
+window — see `docs/scheduling-flow.md`).
 
 - Eligible day → a full set of times is generated.
 - Non-eligible day → every time cell is left blank (`""`).
-
-(The `exclusions` parameter for vacation/termination exists in the
-seam but is not yet wired to a data source.)
 
 ## 2. The rule set
 
@@ -26,27 +25,36 @@ override (`get_rules_for_plan`). Current `Default` values:
 
 | Rule | Value | Meaning |
 |------|-------|---------|
-| `arrival_window` | 08:00–11:00 | Arrival drawn uniformly in this range |
-| `session_span_min` | 210–245 min | Departure = Arrival + a random span in this range (3 h 30 m – 4 h 5 m) |
+| `earliest_time_in` | 08:00 | Time-In may not start before this |
+| `latest_time_out` | 16:00 | Time-Out may not end after this |
+| `session_length_min` | 210–240 min | Visit length (Time-In → Time-Out), a random 3 h 30 m – 4 h 0 m, capped to the free time in the window |
 | `pickup_lead_min` | 8–12 min | Pick-Up is this many minutes **before** Arrival |
 | `dropoff_trail_min` | 8–12 min | Drop-Off is this many minutes **after** Departure |
 | `time_in_drift_min` | (2, 2) | Time-In is exactly 2 minutes **after** Arrival |
 | `time_out_drift_min` | (2, 2) | Time-Out is exactly 2 minutes **before** Departure |
-| `round_to_minutes` | 1 | Snap step for Arrival (1 = no snap; 5 = snap to :05) |
+| `round_to_minutes` | 1 | Snap step for Time-In (1 = no snap; 5 = snap to :05) |
+
+The earliest/latest bounds and the session length are editable in
+**Settings → Scheduling Rules**; availability further narrows them per
+day.
 
 ## 3. Generating one day (`daily_schedule.build_daily_schedule`)
 
-**Arrival** is the single anchor; **Departure** is derived from it:
+The attendance block (**Time-In → Time-Out**) is the anchor; the
+transport times are derived around it. The day is given a **placement
+window** `(in_lo, out_hi)` — the 08:00–16:00 day bounds intersected
+with the member's availability (just 08:00–16:00 when there is no
+availability rule).
 
-1. **Arrival** = random minute in `arrival_window` (08:00–11:00),
-   snapped by `round_to_minutes`.
-2. **Span** = random minute count in `session_span_min` (210–245).
-3. **Departure** = Arrival + Span (max possible 11:00 + 4 h 5 m =
-   15:05).
+1. **Length** = random minute count in `session_length_min` (210–240),
+   capped to `out_hi − in_lo` so it can't exceed the free time.
+2. **Time-In** = a random position in `[in_lo, out_hi − Length]`,
+   snapped by `round_to_minutes`, so the whole block fits the window.
+3. **Time-Out** = Time-In + Length.
 4. Derived (exact offsets):
+   - **Arrival** = Time-In − random(`time_in_drift_min`)
+   - **Departure** = Time-Out + random(`time_out_drift_min`)
    - **Pick-Up** = Arrival − random(`pickup_lead_min`)
-   - **Time-In** = Arrival + 2
-   - **Time-Out** = Departure − 2
    - **Drop-Off** = Departure + random(`dropoff_trail_min`)
 
 Randomness comes from an injected `random.Random` instance, so a
@@ -59,12 +67,12 @@ Every generated day is validated; a violation raises `ValueError`
 
 ```
 Pick-Up < Arrival ≤ Time-In ≤ Time-Out ≤ Departure < Drop-Off
-session_span_min[0] ≤ (Departure − Arrival) ≤ session_span_min[1]   (210–245 min)
+session_length_min[0] ≤ (Time-Out − Time-In) ≤ session_length_min[1]   (210–240 min)
 ```
 
 With the `Default` rules these always hold: Pick-Up is ≥ 8 min
-before Arrival, Drop-Off ≥ 8 min after Departure, and the span is
-drawn directly within 210–245 min so the session check cannot fail.
+before Arrival, Drop-Off ≥ 8 min after Departure, and the length is
+drawn directly within 210–240 min so the session check cannot fail.
 
 ## 5. Output shape
 
@@ -76,9 +84,9 @@ anchors.
 
 ## Key files
 
-- `monthly_schedule/rules.py` — tunable windows/offsets per plan
+- `monthly_schedule/rules.py` — tunable bounds/length/offsets per plan
 - `monthly_schedule/daily_schedule.py` — generation + invariant check
-- `monthly_schedule/eligibility.py` — which days are eligible
+- `monthly_schedule/per_day.py` — per-day eligibility + placement window
 - `monthly_schedule/rows.py` — per-day loop tying it together
 
 Full rationale: `docs/superpowers/specs/2026-05-15-monthly-schedule-design.md` §4.

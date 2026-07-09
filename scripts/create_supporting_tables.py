@@ -1,12 +1,12 @@
-"""Create the six supporting tables in an Access .accdb that already
+"""Create the eight supporting tables in an Access .accdb that already
 contains a Contacts table.
 
 Given a fresh .accdb whose only table is `Contacts`, this script
-issues six CREATE TABLE statements to bring up the `Enrollment`,
-`Authorization`, `Absences`, `Availability`, `OneOffAvailability`,
-and `EmergencyContact` tables — every column the scheduler and the
-backfill scripts read, including the `[Health Plan]` column on
-`Authorization`.
+issues eight CREATE TABLE statements to bring up the `Enrollment`,
+`Authorization`, `TransportAuthorization`, `Absences`, `Availability`,
+`OneOffAvailability`, `EmergencyContact`, and `AuthEdge` tables — every
+column the scheduler and the backfill scripts read, including the
+`[Health Plan]` column on `Authorization`.
 
 The script is a one-shot DDL bootstrap. No data is touched. If a
 supporting table already exists it is skipped and the script
@@ -46,13 +46,48 @@ _CREATE_AUTHORIZATION = (
     "[notes] MEMO, "
     "[Health Plan] TEXT(255), "
     "[Member ID] TEXT(255), "
+    "[auth_number] TEXT(255), "
     "[created_at] DATETIME"
     ")"
 )
 
-# Note: the [Document] ATTACHMENT field is added by
-# scripts/add_document_to_authorization.py via DAO. ODBC can't
-# create ATTACHMENT fields, so they can't live in this DDL.
+# Note: the [Document] ATTACHMENT field is added separately by
+# scripts/add_document_to_authorization.py (and, for the transport
+# table below, scripts/add_document_to_transport_authorization.py) via
+# DAO. ODBC can't create ATTACHMENT fields, so they can't live in this
+# DDL.
+
+# Transportation authorization — a full mirror of Authorization. The
+# backfill copies the paired Authorization row's dates/effective dates/
+# auth_days/Health Plan/Member ID and sets [auth_number] from
+# Contacts.[TRANS Auth]. Kept as its own table because transport dates
+# may diverge from the care authorization in the future.
+_CREATE_TRANSPORT_AUTHORIZATION = (
+    "CREATE TABLE [TransportAuthorization] ("
+    "[ID] AUTOINCREMENT PRIMARY KEY, "
+    "[Center ID] DOUBLE, "
+    "[auth_start] DATETIME, "
+    "[auth_end] DATETIME, "
+    "[effective_start] DATETIME, "
+    "[effective_end] DATETIME, "
+    "[auth_days] TEXT(255), "
+    "[notes] MEMO, "
+    "[Health Plan] TEXT(255), "
+    "[Member ID] TEXT(255), "
+    "[auth_number] TEXT(255), "
+    "[created_at] DATETIME"
+    ")"
+)
+
+# Link table relating each Authorization row to its paired
+# TransportAuthorization row (populated by the backfill).
+_CREATE_AUTH_EDGE = (
+    "CREATE TABLE [AuthEdge] ("
+    "[ID] AUTOINCREMENT PRIMARY KEY, "
+    "[authorization_id] LONG, "
+    "[transport_authorization_id] LONG"
+    ")"
+)
 
 _CREATE_ABSENCES = (
     "CREATE TABLE [Absences] ("
@@ -102,10 +137,12 @@ _CREATE_EMERGENCY_CONTACT = (
 _DDLS = [
     ("Enrollment", _CREATE_ENROLLMENT),
     ("Authorization", _CREATE_AUTHORIZATION),
+    ("TransportAuthorization", _CREATE_TRANSPORT_AUTHORIZATION),
     ("Absences", _CREATE_ABSENCES),
     ("Availability", _CREATE_AVAILABILITY),
     ("OneOffAvailability", _CREATE_ONE_OFF_AVAILABILITY),
     ("EmergencyContact", _CREATE_EMERGENCY_CONTACT),
+    ("AuthEdge", _CREATE_AUTH_EDGE),
 ]
 
 

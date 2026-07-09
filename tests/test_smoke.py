@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 import time
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -77,10 +78,14 @@ def test_one_off_conflict_writes_skipped_csv(tmp_path):
 
     out_dir = tmp_path / "out"
     out_dir.mkdir()
+    # make_test_db seeds every scenario anchored to date.today(), so
+    # schedule the current month/year to match (else the member reads as
+    # "not enrolled this month").
+    today = date.today()
     result = subprocess.run(
         [sys.executable, str(REPO_ROOT / "new_monthly_schedule.py"),
          "--center-id", "100100",
-         "--year", "2026", "--month", "6",
+         "--year", str(today.year), "--month", str(today.month),
          "--db-path", str(test_db),
          "--output-path", str(out_dir),
          "--api-key", "TEST_KEY_NOT_USED",

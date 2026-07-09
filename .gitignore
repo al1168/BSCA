@@ -28,6 +28,9 @@ bsca_settings.json
 build/
 dist/
 
+# Packaging metadata
+*.egg-info/
+
 # Test databases (local only)
 test_dbs/
 
@@ -37,3 +40,7 @@ _bench_all.txt
 _bench_all.py
 _diag_*.py
 geo_cache.backup-*.json
+
+# Backfill / termination output CSVs (contain member PII/PHI — local only)
+*_skipped_*.csv
+*_ambiguous_*.csv

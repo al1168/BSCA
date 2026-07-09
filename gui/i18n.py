@@ -49,8 +49,24 @@ STRINGS: dict[str, dict[str, str]] = {
         # options
         "opts.preview": "Preview only (don't save files)",
         "opts.debug": "Debug (write per-day reason CSV next to each schedule)",
+        "opts.mltc_folders": (
+            "All Members: separate output into per-MLTC folders "
+            "(off = one Month_Year_Timesheets folder)"
+        ),
         "opts.generate": "Generate Schedule",
         "opts.open_folder": "Open Output Folder",
+        "opts.print": "Print All Schedules",
+        "print.title": "Print Schedules",
+        "print.default_printer": "the default printer",
+        "print.none": "No generated schedules to print.",
+        "print.confirm.title": "Print Schedules",
+        "print.confirm.body": (
+            "Print {count} schedule(s) to \"{printer}\"?\n\n"
+            "Each schedule is sent to the printer via Excel."
+        ),
+        "print.started": "Printing {count} schedule(s)…",
+        "print.done": "Printed {count} schedule(s).",
+        "print.failed": "Printing failed: {error}",
         # settings dialog
         "settings.welcome": (
             "Before you get started, please fill in the fields "
@@ -62,7 +78,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "settings.api_key_label": "Google Maps API Key",
         "settings.cache_label": "Travel Cache File",
         "settings.rules.title": "Scheduling Rules",
-        "settings.rules.arrival": "Arrival window (earliest – latest):",
+        "settings.rules.earliest_in": "Earliest Time-In:",
+        "settings.rules.latest_out": "Latest Time-Out:",
         "settings.rules.session": "Visit length min – max (HH:MM):",
         "settings.rules.travel_buffer": (
             "Travel buffer min – max (extra minutes on top of Google):"
@@ -216,8 +233,21 @@ STRINGS: dict[str, dict[str, str]] = {
         # options
         "opts.preview": "仅预览（不保存文件）",
         "opts.debug": "调试（在每个日程旁写入每日原因 CSV）",
+        "opts.mltc_folders": "所有成员：按 MLTC 分文件夹输出（关闭＝统一放入一个 月份_年份_Timesheets 文件夹）",
         "opts.generate": "生成日程表",
         "opts.open_folder": "打开输出文件夹",
+        "opts.print": "打印所有日程表",
+        "print.title": "打印日程表",
+        "print.default_printer": "默认打印机",
+        "print.none": "没有可打印的已生成日程表。",
+        "print.confirm.title": "打印日程表",
+        "print.confirm.body": (
+            "将 {count} 份日程表打印到“{printer}”？\n\n"
+            "每份日程表通过 Excel 发送到打印机。"
+        ),
+        "print.started": "正在打印 {count} 份日程表……",
+        "print.done": "已打印 {count} 份日程表。",
+        "print.failed": "打印失败：{error}",
         # settings dialog
         "settings.welcome": (
             "开始之前，请填写以下各项。\n"
@@ -228,7 +258,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "settings.api_key_label": "Google 地图 API 密钥",
         "settings.cache_label": "出行缓存文件",
         "settings.rules.title": "排班规则",
-        "settings.rules.arrival": "到达时间窗口（最早 – 最晚）：",
+        "settings.rules.earliest_in": "最早签到时间：",
+        "settings.rules.latest_out": "最晚签退时间：",
         "settings.rules.session": "访问时长 最短 – 最长（时:分）：",
         "settings.rules.travel_buffer": (
             "出行缓冲 最少 – 最多（在 Google 行程时间上加的额外分钟）："

@@ -6,8 +6,14 @@ clamp/validation line in daily_schedule.validate_schedule.
 
 SCHEDULE_RULES = {
     "Default": {
-        "arrival_window": ("08:00", "11:00"),
-        "session_span_min": (210, 245),   # Departure = Arrival + span (min)
+        # Hard day bounds: the attendance block must not start (Time-In)
+        # before this, nor end (Time-Out) after it.
+        "earliest_time_in": "08:00",
+        "latest_time_out": "16:00",
+        # Visit length measured Time-In -> Time-Out (minutes). A random
+        # block of this size is placed anywhere inside the member's
+        # availability, clipped to the bounds above.
+        "session_length_min": (210, 240),   # 3h30m .. 4h00m
         "pickup_lead_min": (8, 12),       # minutes before Arrival
         "dropoff_trail_min": (8, 12),     # minutes after Departure
         "time_in_drift_min": (2, 2),      # Time-In = Arrival + 2 min

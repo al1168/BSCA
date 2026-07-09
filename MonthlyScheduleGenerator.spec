@@ -7,7 +7,13 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=['pyodbc', 'openpyxl', 'requests'],
+    hiddenimports=[
+        'pyodbc', 'openpyxl', 'requests',
+        # Printing generated schedules via Excel COM (gui/printing.py):
+        # pywin32 provides Dispatch/CoInitialize and the default-printer
+        # lookup. Bundled so the Print button works in the frozen exe.
+        'win32com.client', 'win32print', 'pythoncom', 'pywintypes',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

@@ -9,8 +9,9 @@ from monthly_schedule.per_day import (
 
 
 PLAN_RULES = {
-    "arrival_window": ("08:00", "11:00"),
-    "session_span_min": (210, 245),
+    "earliest_time_in": "08:00",
+    "latest_time_out": "16:00",
+    "session_length_min": (210, 240),
 }
 
 
@@ -46,7 +47,7 @@ def test_eligible_day_no_availability_rule():
     # 2026-05-04 is a Monday (isoweekday 1) → in auth_days "1,3,5"
     result = compute_day_eligibility(date(2026, 5, 4), _ctx(), PLAN_RULES)
     assert result.eligible is True
-    assert result.arrival_window is None
+    assert result.placement_window is None
 
 
 def test_ineligible_not_enrolled():
@@ -91,11 +92,9 @@ def test_eligible_has_no_reason():
 
 
 def test_availability_rule_narrows_window():
-    # Plan default arrival is 08:00–11:00, session_span_min lower is 210.
-    # Member is available 10:00–15:00 on Mondays.
-    # Effective arrival window:
-    #   lo = max(480 [08:00], 600 [10:00]) = 600
-    #   hi = min(660 [11:00], 900 [15:00] - 210) = min(660, 690) = 660
+    # Day bounds 08:00–16:00; member available 10:00–15:00 on Mondays.
+    # Placement window = [max(08:00, 10:00), min(16:00, 15:00)]
+    #                  = (600, 900); 5h wide, fits the 3h30m minimum.
     avail = {"id": 1, "center_id": 1,
              "effective_start_date": date(2026, 1, 1),
              "effective_end_date": None,
@@ -105,12 +104,12 @@ def test_availability_rule_narrows_window():
         date(2026, 5, 4), _ctx(availability=avail), PLAN_RULES
     )
     assert result.eligible is True
-    assert result.arrival_window == (600, 660)
+    assert result.placement_window == (600, 900)
 
 
 def test_availability_window_too_narrow_makes_day_ineligible():
-    # Member available only 12:00–13:30 on Monday: lo=720, hi=min(660, 810-210)=600;
-    # lo > hi → ineligible.
+    # Member available only 12:00–13:30 on Monday: window (720, 810) is
+    # 90 min, narrower than the 210 min minimum → ineligible.
     avail = {"id": 1, "center_id": 1,
              "effective_start_date": date(2026, 1, 1),
              "effective_end_date": None,
@@ -178,15 +177,11 @@ def test_one_off_conflict_exception_carries_fields():
     assert "duplicate" in str(exc)
 
 
-def test_one_off_narrows_window_and_ignores_recurring_availability():
-    # Plan default arrival 08:00-11:00, session_span_min lower bound 210.
-    # Recurring availability (Mon 10:00-15:00) would narrow to (600, 660).
-    # A one-off for the same Monday says 12:00-16:00.
-    # The one-off must win and the recurring rule must be IGNORED.
-    # Intersect (12:00-16:00) with plan (08:00-11:00) - session lower 210:
-    #   lo = max(480, 720) = 720
-    #   hi = min(660, 960 - 210) = min(660, 750) = 660
-    # lo > hi → ineligible (silent skip — non-intersecting), no flag.
+def test_one_off_wins_over_recurring_availability():
+    # Recurring availability (Mon 10:00-15:00) would give window (600, 900).
+    # A one-off for the same Monday says 12:00-16:00. The one-off must win
+    # and the recurring rule must be IGNORED:
+    #   window = [max(08:00, 12:00), min(16:00, 16:00)] = (720, 960), 4h.
     avail = {"id": 1, "center_id": 1,
              "effective_start_date": date(2026, 1, 1),
              "effective_end_date": None,
@@ -199,19 +194,13 @@ def test_one_off_narrows_window_and_ignores_recurring_availability():
         _ctx(availability=avail, one_offs=[one_off]),
         PLAN_RULES,
     )
-    # No flag, no raise; just silent skip (non-intersecting window).
-    assert result.eligible is False
+    assert result.eligible is True
+    assert result.placement_window == (720, 960)
 
 
-def test_one_off_inside_plan_window_narrows_arrival():
-    # Plan default arrival 08:00-11:00 = (480, 660).
-    # session_span_min lower bound is 210.
-    # One-off says 09:00-14:00.
-    # Recurring rule does NOT apply (Mon 12:00-13:00 would on its own
-    # be ineligible). The one-off must replace it entirely.
-    #   lo = max(480 [08:00], 540 [09:00]) = 540
-    #   hi = min(660 [11:00], 840 [14:00] - 210) = min(660, 630) = 630
-    # Arrival window: (540, 630).
+def test_one_off_inside_day_bounds_sets_window():
+    # One-off says 09:00-14:00; recurring (Mon 12:00-13:00) is ignored.
+    #   window = [max(08:00, 09:00), min(16:00, 14:00)] = (540, 840), 5h.
     narrow_recurring = {"id": 1, "center_id": 1,
                         "effective_start_date": date(2026, 1, 1),
                         "effective_end_date": None,
@@ -225,7 +214,7 @@ def test_one_off_inside_plan_window_narrows_arrival():
         PLAN_RULES,
     )
     assert result.eligible is True
-    assert result.arrival_window == (540, 630)
+    assert result.placement_window == (540, 840)
 
 
 def test_duplicate_one_off_rows_raise_conflict():
@@ -315,9 +304,9 @@ def test_one_off_on_unauthorized_weekday_silently_skipped():
     assert result.eligible is False
 
 
-def test_one_off_window_outside_plan_silently_skipped():
-    # Plan arrival 08:00-11:00, session_min_lower 210.
-    # One-off window 14:00-17:00 cannot intersect → silent skip, no raise.
+def test_one_off_window_too_narrow_after_bounds_skipped():
+    # Day bounds 08:00-16:00. One-off 14:00-17:00 clips to (840, 960) =
+    # 2h, narrower than the 210 min minimum → ineligible, no raise.
     one_off = {"id": 99, "center_id": 1, "date": date(2026, 5, 4),
                "avail_start": "14:00", "avail_end": "17:00"}
     result = compute_day_eligibility(

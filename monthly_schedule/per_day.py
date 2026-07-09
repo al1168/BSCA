@@ -41,14 +41,17 @@ class OneOffConflict(Exception):
 class DayEligibility:
     """Result of a single-day eligibility check.
 
-    `arrival_window` is None when the plan's default applies; a tuple of
-    (lo_minutes, hi_minutes) when an Availability rule has narrowed it.
+    `placement_window` is (in_lo, out_hi) in minutes — the earliest
+    allowed Time-In and latest allowed Time-Out for the day, after
+    intersecting the plan's day bounds with the member's availability.
+    It is None when no availability rule applies (the open day: the
+    generator falls back to the plan's full day bounds).
     `reason` is None when eligible=True, otherwise one of the
     REASON_DAY_* constants explaining the rejection (used by the debug
     CSV).
     """
     eligible: bool
-    arrival_window: Optional[Tuple[int, int]] = None
+    placement_window: Optional[Tuple[int, int]] = None
     reason: Optional[str] = None
 
 
@@ -86,19 +89,21 @@ def compute_day_eligibility(day: date, ctx, plan_rules) -> DayEligibility:
         if avail is None:
             return DayEligibility(eligible=True)
 
-    plan_lo = parse_hhmm(plan_rules["arrival_window"][0])
-    plan_hi = parse_hhmm(plan_rules["arrival_window"][1])
+    earliest_in = parse_hhmm(plan_rules["earliest_time_in"])
+    latest_out = parse_hhmm(plan_rules["latest_time_out"])
     avail_lo = parse_hhmm(avail["avail_start"])
     avail_hi = parse_hhmm(avail["avail_end"])
-    session_min_lower = plan_rules["session_span_min"][0]
+    length_min = plan_rules["session_length_min"][0]
 
-    lo = max(plan_lo, avail_lo)
-    hi = min(plan_hi, avail_hi - session_min_lower)
-    if lo > hi:
+    # Placement window: the member's availability clipped to the hard
+    # day bounds (Time-In >= earliest, Time-Out <= latest).
+    in_lo = max(earliest_in, avail_lo)
+    out_hi = min(latest_out, avail_hi)
+    if out_hi - in_lo < length_min:
         return DayEligibility(
             eligible=False, reason=REASON_DAY_WINDOW_TOO_NARROW
         )
-    return DayEligibility(eligible=True, arrival_window=(lo, hi))
+    return DayEligibility(eligible=True, placement_window=(in_lo, out_hi))
 
 
 def compute_month_failure(year: int, month: int, ctx,

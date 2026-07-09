@@ -77,8 +77,9 @@ def test_fresh_install_has_default_schedule_rules(settings_file):
     from gui import app_settings
     s = app_settings.load()
     rules = s["schedule_rules"]
-    assert rules["arrival_window"] == ["08:00", "11:00"]
-    assert rules["session_span_min"] == [210, 245]
+    assert rules["earliest_time_in"] == "08:00"
+    assert rules["latest_time_out"] == "16:00"
+    assert rules["session_length_min"] == [210, 240]
     assert rules["travel_buffer_min"] == [1, 5]
     assert rules["time_in_drift_min"] == [2, 2]
     assert rules["time_out_drift_min"] == [2, 2]
@@ -88,14 +89,32 @@ def test_partial_schedule_rules_fills_in_defaults(settings_file):
     """A settings file with only some rule keys still gets the rest
     from defaults, so adding a new knob in code is forward-compatible."""
     settings_file.write_text(json.dumps({
-        "schedule_rules": {"arrival_window": ["07:00", "10:00"]},
+        "schedule_rules": {"earliest_time_in": "07:00"},
     }))
     from gui import app_settings
     s = app_settings.load()
     rules = s["schedule_rules"]
-    assert rules["arrival_window"] == ["07:00", "10:00"]
-    assert rules["session_span_min"] == [210, 245]  # default
-    assert rules["travel_buffer_min"] == [1, 5]     # default
+    assert rules["earliest_time_in"] == "07:00"
+    assert rules["session_length_min"] == [210, 240]  # default
+    assert rules["travel_buffer_min"] == [1, 5]       # default
+
+
+def test_legacy_rule_keys_are_dropped(settings_file):
+    """Old arrival_window/session_span_min keys from prior versions are
+    retired on load rather than lingering as dead config."""
+    settings_file.write_text(json.dumps({
+        "schedule_rules": {
+            "arrival_window": ["08:00", "11:00"],
+            "session_span_min": [210, 245],
+            "earliest_time_in": "09:00",
+        },
+    }))
+    from gui import app_settings
+    s = app_settings.load()
+    rules = s["schedule_rules"]
+    assert "arrival_window" not in rules
+    assert "session_span_min" not in rules
+    assert rules["earliest_time_in"] == "09:00"
 
 
 def test_defaults_not_mutated_after_load(settings_file):
@@ -103,9 +122,9 @@ def test_defaults_not_mutated_after_load(settings_file):
     into the global DEFAULTS table."""
     from gui import app_settings
     s = app_settings.load()
-    s["schedule_rules"]["arrival_window"] = ["99:99", "99:99"]
+    s["schedule_rules"]["earliest_time_in"] = "99:99"
     fresh = app_settings.load()
-    assert fresh["schedule_rules"]["arrival_window"] == ["08:00", "11:00"]
+    assert fresh["schedule_rules"]["earliest_time_in"] == "08:00"
 
 
 def test_load_existing_key_wins_over_legacy_path(settings_file, tmp_path):

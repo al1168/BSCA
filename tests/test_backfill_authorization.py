@@ -27,11 +27,35 @@ def test_main_missing_db_returns_2(tmp_path, capsys):
 def test_contacts_query_columns():
     q = backfill._CONTACTS_QUERY
     for col in ("[Center ID]", "[Last Name]", "[First Name]",
-                "[Health Plan]", "[SADC]", "[Auth BGN]", "[Auth EXP]"):
+                "[Health Plan]", "[SADC]", "[Auth BGN]", "[Auth EXP]",
+                "[Member ID]", "[SADC Auth]", "[TRANS Auth]"):
         assert col in q
     assert "FROM [Contacts]" in q
     assert "WHERE" not in q  # full table scan
     assert "ORDER BY [Center ID]" in q
+
+
+def test_transport_insert_query_columns():
+    q = backfill._TRANSPORT_INSERT
+    assert "INSERT INTO [TransportAuthorization]" in q
+    for col in ("[Center ID]", "[auth_start]", "[auth_end]",
+                "[effective_start]", "[effective_end]", "[auth_days]",
+                "[Health Plan]", "[Member ID]", "[auth_number]",
+                "[created_at]"):
+        assert col in q
+    assert q.count("?") == 10
+
+
+def test_edge_insert_query_columns():
+    q = backfill._EDGE_INSERT
+    assert "INSERT INTO [AuthEdge]" in q
+    assert "[authorization_id]" in q
+    assert "[transport_authorization_id]" in q
+    assert q.count("?") == 2
+
+
+def test_identity_query_shape():
+    assert "@@IDENTITY" in backfill._IDENTITY_QUERY
 
 
 def test_auth_select_query_for_member():
@@ -54,10 +78,11 @@ def test_auth_insert_query_columns():
     assert "INSERT INTO [Authorization]" in q
     for col in ("[Center ID]", "[auth_start]", "[auth_end]",
                 "[effective_start]", "[effective_end]", "[auth_days]",
-                "[Health Plan]", "[Member ID]", "[created_at]"):
+                "[Health Plan]", "[Member ID]", "[auth_number]",
+                "[created_at]"):
         assert col in q
-    # Nine values, no trailing commas, exactly nine `?` placeholders.
-    assert q.count("?") == 9
+    # Ten values, no trailing commas, exactly ten `?` placeholders.
+    assert q.count("?") == 10
 
 
 class FakeCursor:
@@ -197,16 +222,100 @@ def test_insert_branch_happy_path():
     assert len(inserts) == 1
     _, params = inserts[0]
     # ([Center ID], auth_start, auth_end, eff_start, eff_end,
-    #  auth_days, [Health Plan], [Member ID], created_at)
+    #  auth_days, [Health Plan], [Member ID], [auth_number], created_at)
     assert params[:7] == ("24010", bgn, exp, bgn, exp, "1,3,5", "HOF")
-    # Member ID defaults to None when not passed.
+    # Member ID and auth_number default to None when not passed.
     assert params[7] is None
+    assert params[8] is None
     # created_at is set to "now" — assert it's a fresh datetime
     # rather than pinning to an exact value.
     import datetime as _dt_mod
-    assert isinstance(params[8], _dt_mod.datetime)
-    assert (_dt_mod.datetime.now() - params[8]).total_seconds() < 5
+    assert isinstance(params[9], _dt_mod.datetime)
+    assert (_dt_mod.datetime.now() - params[9]).total_seconds() < 5
     assert stats["inserted_members"] == 1
+
+
+def test_insert_branch_sets_auth_number_from_sadc_auth():
+    cur = FakeCursor()
+    stats = {"inserted_members": 0}
+    result = backfill._process_insert_branch(
+        cur, center_id=24010, sadc="1.3.5",
+        auth_bgn=_dt(2026, 1, 1), auth_exp=_dt(2026, 12, 31),
+        health_plan="HOF", stats=stats,
+        member_id="M-001", sadc_auth="  AUTH-9988  ",
+    )
+    assert result == ("inserted", None)
+    _, params = next((s, p) for s, p in cur.executed
+                     if s == backfill._AUTH_INSERT)
+    assert params[7] == "M-001"       # member_id
+    assert params[8] == "AUTH-9988"   # auth_number, trimmed
+
+
+def test_insert_branch_blank_sadc_auth_is_none():
+    cur = FakeCursor()
+    stats = {"inserted_members": 0}
+    backfill._process_insert_branch(
+        cur, center_id=24010, sadc="1.3.5",
+        auth_bgn=_dt(2026, 1, 1), auth_exp=_dt(2026, 12, 31),
+        health_plan="HOF", stats=stats, sadc_auth="   ",
+    )
+    _, params = next((s, p) for s, p in cur.executed
+                     if s == backfill._AUTH_INSERT)
+    assert params[8] is None   # blank SADC Auth stored as NULL
+
+
+def test_insert_branch_creates_transport_and_edge_when_trans_auth_present():
+    cur = FakeCursor()
+    stats = {"inserted_members": 0, "transport_inserted_members": 0}
+    bgn = _dt(2026, 1, 1)
+    exp = _dt(2026, 12, 31)
+    # Two @@IDENTITY reads: the Authorization id, then the transport id.
+    cur.queue_fetchone((100,))
+    cur.queue_fetchone((200,))
+    result = backfill._process_insert_branch(
+        cur, center_id=24010, sadc="1.3.5",
+        auth_bgn=bgn, auth_exp=exp, health_plan="HOF", stats=stats,
+        member_id="M-001", sadc_auth="SADC-1", trans_auth="  TRANS-9  ",
+    )
+    assert result == ("inserted", None)
+    # Exact SQL order: auth insert -> @@IDENTITY -> transport insert ->
+    # @@IDENTITY -> edge insert.
+    sqls = [s for s, _ in cur.executed]
+    assert sqls == [
+        backfill._AUTH_INSERT,
+        backfill._IDENTITY_QUERY,
+        backfill._TRANSPORT_INSERT,
+        backfill._IDENTITY_QUERY,
+        backfill._EDGE_INSERT,
+    ]
+    # Transport row mirrors the auth row; auth_number = trimmed TRANS Auth.
+    t_params = next(p for s, p in cur.executed
+                    if s == backfill._TRANSPORT_INSERT)
+    assert t_params[:7] == ("24010", bgn, exp, bgn, exp, "1,3,5", "HOF")
+    assert t_params[7] == "M-001"      # Member ID, copied from the auth row
+    assert t_params[8] == "TRANS-9"    # auth_number from TRANS Auth, trimmed
+    import datetime as _dt_mod
+    assert isinstance(t_params[9], _dt_mod.datetime)  # created_at
+    # Edge links the two captured identities.
+    e_params = next(p for s, p in cur.executed if s == backfill._EDGE_INSERT)
+    assert e_params == (100, 200)
+    assert stats["transport_inserted_members"] == 1
+
+
+def test_insert_branch_skips_transport_when_trans_auth_blank():
+    cur = FakeCursor()
+    stats = {"inserted_members": 0, "transport_inserted_members": 0}
+    backfill._process_insert_branch(
+        cur, center_id=24010, sadc="1.3.5",
+        auth_bgn=_dt(2026, 1, 1), auth_exp=_dt(2026, 12, 31),
+        health_plan="HOF", stats=stats, trans_auth="   ",
+    )
+    sqls = [s for s, _ in cur.executed]
+    # Only the Authorization insert: no @@IDENTITY, no transport, no edge.
+    assert sqls == [backfill._AUTH_INSERT]
+    assert backfill._TRANSPORT_INSERT not in sqls
+    assert backfill._EDGE_INSERT not in sqls
+    assert stats["transport_inserted_members"] == 0
 
 
 def test_insert_branch_skip_missing_all():
@@ -267,9 +376,10 @@ def test_insert_branch_parses_string_dates():
         _dt(2026, 1, 1), _dt(2026, 12, 31), "1,3,5", "HOF",
     )
     assert params[7] is None  # member_id defaults to None
+    assert params[8] is None  # auth_number defaults to None
     # created_at is a fresh now-timestamp.
     import datetime as _dt_mod
-    assert isinstance(params[8], _dt_mod.datetime)
+    assert isinstance(params[9], _dt_mod.datetime)
 
 
 def test_insert_branch_unparseable_date_treated_as_missing():
@@ -342,14 +452,18 @@ def test_read_contacts_skips_null_center_id():
 
         def fetchall(self):
             return [
-                (None, "Skip", "Me", "HOF", "1,3,5", None, None, None),
-                (24010, "Real", "One", "HOF", "1,3,5", None, None, "M-001"),
+                (None, "Skip", "Me", "HOF", "1,3,5", None, None,
+                 None, None, None),
+                (24010, "Real", "One", "HOF", "1,3,5", None, None,
+                 "M-001", "AUTH-1", "TRANS-1"),
             ]
 
     conn = StubConn()
     rows = list(backfill._read_contacts(conn))
     assert len(rows) == 1
     assert rows[0][0] == 24010  # int
+    assert rows[0][8] == "AUTH-1"   # SADC Auth passed through
+    assert rows[0][9] == "TRANS-1"  # TRANS Auth passed through
     assert conn.sql == backfill._CONTACTS_QUERY
 
 
@@ -445,7 +559,9 @@ def test_exclude_test_members_skips_trailing_00_before_auth_lookup(
     tmp_path, capsys, monkeypatch
 ):
     # Contact with cid=12300 (ends in 00).
-    contacts_rows = [(12300, "Doe", "John", "HOF", "1,3,5", None, None, None)]
+    contacts_rows = [
+        (12300, "Doe", "John", "HOF", "1,3,5", None, None, None, None, None)
+    ]
     fake_conn = _FakeConn(contacts_rows=contacts_rows)
     monkeypatch.setattr("pyodbc.connect", lambda cs: fake_conn)
 

@@ -27,12 +27,14 @@ from PyQt6.QtWidgets import (
 
 from gui import app_settings
 from gui.i18n import LanguageManager, tr
+from gui.printing import printable_schedules, default_printer_name
+from gui.print_worker import PrintWorker
 from gui.settings_dialog import SettingsDialog
 from gui.worker import ScheduleWorker
 from new_monthly_schedule import REASON_NOT_FOUND, parse_center_ids, resolve_output_dir
 from monthly_schedule.per_day import REASON_NOT_ENROLLED, REASON_NO_AUTH, REASON_ABSENT_MONTH
 
-PLAN_CODES = ["HF", "HOF", "VCM", "BCBS", "ES", "AE", "HC", "Aetna", "Anthem", "BCSB"]
+PLAN_CODES = ["HF", "HOF", "VCM", "BCBS", "ES", "AE", "HC", "BCSB"]
 
 
 def _translate_reason(reason: str) -> str:
@@ -53,7 +55,9 @@ class MainWindow(QWidget):
         self.setMinimumWidth(560)
         self._settings = app_settings.load()
         self._worker = None
+        self._print_worker = None
         self._last_out_dir = None
+        self._last_generated = []   # .xlsx paths from the last run
 
         root = QVBoxLayout(self)
         root.setSpacing(12)
@@ -231,6 +235,10 @@ class MainWindow(QWidget):
         root.addWidget(self._preview_check)
         self._debug_check = QCheckBox()
         root.addWidget(self._debug_check)
+        # All-Members only: split output into per-MLTC folders. Default
+        # off -> everyone in one <Month>_<Year>_Timesheets folder.
+        self._mltc_folders_check = QCheckBox()
+        root.addWidget(self._mltc_folders_check)
 
         # ── Generate ───────────────────────────────────────────────
         self._generate_btn = QPushButton()
@@ -259,6 +267,13 @@ class MainWindow(QWidget):
         self._open_folder_btn.setVisible(False)
         self._open_folder_btn.clicked.connect(self._open_output_folder)
         root.addWidget(self._open_folder_btn)
+
+        # Appears after a successful (non-preview) run; prints every
+        # generated schedule to the default printer (never debug CSVs).
+        self._print_btn = QPushButton()
+        self._print_btn.setVisible(False)
+        self._print_btn.clicked.connect(self._print_schedules)
+        root.addWidget(self._print_btn)
 
         # Wire up live retranslation and apply once.
         LanguageManager.instance().languageChanged.connect(self._retranslate)
@@ -296,8 +311,10 @@ class MainWindow(QWidget):
 
         self._preview_check.setText(tr("opts.preview"))
         self._debug_check.setText(tr("opts.debug"))
+        self._mltc_folders_check.setText(tr("opts.mltc_folders"))
         self._generate_btn.setText(tr("opts.generate"))
         self._open_folder_btn.setText(tr("opts.open_folder"))
+        self._print_btn.setText(tr("opts.print"))
 
     # ── Slots ─────────────────────────────────────────────────────
 
@@ -343,6 +360,51 @@ class MainWindow(QWidget):
                 os.startfile(self._last_out_dir)
             else:
                 subprocess.Popen(["xdg-open", self._last_out_dir])
+
+    def _print_schedules(self):
+        files = printable_schedules(self._last_generated)
+        if not files:
+            QMessageBox.information(
+                self, tr("print.title"), tr("print.none")
+            )
+            return
+        printer = default_printer_name() or tr("print.default_printer")
+        confirm = QMessageBox.question(
+            self,
+            tr("print.confirm.title"),
+            tr("print.confirm.body", count=len(files), printer=printer),
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        # Disable the buttons and stream progress while printing.
+        self._print_btn.setEnabled(False)
+        self._generate_btn.setEnabled(False)
+        self._progress.setRange(0, len(files))
+        self._progress.setValue(0)
+        self._progress.setVisible(True)
+        self._log.setVisible(True)
+        self._log.appendPlainText("")
+        self._log.appendPlainText(tr("print.started", count=len(files)))
+        self._print_worker = PrintWorker(files)
+        self._print_worker.progress.connect(self._on_print_progress)
+        self._print_worker.finished.connect(self._on_print_finished)
+        self._print_worker.start()
+
+    def _on_print_progress(self, done: int, total: int):
+        self._progress.setRange(0, total)
+        self._progress.setValue(done)
+
+    def _on_print_finished(self, success: bool, payload: dict):
+        self._print_btn.setEnabled(True)
+        self._generate_btn.setEnabled(True)
+        if success:
+            self._log.appendPlainText(
+                tr("print.done", count=payload.get("printed", 0))
+            )
+        else:
+            msg = tr("print.failed", error=payload.get("error", ""))
+            self._log.appendPlainText(msg)
+            QMessageBox.warning(self, tr("print.title"), msg)
 
     def _validate(self) -> bool:
         mode = self._who_group.checkedId()
@@ -432,6 +494,7 @@ class MainWindow(QWidget):
         month = self._month_combo.currentIndex() + 1
         preview = self._preview_check.isChecked()
         debug = self._debug_check.isChecked()
+        separate_by_plan = self._mltc_folders_check.isChecked()
         if self._range_check.isChecked():
             start_day = self._range_from_spin.value()
             end_day = self._range_to_spin.value()
@@ -453,6 +516,7 @@ class MainWindow(QWidget):
         self._progress.setValue(0)
         self._progress.setVisible(True)
         self._open_folder_btn.setVisible(False)
+        self._print_btn.setVisible(False)
         self._generate_btn.setEnabled(False)
         self._last_out_dir = out_dir
 
@@ -472,6 +536,7 @@ class MainWindow(QWidget):
             start_day=start_day,
             end_day=end_day,
             schedule_rules=self._settings.get("schedule_rules"),
+            separate_by_plan=separate_by_plan,
         )
         self._worker.progress.connect(self._on_progress)
         self._worker.log_line.connect(self._on_log_line)
@@ -494,8 +559,12 @@ class MainWindow(QWidget):
         self._log.appendPlainText(summary)
         self._generate_btn.setEnabled(True)
         preview = self._preview_check.isChecked()
-        if success and not preview:
+        self._last_generated = payload.get("generated_paths", []) or []
+        # Show the folder/print buttons whenever at least one schedule was
+        # written — even on a partial run where some members were skipped.
+        if not preview and self._last_generated:
             self._open_folder_btn.setVisible(True)
+            self._print_btn.setVisible(True)
         if not success:
             QMessageBox.warning(
                 self, tr("msg.completed_errors.title"), summary

@@ -1,10 +1,13 @@
 """Generate one coherent daily schedule and assert its invariants.
 
-The two output tables (attendance + transportation) are both derived
-from the same Arrival/Departure anchors so they stay mutually
-consistent (spec §4b). Only the anchors are snapped by
-`round_to_minutes`; derived offsets stay exact so the ordering
-invariant cannot be broken by rounding.
+A single attendance block (Time-In -> Time-Out) of a random length is
+placed anywhere inside the member's availability, clipped to the hard
+day bounds (Time-In not before `earliest_time_in`, Time-Out not after
+`latest_time_out`). The transport anchors (Arrival/Departure) and the
+two tables are derived from that block so they stay mutually consistent
+(spec §4b). Only the anchors are snapped by `round_to_minutes`; derived
+offsets stay exact so the ordering invariant cannot be broken by
+rounding.
 """
 
 from monthly_schedule.rules import parse_hhmm, format_minutes
@@ -33,34 +36,53 @@ def validate_schedule(pickup, arrival, time_in, time_out, departure, dropoff, ru
             f"End ordering violated: time_out={time_out} "
             f"departure={departure} dropoff={dropoff}"
         )
-    span = departure - arrival
-    lo, hi = rules["session_span_min"]
-    if not (lo <= span <= hi):
+    length = time_out - time_in
+    lo, hi = rules["session_length_min"]
+    if not (lo <= length <= hi):
         raise ValueError(
-            f"Session span {span} min outside [{lo}, {hi}]"
+            f"Session length {length} min outside [{lo}, {hi}]"
         )
 
 
-def build_daily_schedule(rules, rng, arrival_window=None):
+def build_daily_schedule(rules, rng, window=None):
     """Return a dict of 'HH:MM' strings for one eligible day's visit.
 
-    `arrival_window` (optional) is a (lo_minutes, hi_minutes) tuple that
-    overrides the plan's default arrival_window. Used by the per-day
-    eligibility flow to honor Availability rules."""
-    if arrival_window is None:
-        a_lo, a_hi = (parse_hhmm(x) for x in rules["arrival_window"])
+    `window` (optional) is a (in_lo, out_hi) tuple in minutes: the
+    earliest allowed Time-In and the latest allowed Time-Out for the
+    day, already narrowed by the member's availability. When omitted it
+    defaults to the plan's `earliest_time_in`/`latest_time_out` bounds
+    (the open-day case, member with no availability rule).
+
+    A random length is drawn from `session_length_min`, capped to the
+    free time in the window, and the block is dropped at a random
+    position so the whole of it (Time-In .. Time-Out) fits inside the
+    window. Arrival/Departure and pickup/drop-off are derived around it.
+    """
+    if window is None:
+        in_lo = parse_hhmm(rules["earliest_time_in"])
+        out_hi = parse_hhmm(rules["latest_time_out"])
     else:
-        a_lo, a_hi = arrival_window
+        in_lo, out_hi = window
     step = rules["round_to_minutes"]
 
-    arrival = _round_to(rng.randint(a_lo, a_hi), step)
-    span = rng.randint(*rules["session_span_min"])
-    departure = arrival + span
+    len_lo, len_hi = rules["session_length_min"]
+    # Cap the length at the free time in the window; never below the
+    # configured minimum (callers guarantee the window is at least that
+    # wide, but max() keeps a too-narrow window from crashing).
+    len_hi = max(len_lo, min(len_hi, out_hi - in_lo))
+    length = rng.randint(len_lo, len_hi)
 
+    # Place the block: Time-In anywhere that keeps Time-Out <= out_hi.
+    latest_in = max(in_lo, out_hi - length)
+    time_in = _round_to(rng.randint(in_lo, latest_in), step)
+    # Snapping can nudge Time-In past the edges — clamp so it still fits.
+    time_in = min(max(time_in, in_lo), latest_in)
+    time_out = time_in + length
+
+    arrival = time_in - rng.randint(*rules["time_in_drift_min"])
+    departure = time_out + rng.randint(*rules["time_out_drift_min"])
     pickup = arrival - rng.randint(*rules["pickup_lead_min"])
     dropoff = departure + rng.randint(*rules["dropoff_trail_min"])
-    time_in = arrival + rng.randint(*rules["time_in_drift_min"])
-    time_out = departure - rng.randint(*rules["time_out_drift_min"])
 
     validate_schedule(
         pickup, arrival, time_in, time_out, departure, dropoff, rules

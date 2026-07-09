@@ -38,10 +38,15 @@ class MemberContext:
         return max(candidates, key=lambda r: (r["effective_start"], r["id"]))
 
     def is_absent(self, day: date) -> bool:
+        return self.absence_for(day) is not None
+
+    def absence_for(self, day: date):
+        """Return the first absence row covering `day` (with its
+        leave_type), or None. Used by the debug report."""
         for row in self._absences:
             if row["start_date"] <= day <= row["end_date"]:
-                return True
-        return False
+                return row
+        return None
 
     def availability_for(self, day: date):
         """Return the most relevant Availability row for `day`'s weekday

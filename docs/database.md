@@ -33,7 +33,13 @@ several pre-redesign columns that the scheduler no longer reads:
 `TRANS Auth`. These remain in the database as a historical record
 (and may be used by other tools or reports), but the scheduler now
 reads weekday authorization exclusively from the new Authorization
-table.
+table. The setup-time backfill
+([scripts/backfill_authorization_from_contacts.py](../scripts/backfill_authorization_from_contacts.py))
+still consults some of these once, to seed the Authorization and
+TransportAuthorization tables: `SADC` → `auth_days`,
+`SADC Auth` → `Authorization.auth_number`,
+`TRANS Auth` → `TransportAuthorization.auth_number`,
+`Auth BGN`/`Auth EXP` → the date pairs.
 
 ### Enrollment
 
@@ -68,6 +74,10 @@ during each period.
 | effective_end | Date/Time | Last day **this row's** `auth_days` apply. |
 | auth_days | Short Text | Authorized weekdays as digits 1–7 separated by any non-digit. `1=Mon` … `7=Sun`. Example: `"1,3,5"` for Mon/Wed/Fri. Parser: [monthly_schedule/auth_days.py](../monthly_schedule/auth_days.py). |
 | notes | Long Text, nullable | Free-text context. |
+| Health Plan | Short Text | The member's MLTC plan, copied from Contacts.[Health Plan] by the backfill. |
+| Member ID | Short Text, nullable | External Medicaid-style ID, copied from Contacts.[Member ID]. |
+| auth_number | Short Text, nullable | Authorization number, copied from Contacts.[SADC Auth] by the backfill. |
+| created_at | Date/Time | Timestamp set when the backfill inserts the row. |
 
 **Any weekday change requires a new Authorization row** — this
 applies to every plan/company. The previous row is left in place as
@@ -101,6 +111,50 @@ starting 2026-07-01):
 The first row's `auth_end` stays at 2026-12-31 (the original
 document's expiry); only its `effective_end` is shortened to
 2026-06-30 to reflect that the new auth took over.
+
+### TransportAuthorization
+
+The member's **transportation** authorization. Same schema as
+`Authorization` (every column, including `[ID]`), kept as its own table
+because the transport authorization may eventually carry dates that
+differ from the care authorization.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| ID | AutoNumber | Primary key. |
+| Center ID | Number | FK → Contacts. |
+| auth_start / auth_end | Date/Time | Authorization document validity. |
+| effective_start / effective_end | Date/Time | When this row applies. |
+| auth_days | Short Text | Authorized weekdays (1–7). |
+| notes | Long Text, nullable | Free-text context. |
+| Health Plan | Short Text | Member's MLTC plan. |
+| Member ID | Short Text, nullable | External Medicaid-style ID. |
+| auth_number | Short Text, nullable | Transport authorization number, copied from Contacts.[TRANS Auth]. |
+| created_at | Date/Time | Timestamp set when the backfill inserts the row. |
+| Document | Attachment | Native Access ATTACHMENT (paperclip) field for scanned transport-auth documents. Added by [scripts/add_document_to_transport_authorization.py](../scripts/add_document_to_transport_authorization.py) via DAO — ODBC can't create ATTACHMENT fields, so it's not in the CREATE TABLE DDL. (`Authorization` carries the same field, added by the equivalent script.) |
+
+**How the backfill populates it.** When it inserts an `Authorization`
+row and the member's `Contacts.[TRANS Auth]` is non-blank, it also
+inserts a `TransportAuthorization` row that is identical to the
+Authorization row **except** `auth_number = TRANS Auth`, and records the
+pairing in `AuthEdge`. A blank `TRANS Auth` produces no transport row.
+(Today the dates/effective dates/`auth_days` are copied verbatim from
+the care authorization; the separate table leaves room for them to
+diverge later.)
+
+### AuthEdge
+
+Link table pairing each `Authorization` row with its
+`TransportAuthorization` row.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| ID | AutoNumber | Primary key. |
+| authorization_id | Number (LONG) | FK → Authorization.[ID]. |
+| transport_authorization_id | Number (LONG) | FK → TransportAuthorization.[ID]. |
+
+The backfill captures each inserted row's autonumber via Access's
+`SELECT @@IDENTITY` and writes one `AuthEdge` row per pair.
 
 ### Absences
 

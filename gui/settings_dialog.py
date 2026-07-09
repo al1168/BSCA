@@ -252,14 +252,25 @@ class SettingsDialog(QDialog):
         rules_form = QFormLayout(self._rules_group)
         rules_form.setVerticalSpacing(8)
 
-        arr_lo, arr_hi = rules.get("arrival_window", ["08:00", "11:00"])
-        self._arrival_row = _RangeTimes(
-            _time_from_hhmm(arr_lo), _time_from_hhmm(arr_hi),
+        self._earliest_in_edit = QTimeEdit()
+        self._earliest_in_edit.setDisplayFormat("HH:mm")
+        self._earliest_in_edit.setTime(
+            _time_from_hhmm(rules.get("earliest_time_in", "08:00"))
         )
-        self._arrival_label = QLabel()
-        rules_form.addRow(self._arrival_label, self._arrival_row)
+        self._earliest_in_edit.setFixedWidth(82)
+        self._earliest_in_label = QLabel()
+        rules_form.addRow(self._earliest_in_label, self._earliest_in_edit)
 
-        sess_lo, sess_hi = rules.get("session_span_min", [210, 245])
+        self._latest_out_edit = QTimeEdit()
+        self._latest_out_edit.setDisplayFormat("HH:mm")
+        self._latest_out_edit.setTime(
+            _time_from_hhmm(rules.get("latest_time_out", "16:00"))
+        )
+        self._latest_out_edit.setFixedWidth(82)
+        self._latest_out_label = QLabel()
+        rules_form.addRow(self._latest_out_label, self._latest_out_edit)
+
+        sess_lo, sess_hi = rules.get("session_length_min", [210, 240])
         self._session_row = _RangeTimes(
             _minutes_to_qtime(int(sess_lo)),
             _minutes_to_qtime(int(sess_hi)),
@@ -321,7 +332,8 @@ class SettingsDialog(QDialog):
         if self._test_btn is not None:
             self._test_btn.setText(tr("settings.test_connection"))
         self._rules_group.setTitle(tr("settings.rules.title"))
-        self._arrival_label.setText(tr("settings.rules.arrival"))
+        self._earliest_in_label.setText(tr("settings.rules.earliest_in"))
+        self._latest_out_label.setText(tr("settings.rules.latest_out"))
         self._session_label.setText(tr("settings.rules.session"))
         self._travel_label.setText(tr("settings.rules.travel_buffer"))
         self._time_in_label.setText(tr("settings.rules.time_in"))
@@ -369,37 +381,38 @@ class SettingsDialog(QDialog):
         )
 
     def _save(self):
-        arrival = self._arrival_row.hhmm_value()
+        earliest_in = _hhmm(self._earliest_in_edit.time())
+        latest_out = _hhmm(self._latest_out_edit.time())
         session = self._session_row.minutes_value()
         travel = self._travel_row.value()
         time_in = self._time_in_row.value()
         time_out = self._time_out_row.value()
-        # Guardrail: each min must be <= its max. On any violation we
-        # warn but still save (clamping by swapping would silently
-        # change user intent; better to ask them to fix it).
-        ranges = [
-            ("arrival_window", arrival),
-            ("session_span_min", session),
-            ("travel_buffer_min", travel),
-            ("time_in_drift_min", time_in),
-            ("time_out_drift_min", time_out),
-        ]
-        for _, (lo, hi) in ranges:
-            if lo > hi:
-                QMessageBox.warning(
-                    self,
-                    tr("settings.rules.invalid_range.title"),
-                    tr("settings.rules.invalid_range.body"),
-                )
-                return
+        # Guardrail: each min must be <= its max, and the day bounds must
+        # be ordered (earliest Time-In before latest Time-Out). On any
+        # violation we warn and ask the user to fix it rather than
+        # silently swapping (which would change their intent).
+        ranges = [session, travel, time_in, time_out]
+        bad = any(lo > hi for lo, hi in ranges)
+        bad = bad or (
+            _qtime_to_minutes(self._earliest_in_edit.time())
+            >= _qtime_to_minutes(self._latest_out_edit.time())
+        )
+        if bad:
+            QMessageBox.warning(
+                self,
+                tr("settings.rules.invalid_range.title"),
+                tr("settings.rules.invalid_range.body"),
+            )
+            return
         self._result = {
             "db_path": self._db_row.value(),
             "output_path": self._out_row.value(),
             "google_api_key": self._key_row.value(),
             "geo_cache": self._cache_row.value(),
             "schedule_rules": {
-                "arrival_window": list(arrival),
-                "session_span_min": list(session),
+                "earliest_time_in": earliest_in,
+                "latest_time_out": latest_out,
+                "session_length_min": list(session),
                 "travel_buffer_min": list(travel),
                 "time_in_drift_min": list(time_in),
                 "time_out_drift_min": list(time_out),

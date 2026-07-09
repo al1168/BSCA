@@ -21,8 +21,9 @@ def test_format_minutes():
 
 def test_default_rules_present_and_shaped():
     d = SCHEDULE_RULES["Default"]
-    assert d["arrival_window"] == ("08:00", "11:00")
-    assert d["session_span_min"] == (210, 245)
+    assert d["earliest_time_in"] == "08:00"
+    assert d["latest_time_out"] == "16:00"
+    assert d["session_length_min"] == (210, 240)
     assert d["time_in_drift_min"] == (2, 2)
     assert d["time_out_drift_min"] == (2, 2)
     assert d["pickup_lead_min"] == (8, 12)
@@ -30,9 +31,9 @@ def test_default_rules_present_and_shaped():
     assert d["round_to_minutes"] == 1
     buf_lo, buf_hi = d["travel_buffer_min"]
     assert 0 < buf_lo <= buf_hi
-    assert "departure_window" not in d
-    assert "min_session_hours" not in d
-    assert "max_session_hours" not in d
+    # the old arrival-window model is gone
+    assert "arrival_window" not in d
+    assert "session_span_min" not in d
 
 
 def test_get_rules_for_plan_falls_back_to_default():
@@ -48,12 +49,14 @@ def test_get_rules_for_plan_uses_specific_entry(monkeypatch):
 
 def test_overrides_replace_default_values():
     overrides = {
-        "arrival_window": ["07:00", "10:00"],
-        "session_span_min": [180, 200],
+        "earliest_time_in": "07:00",
+        "latest_time_out": "15:00",
+        "session_length_min": [180, 200],
     }
     rules = get_rules_for_plan("Default", overrides)
-    assert rules["arrival_window"] == ("07:00", "10:00")
-    assert rules["session_span_min"] == (180, 200)
+    assert rules["earliest_time_in"] == "07:00"
+    assert rules["latest_time_out"] == "15:00"
+    assert rules["session_length_min"] == (180, 200)
     # Unmentioned keys still come from the default.
     assert rules["time_in_drift_min"] == SCHEDULE_RULES["Default"]["time_in_drift_min"]
 
@@ -61,17 +64,17 @@ def test_overrides_replace_default_values():
 def test_overrides_none_value_keeps_default():
     """A None override is a 'no opinion' marker — defaults still apply."""
     rules = get_rules_for_plan(
-        "Default", {"arrival_window": None}
+        "Default", {"earliest_time_in": None}
     )
-    assert rules["arrival_window"] == SCHEDULE_RULES["Default"]["arrival_window"]
+    assert rules["earliest_time_in"] == SCHEDULE_RULES["Default"]["earliest_time_in"]
 
 
 def test_overrides_does_not_mutate_default():
     """get_rules_for_plan must return a fresh dict so caller mutations
     can't leak back into the global SCHEDULE_RULES table."""
     before = dict(SCHEDULE_RULES["Default"])
-    rules = get_rules_for_plan("Default", {"arrival_window": ["07:00", "10:00"]})
-    rules["arrival_window"] = ("99:99", "99:99")  # caller stomp
+    rules = get_rules_for_plan("Default", {"earliest_time_in": "07:00"})
+    rules["earliest_time_in"] = "99:99"  # caller stomp
     assert SCHEDULE_RULES["Default"] == before
 
 

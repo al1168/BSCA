@@ -1,6 +1,7 @@
 """CLI: generate monthly schedule workbooks from the four-table Access data model."""
 
 import argparse
+import calendar
 import csv
 import os
 import random
@@ -13,6 +14,7 @@ from monthly_schedule.db import (
     get_enrollments, get_authorizations, get_absences, get_availability,
     get_one_offs,
 )
+from monthly_schedule.auth_days import get_authorized_weekdays
 from monthly_schedule.month_dates import get_month_dates
 from monthly_schedule.eligibility_context import MemberContext
 from monthly_schedule.per_day import compute_month_failure, OneOffConflict
@@ -66,28 +68,31 @@ def schedule_filename(center_id, year, month,
     return f"Schedule_{center_id}_{year:04d}-{month:02d}{suffix}.xlsx"
 
 
-def debug_filename(year, month, start_day=None, end_day=None):
-    """Single combined debug-CSV filename for the run (one row per
-    member-day across all scheduled members). Appends `_DD-DD` when a
-    custom range is supplied so the debug + schedule files match."""
+def debug_filename(center_id, year, month, start_day=None, end_day=None):
+    """Per-member debug-CSV filename (`Debug_<center_id>_<YYYY-MM>.csv`,
+    one file per member). Appends `_DD-DD` when a custom range is
+    supplied so the debug + schedule files match."""
     suffix = _range_suffix(start_day, end_day)
-    return f"Debug_{year:04d}-{month:02d}{suffix}.csv"
+    return f"Debug_{center_id}_{year:04d}-{month:02d}{suffix}.csv"
 
 
 def write_debug_csv(rows, path):
-    """Write the combined per-day diagnostic rows for the whole run.
+    """Write one member's per-day diagnostic rows to `path`.
 
     `rows` is a list of dicts with keys: center_id, name, date, day,
-    scheduled, reason. `scheduled` is rendered as 'yes'/'no' for
-    readability when opened in Excel. Returns the path written, or
-    None when `rows` is empty (file not created)."""
+    scheduled, reason, availability, availability_source, absent,
+    auth_days, placement_window, max_length. `scheduled` is rendered as
+    'yes'/'no' for readability when opened in Excel. Returns the path
+    written, or None when `rows` is empty (file not created)."""
     if not rows:
         return None
     with open(path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
-        writer.writerow(
-            ["center_id", "name", "date", "day", "scheduled", "reason"]
-        )
+        writer.writerow([
+            "center_id", "name", "date", "day", "scheduled", "reason",
+            "availability", "availability_source", "absent", "auth_days",
+            "placement_window", "max_length",
+        ])
         for row in rows:
             writer.writerow([
                 row["center_id"],
@@ -96,6 +101,12 @@ def write_debug_csv(rows, path):
                 row["day"],
                 "yes" if row["scheduled"] else "no",
                 row["reason"],
+                row["availability"],
+                row["availability_source"],
+                row["absent"],
+                row["auth_days"],
+                row["placement_window"],
+                row["max_length"],
             ])
     return path
 
@@ -116,6 +127,21 @@ def collect_debug_rows(member, ctx, year, month,
             year, month, ctx, rules, start_day, end_day
         )
     ]
+
+
+def all_members_subdir(year, month, health_plan, separate_by_plan):
+    """Subfolder name (under the output dir) for one member in an
+    All-Members run.
+
+    With `separate_by_plan` each MLTC gets its own `<PLAN>_<YYYY-MM>`
+    folder (blank/unknown plan -> `_NoPlan`). Otherwise everyone shares a
+    single `<MonthName>_<YYYY>_Timesheets` folder (e.g.
+    `June_2026_Timesheets`)."""
+    if separate_by_plan:
+        plan = (str(health_plan).strip().upper()
+                if health_plan else "") or "_NoPlan"
+        return f"{plan}_{year:04d}-{month:02d}"
+    return f"{calendar.month_name[month]}_{year:04d}_Timesheets"
 
 
 def resolve_output_dir(base, plan_code, year, month):
@@ -233,8 +259,8 @@ def process_member(member, ctx, year, month, out_dir, preview,
     of the month is scheduled. When `time_cache` is supplied, daily
     times are reused across runs (idempotency for partial schedules).
     `schedule_rules_overrides` is the user's settings-configured rules
-    (arrival_window, session_span_min, travel_buffer_min, etc.) that
-    replace the built-in defaults."""
+    (earliest_time_in, latest_time_out, session_length_min,
+    travel_buffer_min, etc.) that replace the built-in defaults."""
     failure = compute_month_failure(year, month, ctx, start_day, end_day)
     if failure is not None:
         return (False, "eligibility", failure, None)
@@ -281,8 +307,15 @@ def process_member(member, ctx, year, month, out_dir, preview,
             member["center_id"], year, month, start_day, end_day
         ),
     )
+    # Authorized weekdays across the range (union over any mid-month
+    # authorization changes), shown in each timesheet header.
+    auth_weekdays = set()
+    for day in get_month_dates(year, month, start_day, end_day):
+        auth = ctx.active_authorization(day)
+        if auth:
+            auth_weekdays |= get_authorized_weekdays(auth["auth_days"])
     try:
-        build_workbook(member, rows, path)
+        build_workbook(member, rows, path, auth_weekdays=auth_weekdays)
     except Exception as exc:  # reported in the run summary
         return (False, "write", f"{type(exc).__name__} — {exc}", None)
     print(f"Wrote {path}")
@@ -357,7 +390,6 @@ def main(argv=None):
         os.makedirs(out_dir, exist_ok=True)
 
     success = 0
-    debug_rows = []
     for member in members:
         ctx = MemberContext(
             enrollments=get_enrollments(member["center_id"], args.db_path),
@@ -367,12 +399,20 @@ def main(argv=None):
             one_offs=get_one_offs(member["center_id"], args.db_path),
         )
         if args.debug and not args.preview_data:
-            debug_rows.extend(
-                collect_debug_rows(
-                    member, ctx, args.year, args.month,
-                    args.start_day, args.end_day,
-                )
+            member_debug_rows = collect_debug_rows(
+                member, ctx, args.year, args.month,
+                args.start_day, args.end_day,
             )
+            debug_path = os.path.join(
+                out_dir,
+                debug_filename(
+                    member["center_id"], args.year, args.month,
+                    args.start_day, args.end_day,
+                ),
+            )
+            written = write_debug_csv(member_debug_rows, debug_path)
+            if written is not None:
+                print(f"Wrote debug report: {written}", file=sys.stderr)
         ok, stage, reason, day = process_member(
             member, ctx, args.year, args.month, out_dir,
             args.preview_data, api_key, cache,
@@ -396,17 +436,6 @@ def main(argv=None):
         skipped_csv = write_skipped_members_csv(failures, out_dir)
         if skipped_csv is not None:
             print(f"Wrote skipped members report: {skipped_csv}", file=sys.stderr)
-        if args.debug:
-            debug_path = os.path.join(
-                out_dir,
-                debug_filename(
-                    args.year, args.month,
-                    args.start_day, args.end_day,
-                ),
-            )
-            written = write_debug_csv(debug_rows, debug_path)
-            if written is not None:
-                print(f"Wrote debug report: {written}", file=sys.stderr)
     total = success + len(failures)
     verb = "Previewed" if args.preview_data else "Wrote"
     summary_dir = None if args.preview_data else out_dir

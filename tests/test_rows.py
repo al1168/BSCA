@@ -10,8 +10,9 @@ from monthly_schedule.per_day import (
 
 
 PLAN_RULES = {
-    "arrival_window": ("08:00", "11:00"),
-    "session_span_min": (210, 245),
+    "earliest_time_in": "08:00",
+    "latest_time_out": "16:00",
+    "session_length_min": (210, 240),
     "pickup_lead_min": (8, 12),
     "dropoff_trail_min": (8, 12),
     "time_in_drift_min": (2, 2),
@@ -35,6 +36,44 @@ def _ctx_full_month(authorized="1,3,5"):
         availabilities=[],
         one_offs=[],
     )
+
+
+def _to_min(hhmm):
+    h, m = hhmm.split(":")
+    return int(h) * 60 + int(m)
+
+
+def test_build_rows_caps_session_to_availability():
+    # Member available only 08:00-11:40 (3h40m) on Mon/Wed/Fri. Every
+    # scheduled day's attendance block (Time-In..Time-Out) must end by
+    # 11:40 and run 3h30m-3h40m — fitting the free time, not the plan max.
+    avail = [
+        {"id": d, "center_id": 1,
+         "effective_start_date": date(2026, 1, 1),
+         "effective_end_date": None,
+         "day_of_week": d, "avail_start": "08:00", "avail_end": "11:40"}
+        for d in (1, 3, 5)
+    ]
+    ctx = MemberContext(
+        enrollments=[{"id": 1, "center_id": 1,
+                      "start_date": date(2026, 1, 1), "end_date": None}],
+        authorizations=[{"id": 1, "center_id": 1,
+                         "auth_start": date(2026, 1, 1),
+                         "auth_end": date(2026, 12, 31),
+                         "effective_start": date(2026, 1, 1),
+                         "effective_end": date(2026, 12, 31),
+                         "auth_days": "1,3,5"}],
+        absences=[], availabilities=avail, one_offs=[],
+    )
+    rows = build_rows(2026, 5, ctx, PLAN_RULES, random.Random(0))
+    scheduled = [r for r in rows if r["arrival"]]
+    assert scheduled  # sanity: some days were scheduled
+    for r in scheduled:
+        ti = _to_min(r["time_in"])
+        to = _to_min(r["time_out"])
+        assert ti >= _to_min("08:00")
+        assert to <= _to_min("11:40")
+        assert 210 <= to - ti <= 220
 
 
 def test_build_rows_one_row_per_day():
@@ -107,11 +146,10 @@ def test_availability_window_honored():
     )
     rows = build_rows(2026, 5, ctx, PLAN_RULES, random.Random(0))
     mon = next(r for r in rows if r["date"] == date(2026, 5, 4))
-    # Plan default arrival is 08:00–11:00; member is available 10:00 onwards,
-    # so the effective arrival window narrows to 10:00–11:00 (600–660 min).
-    h, m = mon["arrival"].split(":")
-    arrival_min = int(h) * 60 + int(m)
-    assert 600 <= arrival_min <= 660
+    # Member available 10:00–15:00, so the attendance block must sit
+    # inside that window: Time-In >= 10:00 and Time-Out <= 15:00.
+    assert _to_min(mon["time_in"]) >= _to_min("10:00")
+    assert _to_min(mon["time_out"]) <= _to_min("15:00")
 
 
 def test_debug_rows_only_authorized_weekdays():
@@ -145,11 +183,65 @@ def test_debug_rows_records_absence_reason():
     monday = next(r for r in rows if r["date"] == date(2026, 5, 4))
     assert monday["scheduled"] is False
     assert monday["reason"] == REASON_DAY_ABSENT
+    assert monday["absent"] == "yes (Vacation)"
+
+
+def test_debug_rows_carry_diagnostic_fields():
+    # Recurring availability 08:00-11:40 on Mon/Wed/Fri, no absence.
+    avail = {"id": 1, "center_id": 1,
+             "effective_start_date": date(2026, 1, 1),
+             "effective_end_date": None,
+             "day_of_week": 1,
+             "avail_start": "08:00", "avail_end": "11:40"}
+    ctx = MemberContext(
+        enrollments=[{"id": 1, "center_id": 1,
+                      "start_date": date(2026, 1, 1), "end_date": None}],
+        authorizations=[{"id": 1, "center_id": 1,
+                         "auth_start": date(2026, 1, 1),
+                         "auth_end": date(2026, 12, 31),
+                         "effective_start": date(2026, 1, 1),
+                         "effective_end": date(2026, 12, 31),
+                         "auth_days": "1,3,5"}],
+        absences=[],
+        availabilities=[avail],
+        one_offs=[],
+    )
+    rows = build_debug_rows(2026, 5, ctx, PLAN_RULES)
+    monday = next(r for r in rows if r["date"] == date(2026, 5, 4))
+    assert monday["availability"] == "08:00-11:40"
+    assert monday["availability_source"] == "recurring"
+    assert monday["absent"] == "no"
+    assert monday["auth_days"] == "1,3,5"
+    assert monday["placement_window"] == "08:00-11:40"
+    assert monday["max_length"] == "03:40"   # min(4h00, 3h40 of free time)
+
+
+def test_debug_rows_show_one_off_availability_source():
+    one_off = {"id": 9, "center_id": 1, "date": date(2026, 5, 4),
+               "avail_start": "09:00", "avail_end": "14:00"}
+    ctx = MemberContext(
+        enrollments=[{"id": 1, "center_id": 1,
+                      "start_date": date(2026, 1, 1), "end_date": None}],
+        authorizations=[{"id": 1, "center_id": 1,
+                         "auth_start": date(2026, 1, 1),
+                         "auth_end": date(2026, 12, 31),
+                         "effective_start": date(2026, 1, 1),
+                         "effective_end": date(2026, 12, 31),
+                         "auth_days": "1,3,5"}],
+        absences=[],
+        availabilities=[],
+        one_offs=[one_off],
+    )
+    rows = build_debug_rows(2026, 5, ctx, PLAN_RULES)
+    monday = next(r for r in rows if r["date"] == date(2026, 5, 4))
+    assert monday["availability"] == "09:00-14:00"
+    assert monday["availability_source"] == "one-off"
+    assert monday["placement_window"] == "09:00-14:00"
 
 
 def test_debug_rows_records_window_too_narrow():
-    # Plan arrival 08:00-11:00, session_span lower 210. A 12:00-13:30
-    # availability gives lo=720, hi=min(660, 810-210)=600 → ineligible.
+    # A 12:00-13:30 availability clips to window (720, 810) = 90 min,
+    # narrower than the 210 min minimum → ineligible.
     avail = {"id": 1, "center_id": 1,
              "effective_start_date": date(2026, 1, 1),
              "effective_end_date": None,
@@ -223,7 +315,7 @@ def test_build_rows_stores_into_time_cache_on_miss():
     monday = next(r for r in rows if r["date"] == date(2026, 5, 4))
     hit = lookup_times(
         time_cache, 1, date(2026, 5, 4), "HOF", 7,
-        (480, 660),
+        (480, 960),
     )
     assert hit is not None
     assert hit["arrival"] == monday["arrival"]

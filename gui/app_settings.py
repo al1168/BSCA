@@ -13,8 +13,9 @@ DEFAULTS = {
     # so they round-trip cleanly through JSON; rules.get_rules_for_plan
     # converts the ranges back to tuples at use site.
     "schedule_rules": {
-        "arrival_window": ["08:00", "11:00"],
-        "session_span_min": [210, 245],
+        "earliest_time_in": "08:00",
+        "latest_time_out": "16:00",
+        "session_length_min": [210, 240],
         "travel_buffer_min": [1, 5],
         "time_in_drift_min": [2, 2],
         "time_out_drift_min": [2, 2],
@@ -39,10 +40,14 @@ def load() -> dict:
 
     merged = {**DEFAULTS, **data}
     # schedule_rules: deep-merge so a file with only some of the keys
-    # still gets defaults for the rest (forward-compatible).
+    # still gets defaults for the rest (forward-compatible). Saved keys
+    # not in DEFAULTS are dropped, which retires legacy rule keys
+    # (arrival_window/session_span_min) left over from older versions.
     saved_rules = data.get("schedule_rules") or {}
+    known = set(DEFAULTS["schedule_rules"])
     merged["schedule_rules"] = {
-        **DEFAULTS["schedule_rules"], **saved_rules
+        **DEFAULTS["schedule_rules"],
+        **{k: v for k, v in saved_rules.items() if k in known},
     }
     if _migrate_legacy_google_config(merged):
         try:

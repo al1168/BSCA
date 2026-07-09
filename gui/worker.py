@@ -14,11 +14,13 @@ from monthly_schedule.eligibility_context import MemberContext
 from monthly_schedule.per_day import OneOffConflict
 from monthly_schedule.travel import load_cache, save_cache
 from monthly_schedule.time_cache import load_time_cache, save_time_cache
+from gui.app_paths import time_cache_path as app_time_cache_path
 from gui.errors import friendly_db_error
 from gui.i18n import tr
 from new_monthly_schedule import (
     Failure,
     REASON_NOT_FOUND,
+    all_members_subdir,
     collect_debug_rows,
     debug_filename,
     parse_center_ids,
@@ -52,6 +54,7 @@ class ScheduleWorker(QThread):
         start_day=None,
         end_day=None,
         schedule_rules=None,
+        separate_by_plan=False,
         parent=None,
     ):
         super().__init__(parent)
@@ -70,6 +73,7 @@ class ScheduleWorker(QThread):
         self.start_day = start_day
         self.end_day = end_day
         self.schedule_rules = schedule_rules
+        self.separate_by_plan = separate_by_plan
 
     def _emit_error(self, text: str):
         self.finished.emit(False, {"error_text": text})
@@ -88,14 +92,17 @@ class ScheduleWorker(QThread):
     def _run_inner(self):
         api_key = self.google_api_key
         cache = load_cache(self.geo_cache)
-        # Time cache lives next to geo_cache so users get persistence
-        # automatically without touching settings. Idempotency for
-        # partial schedules: rerunning May for a member previously
-        # scheduled May 1-19 reuses the printed times.
-        time_cache_path = os.path.join(
+        # Time cache lives under %APPDATA% so it isn't accidentally
+        # deleted alongside the generated output. Older versions kept it
+        # next to geo_cache.json; that file is migrated over on first run
+        # so already-printed times stay stable. Idempotency for partial
+        # schedules: rerunning May for a member previously scheduled
+        # May 1-19 reuses the printed times.
+        legacy_time_cache = os.path.join(
             os.path.dirname(os.path.abspath(self.geo_cache)),
             "time_cache.json",
         )
+        time_cache_path = app_time_cache_path(legacy_path=legacy_time_cache)
         time_cache = load_time_cache(time_cache_path)
 
         members = []
@@ -149,7 +156,7 @@ class ScheduleWorker(QThread):
 
         total = len(members) + len(failures)
         success = 0
-        debug_rows = []
+        generated_paths = []   # full paths of the .xlsx schedules written
 
         # Eager-fetch all four supporting tables once and index by
         # center_id. Replaces 4×N ODBC connections (the per-member
@@ -181,23 +188,37 @@ class ScheduleWorker(QThread):
                     one_offs=one_off_idx.get(cid, []),
                 )
                 if self.mode == "all":
-                    raw_plan = member.get("health_plan")
-                    plan = (str(raw_plan).strip().upper() if raw_plan else "") or "_NoPlan"
                     member_out_dir = os.path.join(
-                        self.out_dir, f"{plan}_{self.year:04d}-{self.month:02d}"
+                        self.out_dir,
+                        all_members_subdir(
+                            self.year, self.month,
+                            member.get("health_plan"),
+                            self.separate_by_plan,
+                        ),
                     )
                     if not self.preview:
                         os.makedirs(member_out_dir, exist_ok=True)
                 else:
                     member_out_dir = self.out_dir
                 if self.debug and not self.preview:
-                    debug_rows.extend(
-                        collect_debug_rows(
-                            member, ctx, self.year, self.month,
-                            self.start_day, self.end_day,
-                            schedule_rules_overrides=self.schedule_rules,
-                        )
+                    member_debug_rows = collect_debug_rows(
+                        member, ctx, self.year, self.month,
+                        self.start_day, self.end_day,
+                        schedule_rules_overrides=self.schedule_rules,
                     )
+                    debug_path = os.path.join(
+                        member_out_dir,
+                        debug_filename(
+                            member["center_id"], self.year, self.month,
+                            self.start_day, self.end_day,
+                        ),
+                    )
+                    written = write_debug_csv(member_debug_rows, debug_path)
+                    if written is not None:
+                        self.log_line.emit(
+                            "worker.wrote_debug_csv",
+                            {"filename": os.path.basename(written)},
+                        )
                 ok, stage, reason, day = process_member(
                     member, ctx,
                     self.year, self.month, member_out_dir,
@@ -232,7 +253,11 @@ class ScheduleWorker(QThread):
                     )
                 else:
                     fname = schedule_filename(
-                        member["center_id"], self.year, self.month
+                        member["center_id"], self.year, self.month,
+                        self.start_day, self.end_day,
+                    )
+                    generated_paths.append(
+                        os.path.join(member_out_dir, fname)
                     )
                     self.log_line.emit("worker.wrote", {"filename": fname})
             else:
@@ -259,24 +284,11 @@ class ScheduleWorker(QThread):
                     "worker.wrote_skipped_csv",
                     {"filename": os.path.basename(csv_path)},
                 )
-            # Same logic for the combined debug CSV when --debug is on:
-            # one roll-up at out_dir, covering all members in the run.
-            if self.debug:
-                debug_path = os.path.join(
-                    self.out_dir,
-                    debug_filename(
-                        self.year, self.month,
-                        self.start_day, self.end_day,
-                    ),
-                )
-                written = write_debug_csv(debug_rows, debug_path)
-                if written is not None:
-                    self.log_line.emit(
-                        "worker.wrote_debug_csv",
-                        {"filename": os.path.basename(written)},
-                    )
+            # Per-member debug CSVs are written inside the loop, next to
+            # each member's schedule.
 
         payload = {
+            "generated_paths": generated_paths,
             "verb_key": "summary.verb.previewed" if self.preview else "summary.verb.wrote",
             "success": success,
             "total": total,
