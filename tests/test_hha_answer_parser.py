@@ -92,3 +92,80 @@ def test_hhmm_formats_minutes():
     assert hhmm(8 * 60) == "08:00"
     assert hhmm(12 * 60 + 30) == "12:30"
     assert hhmm(0) == "00:00"
+
+
+# ---------------------------------------------------------------------------
+# subtract_care_window — spec §4. Windows are (start_min, end_min) tuples;
+# the typical open window post-setup is the seeded default 08:00-13:00.
+# ---------------------------------------------------------------------------
+
+DEFAULT = (8 * 60, 13 * 60)
+
+
+def test_subtract_no_overlap_after_close():
+    """5 PM - 9 PM care vs 08:00-13:00: no change."""
+    result = subtract_care_window(DEFAULT, (17 * 60, 21 * 60))
+    assert result == {"action": "none", "window": DEFAULT, "dropped": None}
+
+
+def test_subtract_no_overlap_touching_edges():
+    """Care ending exactly at open / starting exactly at close: no change."""
+    assert subtract_care_window(DEFAULT, (6 * 60, 8 * 60))["action"] == "none"
+    assert subtract_care_window(DEFAULT, (13 * 60, 15 * 60))["action"] == "none"
+
+
+def test_subtract_front_overlap_pushes_start():
+    """6 AM - 12 PM care: morning care pushes avail_start to 12:00."""
+    result = subtract_care_window(DEFAULT, (6 * 60, 12 * 60))
+    assert result == {
+        "action": "narrow", "window": (12 * 60, 13 * 60), "dropped": None,
+    }
+
+
+def test_subtract_back_overlap_pulls_end():
+    """12 PM - 4 PM care: avail_end pulled to 12:00 (the original rule)."""
+    result = subtract_care_window(DEFAULT, (12 * 60, 16 * 60))
+    assert result == {
+        "action": "narrow", "window": (8 * 60, 12 * 60), "dropped": None,
+    }
+
+
+def test_subtract_strict_inside_keeps_longer_piece():
+    """8:30 AM - 12 PM care leaves 08:00-08:30 and 12:00-13:00; the
+    longer piece (12:00-13:00) is kept, the other reported as dropped."""
+    result = subtract_care_window(DEFAULT, (510, 12 * 60))
+    assert result == {
+        "action": "split",
+        "window": (12 * 60, 13 * 60),
+        "dropped": (8 * 60, 510),
+    }
+
+
+def test_subtract_strict_inside_tie_keeps_morning():
+    """Equal pieces (30 min each): keep the morning piece."""
+    result = subtract_care_window(DEFAULT, (510, 750))
+    assert result["action"] == "split"
+    assert result["window"] == (8 * 60, 510)
+    assert result["dropped"] == (750, 13 * 60)
+
+
+def test_subtract_full_cover_is_blocked():
+    """6:30 AM - 1:30 PM care swallows 08:00-13:00 entirely."""
+    result = subtract_care_window(DEFAULT, (390, 810))
+    assert result == {"action": "blocked", "window": None, "dropped": None}
+
+
+def test_subtract_exact_cover_is_blocked():
+    result = subtract_care_window(DEFAULT, DEFAULT)
+    assert result["action"] == "blocked"
+
+
+def test_subtract_is_idempotent():
+    """Subtracting the same care window from the already-narrowed
+    result is a no-op — re-running the tool is safe."""
+    care = (12 * 60, 16 * 60)
+    first = subtract_care_window(DEFAULT, care)
+    second = subtract_care_window(first["window"], care)
+    assert second == {
+        "action": "none", "window": first["window"], "dropped": None,
+    }

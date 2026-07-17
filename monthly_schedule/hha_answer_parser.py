@@ -72,7 +72,33 @@ def parse_answer(text):
 
 
 def subtract_care_window(avail, care):
-    raise NotImplementedError  # Task 2
+    """Subtract the care interval from the availability interval
+    (both `(start_min, end_min)` tuples). Returns
+
+        {"action": "none" | "narrow" | "split" | "blocked",
+         "window": (lo, hi) | None,    # the post-subtraction window
+         "dropped": (lo, hi) | None}   # discarded piece (split only)
+
+    Split rule (spec §4): when the care window sits strictly inside,
+    keep the longer remaining piece; on a tie keep the morning piece.
+    The result is always a subset of `avail` — this only ever narrows.
+    """
+    a, b = avail
+    s, e = care
+    if e <= a or s >= b:
+        return {"action": "none", "window": (a, b), "dropped": None}
+    if s <= a and e >= b:
+        return {"action": "blocked", "window": None, "dropped": None}
+    if s <= a:
+        return {"action": "narrow", "window": (e, b), "dropped": None}
+    if e >= b:
+        return {"action": "narrow", "window": (a, s), "dropped": None}
+    front, back = (a, s), (e, b)
+    if (s - a) >= (b - e):
+        keep, drop = front, back
+    else:
+        keep, drop = back, front
+    return {"action": "split", "window": keep, "dropped": drop}
 
 
 def hhmm(minutes):
