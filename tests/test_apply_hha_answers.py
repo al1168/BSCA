@@ -21,6 +21,10 @@ class _FakeCursor:
 
     contacts_ids: set[int] — Center IDs that exist in Contacts.
     open_rows: {(center_id_str, day_int): (row_id, start_dt, end_dt)}
+
+    Models read-your-own-writes inside the transaction: UPDATEs mutate
+    the matching _open_rows entry, INSERTs add a new entry with a
+    synthetic row_id, so later SELECTs see uncommitted writes.
     """
 
     def __init__(self, contacts_ids, open_rows):
@@ -30,6 +34,7 @@ class _FakeCursor:
         self.updates = []       # (start_time, end_time, row_id)
         self.inserts = []       # (cid, eff_start, day, start_time, end_time)
         self._pending = None    # next fetchone() result
+        self._next_row_id = 9000    # synthetic ids for INSERTed rows
 
     def execute(self, sql, *params):
         self.executed.append((sql, params))
@@ -40,9 +45,21 @@ class _FakeCursor:
             self._pending = self._open_rows.get((params[0], params[1]))
         elif sql.startswith("UPDATE [Availability]"):
             self.updates.append(params)
+            start_t, end_t, row_id = params
+            for key, (rid, _s, _e) in self._open_rows.items():
+                if rid == row_id:
+                    # The script's _time_to_minutes accepts plain
+                    # datetime.time, so store the times as written.
+                    self._open_rows[key] = (rid, start_t, end_t)
+                    break
             self._pending = None
         elif sql.startswith("INSERT INTO [Availability]"):
             self.inserts.append(params)
+            cid, _eff_start, day, start_t, end_t = params
+            self._open_rows[(cid, day)] = (
+                self._next_row_id, start_t, end_t,
+            )
+            self._next_row_id += 1
             self._pending = None
         else:  # pragma: no cover - unexpected SQL is a test failure
             raise AssertionError(f"unexpected SQL: {sql}")
@@ -167,7 +184,7 @@ def test_back_overlap_updates_open_row(tmp_path, monkeypatch, capsys):
     ]
     assert cursor.inserts == []
     out = capsys.readouterr().out
-    assert "Days updated:" in out
+    assert "Days updated:                   1" in out
     assert _read_review_csv(tmp_path) == []   # nothing flagged
 
 
@@ -207,7 +224,7 @@ def test_no_overlap_writes_nothing(tmp_path, monkeypatch, capsys):
     assert rc == 0
     assert cursor.updates == []
     assert cursor.inserts == []
-    assert "Days unchanged (no overlap): 4" in capsys.readouterr().out
+    assert "Days unchanged (no overlap):    4" in capsys.readouterr().out
 
 
 def test_split_keeps_longer_piece_and_flags(tmp_path, monkeypatch):
@@ -276,6 +293,23 @@ def test_no_open_row_inserts_against_default(tmp_path, monkeypatch):
     assert (start_t, end_t) == (datetime.time(8, 0), datetime.time(12, 0))
 
 
+def test_no_open_row_no_overlap_still_inserts_default(tmp_path, monkeypatch):
+    """A day named in the answer with no open row gets the default
+    window inserted even when care doesn't overlap it (spec: every
+    named day ends up with a row)."""
+    cursor = _FakeCursor(contacts_ids={2528900}, open_rows={})
+    rc, _ = _run(
+        tmp_path, monkeypatch,
+        [("2528900", "Tao", "YanEr", "1 (5 PM - 9 PM)")],
+        cursor,
+    )
+    assert rc == 0
+    assert len(cursor.inserts) == 1
+    cid, eff_start, day, start_t, end_t = cursor.inserts[0]
+    assert (cid, day) == ("2528900", 1)
+    assert (start_t, end_t) == (datetime.time(8, 0), datetime.time(13, 0))
+
+
 def test_blank_answer_skipped_without_db_access(tmp_path, monkeypatch, capsys):
     cursor = _FakeCursor(contacts_ids=set(), open_rows={})
     rc, _ = _run(
@@ -285,7 +319,7 @@ def test_blank_answer_skipped_without_db_access(tmp_path, monkeypatch, capsys):
     )
     assert rc == 0
     assert cursor.executed == []    # never touched the DB
-    assert "Blank answers skipped: 1" in capsys.readouterr().out
+    assert "Blank answers skipped:          1" in capsys.readouterr().out
 
 
 def test_parse_error_flags_row_and_isolates_it(tmp_path, monkeypatch):
@@ -340,6 +374,30 @@ def test_dry_run_rolls_back_but_writes_review_csv(
     assert conn.rolled_back and not conn.committed
     assert len(_read_review_csv(tmp_path)) == 1   # still written
     assert "DRY-RUN" in capsys.readouterr().out
+
+
+def test_duplicate_csv_rows_same_day_subtract_cumulatively(
+    tmp_path, monkeypatch,
+):
+    """The same member appearing twice narrows sequentially: the second
+    row's SELECT sees the first row's uncommitted UPDATE."""
+    cursor = _FakeCursor(
+        contacts_ids={25023},
+        open_rows={("25023", 7): (41, _t(8), _t(13))},
+    )
+    rc, _ = _run(
+        tmp_path, monkeypatch,
+        [
+            ("25023", "Lin", "Zi C", "7 (12 PM - 4 PM)"),
+            ("25023", "Lin", "Zi C", "7 (8 AM - 9 AM)"),
+        ],
+        cursor,
+    )
+    assert rc == 0
+    assert cursor.updates == [
+        (datetime.time(8, 0), datetime.time(12, 0), 41),
+        (datetime.time(9, 0), datetime.time(12, 0), 41),
+    ]
 
 
 def test_multi_group_same_day_subtracts_sequentially(tmp_path, monkeypatch):

@@ -166,7 +166,7 @@ def _apply_member_day(cur, cid, day, intervals, today, args, stats,
         })
         return
 
-    if window == original:
+    if row_id is not None and window == original:
         stats["days_unchanged"] += 1
         return
 
@@ -301,16 +301,16 @@ def main(argv=None):
 
         print()
         print("Apply HHA answers summary")
-        print(f"  Rows read:                   {stats['rows']}")
-        print(f"  Blank answers skipped: {stats['blank']}")
-        print(f"  Members applied:             {stats['members_applied']}")
-        print(f"  Parse errors:                {stats['parse_errors']}")
-        print(f"  Members not found:           {stats['members_not_found']}")
-        print(f"  Days updated: {stats['days_updated']}")
-        print(f"  Days inserted:               {stats['days_inserted']}")
-        print(f"  Days unchanged (no overlap): {stats['days_unchanged']}")
+        print(f"  Rows read:                      {stats['rows']}")
+        print(f"  Blank answers skipped:          {stats['blank']}")
+        print(f"  Members applied:                {stats['members_applied']}")
+        print(f"  Parse errors:                   {stats['parse_errors']}")
+        print(f"  Members not found:              {stats['members_not_found']}")
+        print(f"  Days updated:                   {stats['days_updated']}")
+        print(f"  Days inserted:                  {stats['days_inserted']}")
+        print(f"  Days unchanged (no overlap):    {stats['days_unchanged']}")
         print(f"  Split days (kept longer piece): {stats['split_days']}")
-        print(f"  Blocked days (not written):  {stats['blocked_days']}")
+        print(f"  Blocked days (not written):     {stats['blocked_days']}")
         print(f"  Review CSV: {csv_path}")
         print(f"  Mode: {mode}")
     finally:
