@@ -73,8 +73,10 @@ def test_apply_backs_up_before_running_without_dry_run(
 ):
     csv_path, db_path = paths
     backups_seen_at_call_time = []
+    argvs = []
 
     def fake_main(argv):
+        argvs.append(list(argv))
         backups_seen_at_call_time.append(
             len(list(tmp_path.glob("members.backup_*.accdb")))
         )
@@ -95,6 +97,8 @@ def test_apply_backs_up_before_running_without_dry_run(
     # The backup existed by the time the script ran.
     assert backups_seen_at_call_time == [1]
     assert any("Backed up to" in line for line in log_lines)
+    # Exact argv: no --dry-run in apply mode.
+    assert argvs == [["--csv", csv_path, "--db", db_path]]
 
 
 def test_apply_backup_failure_short_circuits(paths, monkeypatch):
@@ -163,3 +167,32 @@ def test_stdout_is_streamed_through_log_line(paths, monkeypatch):
     assert success is True
     assert any("25023 day 7" in line for line in log_lines)
     assert any("summary" in line for line in log_lines)
+
+
+def test_stderr_is_streamed_through_log_line(paths, monkeypatch):
+    """The script's ERROR diagnostics go to stderr; the operator must
+    see them in the GUI log when a run fails."""
+    csv_path, db_path = paths
+
+    def failing_main(argv):
+        print("ERROR: could not open the Access database.",
+              file=sys.stderr)
+        return 2
+
+    monkeypatch.setattr("scripts.apply_hha_answers.main", failing_main)
+
+    worker = ApplyHhaWorker(csv_path, db_path, mode="preview")
+    log_lines = []
+    worker.log_line.connect(log_lines.append)
+    success, payload = _run_to_completion(worker)
+
+    assert success is False
+    assert payload["error"] == "returned exit code 2"
+    assert any("could not open the Access database" in line
+               for line in log_lines)
+
+
+def test_invalid_mode_raises_value_error(paths):
+    csv_path, db_path = paths
+    with pytest.raises(ValueError):
+        ApplyHhaWorker(csv_path, db_path, mode="bogus")

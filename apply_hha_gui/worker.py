@@ -2,8 +2,8 @@
 
 Runs scripts.apply_hha_answers.main() on a QThread — with --dry-run
 for preview, or backup-then-apply for the real run — streaming the
-script's stdout to the GUI line by line via `LineBuffer` (reused from
-setup_gui; spec §6)."""
+script's stdout/stderr to the GUI line by line via `LineBuffer` (reused
+from setup_gui; spec §6)."""
 import contextlib
 import datetime
 import shutil
@@ -58,7 +58,8 @@ class ApplyHhaWorker(QThread):
 
         buf = LineBuffer(self.log_line.emit)
         try:
-            with contextlib.redirect_stdout(buf):
+            with contextlib.redirect_stdout(buf), \
+                    contextlib.redirect_stderr(buf):
                 rc = apply_hha_answers.main(argv)
             buf.flush()
         except Exception as exc:
