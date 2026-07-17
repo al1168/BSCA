@@ -137,6 +137,8 @@ class MainWindow(QWidget):
         return csv_path, db_path
 
     def _start(self, mode):
+        if self._worker is not None:
+            return
         paths = self._validated_paths()
         if paths is None:
             return
@@ -154,12 +156,15 @@ class MainWindow(QWidget):
 
     def _on_preview_clicked(self):
         self._previewed = None
+        self._on_paths_changed()
         self._start("preview")
 
     def _on_apply_clicked(self):
         self._start("apply")
 
     def _on_finished(self, success: bool, payload: dict):
+        if self.sender() is not self._worker:
+            return
         self._worker = None
         for w in (self._preview_btn, self._csv_edit, self._db_edit,
                   self._csv_browse, self._db_browse):
@@ -202,12 +207,28 @@ class MainWindow(QWidget):
                     "restore, copy this file over the original:\n"
                     f"{backup}"
                 )
-            QMessageBox.warning(self, "Apply HHA Answers Failed", body)
+            QMessageBox.warning(self, "Apply Failed", body)
         self._on_paths_changed()
 
     def closeEvent(self, event):
-        """Wait up to 3 s for an in-flight worker before closing
-        (same rationale as setup_gui)."""
+        """Wait up to 3 s for an in-flight worker; if it is still
+        running, ask before closing. Closing anyway can emit
+        `QThread destroyed while still running` as the parented
+        thread is torn down — accepted for this one-shot tool,
+        and an Apply run is protected by its pre-run backup."""
         if self._worker is not None and self._worker.isRunning():
             self._worker.wait(3000)
+        if self._worker is not None and self._worker.isRunning():
+            choice = QMessageBox.question(
+                self, "Still Running",
+                "The current run has not finished. Closing now may "
+                "leave the database partially written (an Apply run "
+                "makes a backup first).\n\nClose anyway?",
+                QMessageBox.StandardButton.Yes
+                | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if choice == QMessageBox.StandardButton.No:
+                event.ignore()
+                return
         event.accept()

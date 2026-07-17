@@ -1,3 +1,4 @@
+"""Entry point for the Apply HHA Answers GUI (dist/ApplyHHAAnswers.exe)."""
 import sys
 
 from PyQt6.QtWidgets import QApplication
