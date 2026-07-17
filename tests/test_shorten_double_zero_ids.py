@@ -107,3 +107,32 @@ def test_parse_args_all_flags():
     assert args.csv_out == "/tmp/out"
     assert args.dry_run is True
     assert args.quiet is True
+
+
+# ---------------------------------------------------------------------------
+# _write_skipped_csv
+# ---------------------------------------------------------------------------
+
+def test_write_skipped_csv_empty_writes_header(tmp_path):
+    """Even with no rows, the CSV is written with just the header —
+    file presence signals 'a run happened on this date'."""
+    today = datetime.date(2026, 7, 17)
+    path = sh._write_skipped_csv([], str(tmp_path), today)
+    assert path == str(tmp_path / "shorten_ids_skipped_2026-07-17.csv")
+    body = Path(path).read_text(encoding="utf-8-sig")
+    assert body.splitlines() == ["old_id,new_id,reason"]
+
+
+def test_write_skipped_csv_rows(tmp_path):
+    today = datetime.date(2026, 7, 17)
+    rows = [
+        {"old_id": 2213400, "new_id": 22134,
+         "reason": "target ID already exists in: Contacts"},
+        {"old_id": 221340000, "new_id": 2213400,
+         "reason": "still longer than 5 digits after stripping 00"},
+    ]
+    path = sh._write_skipped_csv(rows, str(tmp_path), today)
+    lines = Path(path).read_text(encoding="utf-8-sig").splitlines()
+    assert lines[0] == "old_id,new_id,reason"
+    assert lines[1] == "2213400,22134,target ID already exists in: Contacts"
+    assert lines[2].startswith("221340000,2213400,still longer")

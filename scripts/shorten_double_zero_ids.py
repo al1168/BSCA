@@ -84,3 +84,21 @@ def _parse_args(argv):
     p.add_argument("--quiet", action="store_true",
                    help="Suppress per-member stdout; print only the summary.")
     return p.parse_args(argv)
+
+
+def _write_skipped_csv(rows, out_dir, today):
+    """Write the skipped-members CSV to
+    `<out_dir>/shorten_ids_skipped_<YYYY-MM-DD>.csv`. Returns the path
+    written. Writes the header even if `rows` is empty so the file's
+    presence signals 'a run happened on this date'."""
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(
+        out_dir,
+        f"shorten_ids_skipped_{today.isoformat()}.csv",
+    )
+    with open(path, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=_CSV_COLUMNS)
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+    return path
