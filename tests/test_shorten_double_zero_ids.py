@@ -145,17 +145,23 @@ def test_write_skipped_csv_rows(tmp_path):
 class FakeCursor:
     """Records execute() calls; returns canned fetchall results. The
     `rowcount` attribute defaults to 1 (single affected row) so
-    happy-path tests don't need to set it explicitly."""
+    happy-path tests don't need to set it explicitly. Tests that need
+    per-table rowcounts set `rowcount_by_table` to a dict mapping
+    table name -> rowcount (tables not listed report 0)."""
     def __init__(self):
         self.executed = []        # list of (sql, params_tuple)
         self._fetchall_queue = []
         self.rowcount = 1
+        self.rowcount_by_table = None
 
     def queue_fetchall(self, rows):
         self._fetchall_queue.append(rows)
 
     def execute(self, sql, *params):
         self.executed.append((sql, params))
+        if self.rowcount_by_table is not None and sql.startswith("UPDATE ["):
+            table = sql.split("[")[1].split("]")[0]
+            self.rowcount = self.rowcount_by_table.get(table, 0)
         return self
 
     def fetchall(self):
@@ -234,6 +240,23 @@ def test_main_missing_db_returns_2(tmp_path, capsys):
     assert rc == 2
     err = capsys.readouterr().err
     assert "database not found" in err.lower()
+
+
+def test_main_connect_error_returns_2(tmp_path, monkeypatch, capsys):
+    """A pyodbc connect failure (bad driver, wrong bitness) returns 2
+    with a driver-oriented message on stderr."""
+    import pyodbc as _pyodbc
+
+    def _boom(cs):
+        raise _pyodbc.Error("boom")
+
+    monkeypatch.setattr(_pyodbc, "connect", _boom)
+    db_path = tmp_path / "test.accdb"
+    db_path.touch()
+    rc = sh.main(["--db", str(db_path)])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "could not open the access database" in err.lower()
 
 
 def test_main_renames_across_all_tables(tmp_path, monkeypatch):
@@ -324,6 +347,25 @@ def test_dry_run_calls_rollback_not_commit(tmp_path, monkeypatch):
     assert conn.committed is False
     # Dry-run still executes the UPDATEs (they roll back).
     assert len(_updates(cur)) == len(sh._TABLES)
+
+
+def test_rowcount_zero_tables_not_counted(tmp_path, monkeypatch, capsys):
+    """Tables whose UPDATE reports rowcount 0 contribute neither to
+    the per-member 'rows across tables' line nor the per-table
+    summary counters."""
+    conn, cur = _make_fake_conn({
+        "Contacts": [2213400],
+        "Enrollment": [2213400],
+    })
+    cur.rowcount_by_table = {"Contacts": 1, "Enrollment": 2}
+    rc = _run_main(tmp_path, monkeypatch, conn, extra_flags=())
+    assert rc == 0
+
+    out = capsys.readouterr().out
+    assert "renamed 2213400 -> 22134 (3 rows across 2 tables)" in out
+    assert re.search(r"Contacts:\s+1\b", out)
+    assert re.search(r"Enrollment:\s+2\b", out)
+    assert re.search(r"Authorization:\s+0\b", out)
 
 
 def test_summary_counts(tmp_path, monkeypatch, capsys):

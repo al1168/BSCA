@@ -12,6 +12,10 @@ terminate_long_id_enrollments.py) are never touched.
 
 Safe to run repeatedly: a fully renamed member no longer qualifies,
 and skips are read-only.
+
+If the .accdb enforces referential integrity on [Center ID] without
+cascade-update, the parent-table UPDATE will fail and the whole run
+rolls back; a --dry-run surfaces this before any applied run.
 """
 import argparse
 import csv
