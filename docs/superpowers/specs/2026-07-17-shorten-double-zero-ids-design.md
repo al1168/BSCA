@@ -151,10 +151,11 @@ Processing is **member-centric** (one decision per old Center ID).
      `cursor.rowcount` to that table's counter. Count the member as
      renamed.
 5. After the loop:
-   - Write the skipped CSV (always, even if empty — file presence
-     signals "a run happened on this date").
    - If `--dry-run`: `conn.rollback()`; print `Mode: DRY-RUN`.
    - Otherwise: `conn.commit()`; print `Mode: APPLIED`.
+   - Write the skipped CSV (always, even if empty — file presence
+     signals "a run happened on this date"). Written after the
+     commit/rollback decision, matching the sibling script's order.
 6. Print the summary (see below).
 
 A single commit at the end; any unexpected exception propagates without

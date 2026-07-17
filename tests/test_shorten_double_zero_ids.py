@@ -338,7 +338,7 @@ def test_main_ignores_non_qualifying_ids(tmp_path, monkeypatch):
     assert _skipped_csv_lines(tmp_path) == ["old_id,new_id,reason"]
 
 
-def test_dry_run_calls_rollback_not_commit(tmp_path, monkeypatch):
+def test_dry_run_calls_rollback_not_commit(tmp_path, monkeypatch, capsys):
     conn, cur = _make_fake_conn({"Contacts": [2213400]})
     rc = _run_main(tmp_path, monkeypatch, conn,
                    extra_flags=("--quiet", "--dry-run"))
@@ -347,6 +347,7 @@ def test_dry_run_calls_rollback_not_commit(tmp_path, monkeypatch):
     assert conn.committed is False
     # Dry-run still executes the UPDATEs (they roll back).
     assert len(_updates(cur)) == len(sh._TABLES)
+    assert "Mode: DRY-RUN" in capsys.readouterr().out
 
 
 def test_rowcount_zero_tables_not_counted(tmp_path, monkeypatch, capsys):
