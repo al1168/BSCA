@@ -21,7 +21,10 @@ ones the real run uses.
 ## Decision summary (user-confirmed)
 
 - **New checkbox setting** in Settings → Scheduling Rules, global for
-  all members.
+  all members. **On by default** — existing installs pick it up
+  automatically (the settings loader fills missing rule keys from
+  DEFAULTS), and the time-cache window guard regenerates any previously
+  cached day whose times no longer fit the tightened window.
 - Applies only to days whose availability comes from a **recurring**
   `Availability` row; **one-off** rows keep today's behavior.
 - Kicks in only when `avail_end < latest_time_out` (16:00 by default).
@@ -67,10 +70,11 @@ Rejected alternatives:
 ### 1. Rule key + defaults
 
 - `monthly_schedule/rules.py` `SCHEDULE_RULES["Default"]`: add
-  `"dropoff_by_avail_end": False`.
-- `gui/app_settings.py` `DEFAULTS["schedule_rules"]`: add the same key
-  (required — the loader's `known`-key filter drops keys absent from
-  DEFAULTS).
+  `"dropoff_by_avail_end": True` (on by default).
+- `gui/app_settings.py` `DEFAULTS["schedule_rules"]`: add the same key,
+  also `True` (required — the loader's `known`-key filter drops keys
+  absent from DEFAULTS; the default fill is what turns it on for
+  existing installs).
 - `get_rules_for_plan` needs no change: booleans pass through the
   overrides merge untouched (only lists become tuples).
 
@@ -122,7 +126,7 @@ Rejected alternatives:
 ### 5. GUI
 
 - `gui/settings_dialog.py`: `QCheckBox` in the Scheduling Rules group,
-  initialized from `schedule_rules.get("dropoff_by_avail_end", False)`,
+  initialized from `schedule_rules.get("dropoff_by_avail_end", True)`,
   saved back as a plain bool.
 - `gui/i18n.py`: new key `settings.rules.dropoff_by_avail_end`, label
   (en): "End day by availability end (drop-off before home care)" —
@@ -150,7 +154,9 @@ Rejected alternatives:
 
 - `tests/test_per_day.py`: deadline shrinks `out_hi` only for recurring
   rows with `avail_end < latest_time_out`; one-off days and
-  `avail_end == 16:00` unchanged; checkbox off → unchanged; too-narrow
+  `avail_end == 16:00` unchanged; checkbox explicitly off → legacy
+  behavior (drop-off may spill past avail_end); missing key in saved
+  settings → treated as on (default fill); too-narrow
   under the deadline → ineligible with populated `placement_window` and
   `dropoff_reserve`.
 - Property test: with the flag on, across many seeds/draws,
