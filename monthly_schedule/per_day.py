@@ -43,16 +43,23 @@ class DayEligibility:
 
     `placement_window` is (in_lo, out_hi) in minutes — the earliest
     allowed Time-In and latest allowed Time-Out for the day, after
-    intersecting the plan's day bounds with the member's availability.
-    It is None when no availability rule applies (the open day: the
-    generator falls back to the plan's full day bounds).
+    intersecting the plan's day bounds with the member's availability
+    (and, when `dropoff_by_avail_end` applies, subtracting the
+    drop-off reserve). It is None when no availability rule applies
+    (the open day: the generator falls back to the plan's full day
+    bounds). Unlike before, it IS populated on a too-narrow rejection
+    so the debug CSV can show the numbers.
     `reason` is None when eligible=True, otherwise one of the
     REASON_DAY_* constants explaining the rejection (used by the debug
     CSV).
+    `dropoff_reserve` is the minutes subtracted from avail_end to keep
+    Drop-Off at or before it (max time-out drift + max drop-off
+    trail); 0 when the deadline did not apply.
     """
     eligible: bool
     placement_window: Optional[Tuple[int, int]] = None
     reason: Optional[str] = None
+    dropoff_reserve: int = 0
 
 
 def compute_day_eligibility(day: date, ctx, plan_rules) -> DayEligibility:
@@ -99,11 +106,26 @@ def compute_day_eligibility(day: date, ctx, plan_rules) -> DayEligibility:
     # day bounds (Time-In >= earliest, Time-Out <= latest).
     in_lo = max(earliest_in, avail_lo)
     out_hi = min(latest_out, avail_hi)
+    # Home-care deadline: recurring availability ending before the day
+    # bound means home care starts at avail_end, so the whole transport
+    # tail (drift + drive + buffer) must fit before it. Reserving the
+    # maximum of each random range guarantees Drop-Off <= avail_end for
+    # any draw. One-off rows are exempt (user decision, spec 2026-07-20).
+    reserve = 0
+    if (plan_rules.get("dropoff_by_avail_end")
+            and not one_offs and avail_hi < latest_out):
+        reserve = (plan_rules["time_out_drift_min"][1]
+                   + plan_rules["dropoff_trail_min"][1])
+        out_hi = avail_hi - reserve
     if out_hi - in_lo < length_min:
         return DayEligibility(
-            eligible=False, reason=REASON_DAY_WINDOW_TOO_NARROW
+            eligible=False, reason=REASON_DAY_WINDOW_TOO_NARROW,
+            placement_window=(in_lo, out_hi), dropoff_reserve=reserve,
         )
-    return DayEligibility(eligible=True, placement_window=(in_lo, out_hi))
+    return DayEligibility(
+        eligible=True, placement_window=(in_lo, out_hi),
+        dropoff_reserve=reserve,
+    )
 
 
 def compute_month_failure(year: int, month: int, ctx,

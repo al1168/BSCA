@@ -315,3 +315,93 @@ def test_one_off_window_too_narrow_after_bounds_skipped():
         PLAN_RULES,
     )
     assert result.eligible is False
+
+
+DEADLINE_RULES = {
+    "earliest_time_in": "08:00",
+    "latest_time_out": "16:00",
+    "session_length_min": (210, 240),
+    "time_out_drift_min": (2, 2),
+    "dropoff_trail_min": (30, 34),   # travel-adjusted in real runs
+    "dropoff_by_avail_end": True,
+}
+
+MONDAY_AVAIL_8_TO_15 = {
+    "id": 1, "center_id": 1,
+    "effective_start_date": date(2026, 1, 1),
+    "effective_end_date": None,
+    "day_of_week": 1,
+    "avail_start": "08:00", "avail_end": "15:00",
+}
+
+
+def test_deadline_shrinks_out_hi_by_reserve():
+    # avail_end 15:00 (900) < latest_out 16:00 → reserve = 2 + 34 = 36
+    # → out_hi = 900 - 36 = 864 (14:24). Window (480, 864) is 384 min.
+    result = compute_day_eligibility(
+        date(2026, 5, 4), _ctx(availability=MONDAY_AVAIL_8_TO_15),
+        DEADLINE_RULES,
+    )
+    assert result.eligible is True
+    assert result.placement_window == (480, 864)
+    assert result.dropoff_reserve == 36
+
+
+def test_deadline_off_keeps_legacy_window():
+    rules = {**DEADLINE_RULES, "dropoff_by_avail_end": False}
+    result = compute_day_eligibility(
+        date(2026, 5, 4), _ctx(availability=MONDAY_AVAIL_8_TO_15), rules
+    )
+    assert result.placement_window == (480, 900)
+    assert result.dropoff_reserve == 0
+
+
+def test_deadline_skipped_when_avail_end_at_day_bound():
+    # avail_end == latest_time_out → member has no home care deadline;
+    # window unchanged.
+    avail = {**MONDAY_AVAIL_8_TO_15, "avail_end": "16:00"}
+    result = compute_day_eligibility(
+        date(2026, 5, 4), _ctx(availability=avail), DEADLINE_RULES
+    )
+    assert result.placement_window == (480, 960)
+    assert result.dropoff_reserve == 0
+
+
+def test_deadline_does_not_apply_to_one_off():
+    # One-off 08:00-15:00: per the spec, one-offs keep legacy behavior.
+    one_off = {"id": 99, "center_id": 1, "date": date(2026, 5, 4),
+               "avail_start": "08:00", "avail_end": "15:00"}
+    result = compute_day_eligibility(
+        date(2026, 5, 4), _ctx(one_offs=[one_off]), DEADLINE_RULES
+    )
+    assert result.placement_window == (480, 900)
+    assert result.dropoff_reserve == 0
+
+
+def test_deadline_too_narrow_day_blank_with_numbers():
+    # avail 08:00-11:30 (690): out_hi = 690 - 36 = 654 → width 174 < 210
+    # → ineligible, but the window/reserve are still reported for debug.
+    from monthly_schedule.per_day import REASON_DAY_WINDOW_TOO_NARROW
+    avail = {**MONDAY_AVAIL_8_TO_15, "avail_end": "11:30"}
+    result = compute_day_eligibility(
+        date(2026, 5, 4), _ctx(availability=avail), DEADLINE_RULES
+    )
+    assert result.eligible is False
+    assert result.reason == REASON_DAY_WINDOW_TOO_NARROW
+    assert result.placement_window == (480, 654)
+    assert result.dropoff_reserve == 36
+
+
+def test_legacy_too_narrow_also_reports_window():
+    # Flag absent (module PLAN_RULES): the too-narrow rejection now
+    # carries the window it computed instead of None.
+    avail = {"id": 1, "center_id": 1,
+             "effective_start_date": date(2026, 1, 1),
+             "effective_end_date": None,
+             "day_of_week": 1,
+             "avail_start": "12:00", "avail_end": "13:30"}
+    result = compute_day_eligibility(
+        date(2026, 5, 4), _ctx(availability=avail), PLAN_RULES
+    )
+    assert result.eligible is False
+    assert result.placement_window == (720, 810)
