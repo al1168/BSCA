@@ -34,6 +34,7 @@ override (`get_rules_for_plan`). Current `Default` values:
 | `time_in_drift_min` | (2, 2) | Time-In is exactly 2 minutes **after** Arrival |
 | `time_out_drift_min` | (2, 2) | Time-Out is exactly 2 minutes **before** Departure |
 | `round_to_minutes` | 1 | Snap step for Time-In (1 = no snap; 5 = snap to :05) |
+| `dropoff_by_avail_end` | on | When a recurring availability ends before `latest_time_out`, shrink the window so Drop-Off lands at or before `avail_end` (home care). Day goes blank if under 3h30m. |
 
 The earliest/latest bounds and the session length are editable in
 **Settings → Scheduling Rules**; availability further narrows them per
@@ -44,8 +45,9 @@ day.
 The attendance block (**Time-In → Time-Out**) is the anchor; the
 transport times are derived around it. The day is given a **placement
 window** `(in_lo, out_hi)` — the 08:00–16:00 day bounds intersected
-with the member's availability (just 08:00–16:00 when there is no
-availability rule).
+with the member's availability — minus the drop-off reserve (max drift
++ drive time + max buffer) when `dropoff_by_avail_end` applies (just
+08:00–16:00 when there is no availability rule).
 
 1. **Length** = random minute count in `session_length_min` (210–240),
    capped to `out_hi − in_lo` so it can't exceed the free time.

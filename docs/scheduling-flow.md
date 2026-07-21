@@ -28,7 +28,7 @@ flowchart TD
     F -- No --> G{Recurring<br/>Availability row<br/>for this weekday?}
     G -- No --> Y1([Eligible — open day: use the<br/>08:00–16:00 bounds])
     G -- Yes --> H
-    H --> I{Day bounds 08:00–16:00<br/>intersected with avail<br/>at least 3h30m wide?}
+    H --> I{Day bounds 08:00-16:00<br/>intersected with avail,<br/>minus drop-off reserve when<br/>avail ends early — at least<br/>3h30m wide?}
     I -- No --> X7[/Ineligible: availability window too narrow/]
     I -- Yes --> Y2([Eligible — placement window<br/>clipped to availability])
 
@@ -74,7 +74,8 @@ is one or the other.
 | `avail_end` | The latest clock time the member's visit can **end** (latest allowed Time-Out) on those days. Departure/Drop-Off may fall slightly after it. |
 | `earliest_time_in` (default 08:00) | Program-wide hard floor: Time-In may never be earlier than this, no matter how early `avail_start` is. Editable in **Settings → Scheduling Rules**. |
 | `latest_time_out` (default 16:00) | Program-wide hard ceiling: Time-Out may never be later than this, no matter how late `avail_end` runs. |
-| **Placement window** `(in_lo, out_hi)` | The overlap of the two pairs above: `in_lo = max(earliest_time_in, avail_start)`, `out_hi = min(latest_time_out, avail_end)`. The whole attendance block (Time-In → Time-Out) must fit inside it. If the member has no availability row, the window is simply 08:00–16:00 (an "open day"). |
+| **Placement window** `(in_lo, out_hi)` | The overlap of the two pairs above: `in_lo = max(earliest_time_in, avail_start)`, `out_hi = min(latest_time_out, avail_end)`. With **Drop off by availability end** on (the default), a recurring availability ending before 16:00 further lowers `out_hi` by the drop-off reserve. The whole attendance block (Time-In → Time-Out) must fit inside it. If the member has no availability row, the window is simply 08:00–16:00 (an "open day"). |
+| **Drop-off reserve** | Minutes subtracted from an early `avail_end` so the whole ride home fits before home care starts: max Time-Out drift (2) + drive time + max travel buffer (5). Applies only to recurring availability, only when the **Drop off by availability end** checkbox (Settings → Scheduling Rules, on by default) is checked. Guarantees Drop-Off ≤ `avail_end`. One-off rows are exempt. |
 | `session_length_min` (default 210–240) | The allowed visit length in minutes, measured Time-In → Time-Out. A day is only eligible if its placement window is at least the minimum (3 h 30 m) wide. |
 
 ### Other scheduling inputs
@@ -100,8 +101,11 @@ in the placement window, and everything else is offsets from it.
 | **Departure** | The member leaves the center. | Time-Out + 2 min |
 | **Drop-Off** | Transport returns the member home. | Departure + (`travel_minutes` + 1–5 min buffer) |
 
-Only Time-In and Time-Out are constrained by the placement window; the
-transport times deliberately spill just outside it. Every generated day
+Only Time-In and Time-Out are constrained by the placement window. With
+**Drop off by availability end** off, the transport times deliberately
+spill just outside it; with it on (the default), days whose recurring
+availability ends before 16:00 reserve the whole transport tail inside
+the window, so Drop-Off lands at or before `avail_end`. Every generated day
 must satisfy this ordering, or the run reports an error for that member:
 
 ```
@@ -159,6 +163,8 @@ absent to member partially constrained**:
 
 If you turn on the **Debug** checkbox in the GUI, each authorized day
 gets a row in `Debug_<YYYY-MM>.csv` recording which of these checks
-made it ineligible (or `yes` if it was scheduled), along with the
+made it ineligible (or `yes` if it was scheduled), a `reason_detail`
+column with the arithmetic behind window rejections (availability,
+drop-off reserve, usable width vs. required minimum), along with the
 availability used, absence/leave type, authorized weekdays, the
 placement window, and the maximum session length that fit.
