@@ -3,7 +3,7 @@ from datetime import date
 
 from monthly_schedule.eligibility_context import MemberContext
 from monthly_schedule.rows import build_rows, build_debug_rows
-from monthly_schedule.rules import parse_hhmm
+from monthly_schedule.rules import parse_hhmm, format_minutes
 from monthly_schedule.per_day import (
     REASON_DAY_ABSENT,
     REASON_DAY_WINDOW_TOO_NARROW,
@@ -351,6 +351,7 @@ def test_debug_rows_catches_one_off_conflict():
     assert "duplicate one-off rows" in monday["reason"]
 
 
+# Shared by the deadline property test below and the debug-detail tests (Task 4).
 DEADLINE_E2E_RULES = {
     "earliest_time_in": "08:00",
     "latest_time_out": "16:00",
@@ -387,6 +388,7 @@ def _deadline_ctx():
 def test_dropoff_never_past_avail_end_across_seeds():
     # The guarantee the whole feature rests on: for ANY random draw,
     # Drop-Off <= avail_end on recurring-availability days.
+    # parse_hhmm (production parser) on purpose: this is an end-to-end fence.
     deadline = parse_hhmm("15:00")
     ctx = _deadline_ctx()
     for seed in range(50):
@@ -395,10 +397,13 @@ def test_dropoff_never_past_avail_end_across_seeds():
         scheduled = [r for r in rows if r["dropoff"]]
         assert scheduled, "expected Mondays to be scheduled"
         for r in scheduled:
-            assert parse_hhmm(r["dropoff"]) <= deadline, (
+            dropoff_min = parse_hhmm(r["dropoff"])
+            assert dropoff_min <= deadline, (
                 f"seed {seed} {r['date']}: dropoff {r['dropoff']} "
-                f"past 15:00"
+                f"past {format_minutes(deadline)}"
             )
             # Full session still granted when the window allows it.
             length = parse_hhmm(r["time_out"]) - parse_hhmm(r["time_in"])
-            assert 210 <= length <= 240
+            assert 210 <= length <= 240, (
+                f"seed {seed} {r['date']}: session {length}m outside 210-240"
+            )
