@@ -201,6 +201,7 @@ class ScheduleWorker(QThread):
                         member, ctx, self.year, self.month,
                         self.start_day, self.end_day,
                         schedule_rules_overrides=self.schedule_rules,
+                        api_key=api_key, cache=cache,
                     )
                     debug_path = os.path.join(
                         member_out_dir,

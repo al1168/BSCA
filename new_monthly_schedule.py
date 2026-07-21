@@ -112,15 +112,42 @@ def write_debug_csv(rows, path):
     return path
 
 
+def apply_travel_offsets(rules, travel_minutes):
+    """Return a copy of `rules` with pickup/drop-off offsets rebuilt
+    from the member's drive time plus the configured travel buffer.
+    This is the single place the travel -> offsets mapping lives, so
+    the schedule run and the debug CSV can never disagree."""
+    rules = dict(rules)
+    buf_lo, buf_hi = rules.get("travel_buffer_min", (5, 15))
+    rules["pickup_lead_min"] = (travel_minutes + buf_lo,
+                                travel_minutes + buf_hi)
+    rules["dropoff_trail_min"] = (travel_minutes + buf_lo,
+                                  travel_minutes + buf_hi)
+    return rules
+
+
 def collect_debug_rows(member, ctx, year, month,
                        start_day=None, end_day=None,
-                       schedule_rules_overrides=None):
+                       schedule_rules_overrides=None,
+                       api_key=None, cache=None):
     """Build the run-level debug rows for one member: each row from
-    build_debug_rows annotated with center_id + 'Last, First' name."""
+    build_debug_rows annotated with center_id + 'Last, First' name.
+
+    When `cache` is given, the same travel-adjusted pickup/drop-off
+    offsets as the real run are used (a geo-cache hit in practice), so
+    the CSV's placement windows match what was scheduled. On travel
+    failure the built-in offsets are kept — the member fails the run
+    anyway, and the eligibility columns are still useful."""
     from monthly_schedule.rules import get_rules_for_plan
     rules = dict(get_rules_for_plan(
         member["health_plan"], schedule_rules_overrides
     ))
+    if cache is not None:
+        try:
+            travel_minutes = resolve_travel_minutes(member, api_key, cache)
+            rules = apply_travel_offsets(rules, travel_minutes)
+        except TravelError:
+            pass
     name = f"{member['last_name']}, {member['first_name']}"
     return [
         {"center_id": member["center_id"], "name": name, **r}
@@ -294,14 +321,12 @@ def process_member(member, ctx, year, month, out_dir,
 
     rng = random.Random()
     try:
-        rules = dict(get_rules_for_plan(
-            member["health_plan"], schedule_rules_overrides
-        ))
-        buf_lo, buf_hi = rules.get("travel_buffer_min", (5, 15))
-        rules["pickup_lead_min"] = (travel_minutes + buf_lo,
-                                    travel_minutes + buf_hi)
-        rules["dropoff_trail_min"] = (travel_minutes + buf_lo,
-                                      travel_minutes + buf_hi)
+        rules = apply_travel_offsets(
+            get_rules_for_plan(
+                member["health_plan"], schedule_rules_overrides
+            ),
+            travel_minutes,
+        )
         rows = build_rows(
             year, month, ctx, rules, rng, start_day, end_day,
             time_cache=time_cache,
@@ -414,6 +439,7 @@ def main(argv=None):
             member_debug_rows = collect_debug_rows(
                 member, ctx, args.year, args.month,
                 args.start_day, args.end_day,
+                api_key=api_key, cache=cache,
             )
             debug_path = os.path.join(
                 out_dir,

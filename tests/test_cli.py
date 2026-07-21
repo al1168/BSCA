@@ -760,3 +760,72 @@ def test_write_skipped_members_csv_preserves_input_order(tmp_path):
     assert [row.split(",", 1)[0] for row in lines[1:]] == [
         "24010", "24011", "24012",
     ]
+
+
+def test_collect_debug_rows_uses_travel_adjusted_offsets(monkeypatch):
+    import new_monthly_schedule as cli
+    from datetime import date
+    from monthly_schedule.eligibility_context import MemberContext
+
+    monkeypatch.setattr(cli, "resolve_travel_minutes",
+                        lambda member, api_key, cache: 25)
+    member = {"center_id": 1, "first_name": "A", "last_name": "B",
+              "health_plan": None, "address": "1 Main St",
+              "long_lat": "40.0,-73.0"}
+    ctx = MemberContext(
+        enrollments=[{"id": 1, "center_id": 1,
+                      "start_date": date(2026, 1, 1), "end_date": None}],
+        authorizations=[{"id": 1, "center_id": 1,
+                         "auth_start": date(2026, 1, 1),
+                         "auth_end": date(2026, 12, 31),
+                         "effective_start": date(2026, 1, 1),
+                         "effective_end": date(2026, 12, 31),
+                         "auth_days": "1"}],
+        absences=[],
+        availabilities=[{"id": 1, "center_id": 1,
+                         "effective_start_date": date(2026, 1, 1),
+                         "effective_end_date": None,
+                         "day_of_week": 1,
+                         "avail_start": "08:00", "avail_end": "15:00"}],
+        one_offs=[],
+    )
+    rows = cli.collect_debug_rows(member, ctx, 2026, 5,
+                                  api_key="K", cache={})
+    # travel 25 + buffer max 5 + drift max 2 = 32 min reserve
+    # → out_hi = 15:00 - 32m = 14:28 (default rules, flag on).
+    assert rows[0]["placement_window"] == "08:00-14:28"
+    assert rows[0]["reason_detail"] == (
+        "drop-off reserve 32m before 15:00 avail end"
+    )
+
+
+def test_collect_debug_rows_without_cache_uses_defaults(monkeypatch):
+    import new_monthly_schedule as cli
+    from datetime import date
+    from monthly_schedule.eligibility_context import MemberContext
+
+    def boom(member, api_key, cache):
+        raise AssertionError("must not resolve travel without a cache")
+    monkeypatch.setattr(cli, "resolve_travel_minutes", boom)
+    member = {"center_id": 1, "first_name": "A", "last_name": "B",
+              "health_plan": None}
+    ctx = MemberContext(
+        enrollments=[{"id": 1, "center_id": 1,
+                      "start_date": date(2026, 1, 1), "end_date": None}],
+        authorizations=[{"id": 1, "center_id": 1,
+                         "auth_start": date(2026, 1, 1),
+                         "auth_end": date(2026, 12, 31),
+                         "effective_start": date(2026, 1, 1),
+                         "effective_end": date(2026, 12, 31),
+                         "auth_days": "1"}],
+        absences=[],
+        availabilities=[{"id": 1, "center_id": 1,
+                         "effective_start_date": date(2026, 1, 1),
+                         "effective_end_date": None,
+                         "day_of_week": 1,
+                         "avail_start": "08:00", "avail_end": "15:00"}],
+        one_offs=[],
+    )
+    rows = cli.collect_debug_rows(member, ctx, 2026, 5)
+    # Default offsets: drift max 2 + dropoff trail max 12 = 14 min.
+    assert rows[0]["placement_window"] == "08:00-14:46"
