@@ -137,24 +137,36 @@ def collect_debug_rows(member, ctx, year, month,
     offsets as the real run are used (a geo-cache hit in practice), so
     the CSV's placement windows match what was scheduled. On travel
     failure the built-in offsets are kept — the member fails the run
-    anyway, and the eligibility columns are still useful."""
+    anyway — and every row's reason_detail is stamped so a reader of
+    the CSV knows those offsets are defaults, not the real run's."""
     from monthly_schedule.rules import get_rules_for_plan
     rules = dict(get_rules_for_plan(
         member["health_plan"], schedule_rules_overrides
     ))
+    travel_failed = False
     if cache is not None:
         try:
             travel_minutes = resolve_travel_minutes(member, api_key, cache)
             rules = apply_travel_offsets(rules, travel_minutes)
         except TravelError:
-            pass
+            # Fall back to built-in offsets; process_member fails this
+            # member on the same TravelError, so the run surfaces it.
+            travel_failed = True
     name = f"{member['last_name']}, {member['first_name']}"
-    return [
+    rows = [
         {"center_id": member["center_id"], "name": name, **r}
         for r in build_debug_rows(
             year, month, ctx, rules, start_day, end_day
         )
     ]
+    if travel_failed:
+        note = "travel unresolved - default offsets shown"
+        for r in rows:
+            r["reason_detail"] = (
+                f"{r['reason_detail']}; {note}"
+                if r["reason_detail"] else note
+            )
+    return rows
 
 
 def all_members_subdir(year, month, health_plan, separate_by_plan):
