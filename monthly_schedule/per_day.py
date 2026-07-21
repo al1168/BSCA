@@ -47,8 +47,10 @@ class DayEligibility:
     (and, when `dropoff_by_avail_end` applies, subtracting the
     drop-off reserve). It is None when no availability rule applies
     (the open day: the generator falls back to the plan's full day
-    bounds). Unlike before, it IS populated on a too-narrow rejection
-    so the debug CSV can show the numbers.
+    bounds). It is also populated when `eligible=False` with
+    `REASON_DAY_WINDOW_TOO_NARROW`, so the debug CSV can show the
+    numbers behind the rejection (note: `out_hi` may be less than
+    `in_lo` in that case — consumers must check `eligible` first).
     `reason` is None when eligible=True, otherwise one of the
     REASON_DAY_* constants explaining the rejection (used by the debug
     CSV).
