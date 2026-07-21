@@ -3,6 +3,7 @@ import os
 from PyQt6.QtCore import Qt, QTime
 from PyQt6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -293,6 +294,14 @@ class SettingsDialog(QDialog):
         self._time_out_label = QLabel()
         rules_form.addRow(self._time_out_label, self._time_out_row)
 
+        self._dropoff_deadline_check = QCheckBox()
+        self._dropoff_deadline_check.setChecked(
+            bool(rules.get("dropoff_by_avail_end", True))
+        )
+        self._dropoff_deadline_label = QLabel()
+        rules_form.addRow(self._dropoff_deadline_label,
+                          self._dropoff_deadline_check)
+
         layout.addWidget(self._rules_group)
 
         self._test_btn = None
@@ -338,6 +347,9 @@ class SettingsDialog(QDialog):
         self._travel_label.setText(tr("settings.rules.travel_buffer"))
         self._time_in_label.setText(tr("settings.rules.time_in"))
         self._time_out_label.setText(tr("settings.rules.time_out"))
+        self._dropoff_deadline_label.setText(
+            tr("settings.rules.dropoff_deadline")
+        )
 
     def _test_connection(self):
         db_path = self._db_row.value()
@@ -416,6 +428,8 @@ class SettingsDialog(QDialog):
                 "travel_buffer_min": list(travel),
                 "time_in_drift_min": list(time_in),
                 "time_out_drift_min": list(time_out),
+                "dropoff_by_avail_end":
+                    self._dropoff_deadline_check.isChecked(),
             },
         }
         self.accept()

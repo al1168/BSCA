@@ -89,6 +89,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "settings.rules.time_out": (
             "Time-Out offset min – max (minutes before Departure):"
         ),
+        "settings.rules.dropoff_deadline": (
+            "Drop off by availability end (home care):"
+        ),
         "settings.rules.invalid_range.title": "Invalid Range",
         "settings.rules.invalid_range.body": (
             "Each minimum value must be on or before its maximum. "
@@ -273,6 +276,9 @@ STRINGS: dict[str, dict[str, str]] = {
         ),
         "settings.rules.time_out": (
             "签出偏移 最少 – 最多（离开前多少分钟）："
+        ),
+        "settings.rules.dropoff_deadline": (
+            "在可用时间结束前送回（家庭护理）："
         ),
         "settings.rules.invalid_range.title": "范围无效",
         "settings.rules.invalid_range.body": (
