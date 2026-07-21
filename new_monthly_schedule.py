@@ -80,18 +80,18 @@ def write_debug_csv(rows, path):
     """Write one member's per-day diagnostic rows to `path`.
 
     `rows` is a list of dicts with keys: center_id, name, date, day,
-    scheduled, reason, availability, availability_source, absent,
-    auth_days, placement_window, max_length. `scheduled` is rendered as
-    'yes'/'no' for readability when opened in Excel. Returns the path
-    written, or None when `rows` is empty (file not created)."""
+    scheduled, reason, reason_detail, availability, availability_source,
+    absent, auth_days, placement_window, max_length. `scheduled` is
+    rendered as 'yes'/'no' for readability when opened in Excel. Returns
+    the path written, or None when `rows` is empty (file not created)."""
     if not rows:
         return None
     with open(path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
         writer.writerow([
             "center_id", "name", "date", "day", "scheduled", "reason",
-            "availability", "availability_source", "absent", "auth_days",
-            "placement_window", "max_length",
+            "reason_detail", "availability", "availability_source",
+            "absent", "auth_days", "placement_window", "max_length",
         ])
         for row in rows:
             writer.writerow([
@@ -101,6 +101,7 @@ def write_debug_csv(rows, path):
                 row["day"],
                 "yes" if row["scheduled"] else "no",
                 row["reason"],
+                row["reason_detail"],
                 row["availability"],
                 row["availability_source"],
                 row["absent"],

@@ -407,3 +407,94 @@ def test_dropoff_never_past_avail_end_across_seeds():
             assert 210 <= length <= 240, (
                 f"seed {seed} {r['date']}: session {length}m outside 210-240"
             )
+
+
+def test_debug_too_narrow_day_has_window_and_detail():
+    # avail 08:00-11:30, reserve 2+34=36 → usable 08:00-10:54 (2h54m),
+    # under the 3h30m minimum.
+    rules = {**DEADLINE_E2E_RULES,
+             "dropoff_trail_min": (30, 34)}
+    ctx = MemberContext(
+        enrollments=[{"id": 1, "center_id": 1,
+                      "start_date": date(2026, 1, 1), "end_date": None}],
+        authorizations=[{"id": 1, "center_id": 1,
+                         "auth_start": date(2026, 1, 1),
+                         "auth_end": date(2026, 12, 31),
+                         "effective_start": date(2026, 1, 1),
+                         "effective_end": date(2026, 12, 31),
+                         "auth_days": "1"}],
+        absences=[],
+        availabilities=[{"id": 1, "center_id": 1,
+                         "effective_start_date": date(2026, 1, 1),
+                         "effective_end_date": None,
+                         "day_of_week": 1,
+                         "avail_start": "08:00", "avail_end": "11:30"}],
+        one_offs=[],
+    )
+    rows = build_debug_rows(2026, 5, ctx, rules)
+    assert rows, "expected one row per authorized Monday"
+    row = rows[0]
+    assert row["scheduled"] is False
+    assert row["placement_window"] == "08:00-10:54"
+    assert row["max_length"] == "02:54"
+    assert row["reason_detail"] == (
+        "avail 08:00-11:30 minus 36m drop-off reserve -> "
+        "usable 08:00-10:54 (2h54m) < min 3h30m"
+    )
+
+
+def test_debug_eligible_day_notes_reserve():
+    rules = {**DEADLINE_E2E_RULES, "dropoff_trail_min": (30, 34)}
+    ctx = _deadline_ctx()  # avail 08:00-15:00 → reserve 36, eligible
+    rows = build_debug_rows(2026, 5, ctx, rules)
+    row = rows[0]
+    assert row["scheduled"] is True
+    assert row["placement_window"] == "08:00-14:24"
+    assert row["reason_detail"] == (
+        "drop-off reserve 36m before 15:00 avail end"
+    )
+
+
+def test_debug_too_narrow_without_deadline_shows_width():
+    # Legacy narrow window (12:00-13:30, no deadline): detail carries
+    # the arithmetic that used to be invisible.
+    rules = {**DEADLINE_E2E_RULES, "dropoff_by_avail_end": False}
+    ctx = MemberContext(
+        enrollments=[{"id": 1, "center_id": 1,
+                      "start_date": date(2026, 1, 1), "end_date": None}],
+        authorizations=[{"id": 1, "center_id": 1,
+                         "auth_start": date(2026, 1, 1),
+                         "auth_end": date(2026, 12, 31),
+                         "effective_start": date(2026, 1, 1),
+                         "effective_end": date(2026, 12, 31),
+                         "auth_days": "1"}],
+        absences=[],
+        availabilities=[{"id": 1, "center_id": 1,
+                         "effective_start_date": date(2026, 1, 1),
+                         "effective_end_date": None,
+                         "day_of_week": 1,
+                         "avail_start": "12:00", "avail_end": "13:30"}],
+        one_offs=[],
+    )
+    rows = build_debug_rows(2026, 5, ctx, rules)
+    row = rows[0]
+    assert row["scheduled"] is False
+    assert row["placement_window"] == "12:00-13:30"
+    assert row["reason_detail"] == "usable 12:00-13:30 (1h30m) < min 3h30m"
+
+
+def test_debug_open_day_has_empty_detail():
+    ctx = MemberContext(
+        enrollments=[{"id": 1, "center_id": 1,
+                      "start_date": date(2026, 1, 1), "end_date": None}],
+        authorizations=[{"id": 1, "center_id": 1,
+                         "auth_start": date(2026, 1, 1),
+                         "auth_end": date(2026, 12, 31),
+                         "effective_start": date(2026, 1, 1),
+                         "effective_end": date(2026, 12, 31),
+                         "auth_days": "1"}],
+        absences=[], availabilities=[], one_offs=[],
+    )
+    rows = build_debug_rows(2026, 5, ctx, DEADLINE_E2E_RULES)
+    assert rows[0]["scheduled"] is True
+    assert rows[0]["reason_detail"] == ""

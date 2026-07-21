@@ -724,7 +724,7 @@ def test_debug_flag_writes_per_member_debug_csvs(monkeypatch, tmp_path):
         assert path.exists()
         lines = path.read_text(encoding="utf-8").splitlines()
         assert lines[0] == (
-            "center_id,name,date,day,scheduled,reason,"
+            "center_id,name,date,day,scheduled,reason,reason_detail,"
             "availability,availability_source,absent,auth_days,"
             "placement_window,max_length"
         )

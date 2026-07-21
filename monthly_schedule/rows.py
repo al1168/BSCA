@@ -4,7 +4,9 @@ from monthly_schedule.auth_days import (
     get_authorized_weekdays, format_auth_days,
 )
 from monthly_schedule.month_dates import get_month_dates
-from monthly_schedule.per_day import compute_day_eligibility, OneOffConflict
+from monthly_schedule.per_day import (
+    compute_day_eligibility, OneOffConflict, REASON_DAY_WINDOW_TOO_NARROW,
+)
 from monthly_schedule.daily_schedule import build_daily_schedule
 from monthly_schedule.rules import parse_hhmm, format_minutes
 from monthly_schedule.time_cache import lookup_times, store_times
@@ -76,6 +78,12 @@ def build_rows(year, month, ctx, plan_rules, rng,
     return rows
 
 
+def _fmt_duration(minutes):
+    """126 -> '2h06m' (durations in the debug reason_detail column)."""
+    minutes = max(0, minutes)
+    return f"{minutes // 60}h{minutes % 60:02d}m"
+
+
 def build_debug_rows(year, month, ctx, plan_rules,
                      start_day=None, end_day=None):
     """Diagnostic rows for the debug CSV (one per authorized day).
@@ -86,10 +94,13 @@ def build_debug_rows(year, month, ctx, plan_rules,
     they expected to be scheduled).
 
     Each row is {date, day, scheduled, reason} plus diagnostic fields
-    explaining the decision: `availability` (the effective HH:MM-HH:MM
+    explaining the decision: `reason_detail` (free-text arithmetic
+    behind the reason, e.g. the drop-off reserve subtraction; '' when
+    there's nothing to add), `availability` (the effective HH:MM-HH:MM
     window for the day) and `availability_source` (recurring/one-off/''),
     `absent` ('yes (LeaveType)'/'no'), `auth_days` (e.g. '1,3,5'),
-    `placement_window` (day bounds intersected with availability) and
+    `placement_window` (day bounds intersected with availability,
+    populated even for REASON_DAY_WINDOW_TOO_NARROW rejections) and
     `max_length` (the longest session that fits, HH:MM).
 
     `scheduled` is True when compute_day_eligibility accepted the day;
@@ -127,10 +138,12 @@ def build_debug_rows(year, month, ctx, plan_rules,
             scheduled = result.eligible
             reason = "" if scheduled else (result.reason or "")
             window = result.placement_window
+            reserve = result.dropoff_reserve
         except OneOffConflict as exc:
             scheduled = False
             reason = exc.reason
             window = None
+            reserve = 0
 
         # The placement window actually used: the narrowed window, or
         # the open-day bounds when no availability rule applies.
@@ -139,12 +152,29 @@ def build_debug_rows(year, month, ctx, plan_rules,
                 parse_hhmm(plan_rules["earliest_time_in"]),
                 parse_hhmm(plan_rules["latest_time_out"]),
             )
+        reason_detail = ""
         if window is not None:
             in_lo, out_hi = window
             placement = f"{format_minutes(in_lo)}-{format_minutes(out_hi)}"
-            max_len = min(plan_rules["session_length_min"][1],
-                          out_hi - in_lo)
+            max_len = max(0, min(plan_rules["session_length_min"][1],
+                                 out_hi - in_lo))
             max_length = format_minutes(max_len)
+            usable = (f"usable {placement} "
+                      f"({_fmt_duration(out_hi - in_lo)})")
+            if reason == REASON_DAY_WINDOW_TOO_NARROW:
+                min_len = plan_rules["session_length_min"][0]
+                prefix = (
+                    f"avail {availability} minus {reserve}m "
+                    f"drop-off reserve -> " if reserve else ""
+                )
+                reason_detail = (
+                    f"{prefix}{usable} < min {_fmt_duration(min_len)}"
+                )
+            elif reserve:
+                reason_detail = (
+                    f"drop-off reserve {reserve}m before "
+                    f"{avail_row['avail_end']} avail end"
+                )
         else:
             placement = ""
             max_length = ""
@@ -154,6 +184,7 @@ def build_debug_rows(year, month, ctx, plan_rules,
             "day": DAY_ABBR[day.isoweekday()],
             "scheduled": scheduled,
             "reason": reason,
+            "reason_detail": reason_detail,
             "availability": availability,
             "availability_source": avail_source,
             "absent": absent,
