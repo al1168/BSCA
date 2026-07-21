@@ -3,6 +3,7 @@ from datetime import date
 
 from monthly_schedule.eligibility_context import MemberContext
 from monthly_schedule.rows import build_rows, build_debug_rows
+from monthly_schedule.rules import parse_hhmm
 from monthly_schedule.per_day import (
     REASON_DAY_ABSENT,
     REASON_DAY_WINDOW_TOO_NARROW,
@@ -348,3 +349,56 @@ def test_debug_rows_catches_one_off_conflict():
     monday = next(r for r in rows if r["date"] == date(2026, 5, 4))
     assert monday["scheduled"] is False
     assert "duplicate one-off rows" in monday["reason"]
+
+
+DEADLINE_E2E_RULES = {
+    "earliest_time_in": "08:00",
+    "latest_time_out": "16:00",
+    "session_length_min": (210, 240),
+    "pickup_lead_min": (26, 30),      # travel 25 + buffer 1-5
+    "dropoff_trail_min": (26, 30),
+    "time_in_drift_min": (2, 2),
+    "time_out_drift_min": (2, 2),
+    "round_to_minutes": 1,
+    "dropoff_by_avail_end": True,
+}
+
+
+def _deadline_ctx():
+    return MemberContext(
+        enrollments=[{"id": 1, "center_id": 1,
+                      "start_date": date(2026, 1, 1), "end_date": None}],
+        authorizations=[{"id": 1, "center_id": 1,
+                         "auth_start": date(2026, 1, 1),
+                         "auth_end": date(2026, 12, 31),
+                         "effective_start": date(2026, 1, 1),
+                         "effective_end": date(2026, 12, 31),
+                         "auth_days": "1"}],
+        absences=[],
+        availabilities=[{"id": 1, "center_id": 1,
+                         "effective_start_date": date(2026, 1, 1),
+                         "effective_end_date": None,
+                         "day_of_week": 1,
+                         "avail_start": "08:00", "avail_end": "15:00"}],
+        one_offs=[],
+    )
+
+
+def test_dropoff_never_past_avail_end_across_seeds():
+    # The guarantee the whole feature rests on: for ANY random draw,
+    # Drop-Off <= avail_end on recurring-availability days.
+    deadline = parse_hhmm("15:00")
+    ctx = _deadline_ctx()
+    for seed in range(50):
+        rows = build_rows(2026, 5, ctx, DEADLINE_E2E_RULES,
+                          random.Random(seed))
+        scheduled = [r for r in rows if r["dropoff"]]
+        assert scheduled, "expected Mondays to be scheduled"
+        for r in scheduled:
+            assert parse_hhmm(r["dropoff"]) <= deadline, (
+                f"seed {seed} {r['date']}: dropoff {r['dropoff']} "
+                f"past 15:00"
+            )
+            # Full session still granted when the window allows it.
+            length = parse_hhmm(r["time_out"]) - parse_hhmm(r["time_in"])
+            assert 210 <= length <= 240
