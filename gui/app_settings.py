@@ -19,6 +19,7 @@ DEFAULTS = {
         "travel_buffer_min": [1, 5],
         "time_in_drift_min": [2, 2],
         "time_out_drift_min": [2, 2],
+        "dropoff_by_avail_end": True,
     },
 }
 

@@ -20,6 +20,11 @@ SCHEDULE_RULES = {
         "time_out_drift_min": (2, 2),     # Time-Out = Departure - 2 min
         "round_to_minutes": 1,            # 1 = no snap; 5 = snap to :05
         "travel_buffer_min": (1, 5),      # random buffer added to Google travel time
+        # When truthy: on days with a RECURRING availability ending
+        # before latest_time_out, Drop-Off must land at or before that
+        # end (home care starts then). Enforced by shrinking the
+        # placement window in per_day.compute_day_eligibility.
+        "dropoff_by_avail_end": True,
     },
 }
 

@@ -82,3 +82,14 @@ def test_no_overrides_returns_default_dict_unchanged():
     assert get_rules_for_plan("Default") is SCHEDULE_RULES["Default"]
     assert get_rules_for_plan("Default", None) is SCHEDULE_RULES["Default"]
     assert get_rules_for_plan("Default", {}) is SCHEDULE_RULES["Default"]
+
+
+def test_dropoff_by_avail_end_defaults_on():
+    assert SCHEDULE_RULES["Default"]["dropoff_by_avail_end"] is True
+
+
+def test_dropoff_by_avail_end_bool_override_passes_through():
+    # Booleans must survive the overrides merge untouched (only lists
+    # are converted to tuples).
+    rules = get_rules_for_plan("Default", {"dropoff_by_avail_end": False})
+    assert rules["dropoff_by_avail_end"] is False
