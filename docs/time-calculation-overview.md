@@ -28,8 +28,9 @@ override (`get_rules_for_plan`). Current `Default` values:
 | `earliest_time_in` | 08:00 | Time-In may not start before this |
 | `latest_time_out` | 16:00 | Time-Out may not end after this |
 | `session_length_min` | 210–240 min | Visit length (Time-In → Time-Out), a random 3 h 30 m – 4 h 0 m, capped to the free time in the window |
-| `pickup_lead_min` | 8–12 min | Pick-Up is this many minutes **before** Arrival |
-| `dropoff_trail_min` | 8–12 min | Drop-Off is this many minutes **after** Departure |
+| `pickup_lead_min` | 8–12 min | Pick-Up is this many minutes **before** Arrival. **Overridden per member at run time**: replaced with `travel_minutes + travel_buffer_min` (drive time + 1–5 min) |
+| `dropoff_trail_min` | 8–12 min | Drop-Off is this many minutes **after** Departure. Same per-member travel override as above |
+| `travel_buffer_min` | 1–5 min | Random pad added to the Google drive time when building the per-member Pick-Up/Drop-Off offsets |
 | `time_in_drift_min` | (2, 2) | Time-In is exactly 2 minutes **after** Arrival |
 | `time_out_drift_min` | (2, 2) | Time-Out is exactly 2 minutes **before** Departure |
 | `round_to_minutes` | 1 | Snap step for Time-In (1 = no snap; 5 = snap to :05) |

@@ -49,6 +49,69 @@ flowchart TD
 | 6 | Is there a recurring `Availability` row for this weekday? | `Availability.day_of_week == day.isoweekday()` whose effective-date window includes the day | `MemberContext.availability_for` |
 | 7 | Is the placement window wide enough for a session? | `min(latest_time_out, avail_end) − max(earliest_time_in, avail_start)` ≥ `session_length_min` (3h30m) | `compute_day_eligibility` |
 
+## What each attribute means
+
+Two kinds of "start/end" appear in this flow and they are easy to
+confuse: **date ranges** (which *days* something applies to) and
+**clock times** (which *hours within one day*). Every attribute below
+is one or the other.
+
+### Date-range attributes (which days)
+
+| Attribute | Meaning |
+|---|---|
+| `Enrollment.start_date` / `end_date` | The first and last calendar day the member is part of the program. A blank `end_date` means still enrolled (open-ended). A day outside this range is never scheduled. |
+| `Authorization.effective_start` / `effective_end` | The calendar-day range an authorization covers. A day must fall inside an authorization's range to be schedulable, even if the member is enrolled. |
+| `Absences.start_date` / `end_date` | The first and last day of an absence. Any day inside the range is skipped (unless a one-off availability row exists for it, which is a conflict). |
+| `Availability` effective dates | A recurring availability row can itself carry an effective-date window; the row only applies to days inside that window. |
+| `OneOffAvailability.date` | A single exact date. When present, this row's times replace the recurring availability for that one day. |
+
+### Clock-time attributes (hours within a day)
+
+| Attribute | Meaning |
+|---|---|
+| `avail_start` | The earliest clock time the member can **start the visit** (earliest allowed Time-In) on days this availability row applies. It does not limit Pick-Up/Arrival — those may fall slightly before it, since they are derived backwards from Time-In. |
+| `avail_end` | The latest clock time the member's visit can **end** (latest allowed Time-Out) on those days. Departure/Drop-Off may fall slightly after it. |
+| `earliest_time_in` (default 08:00) | Program-wide hard floor: Time-In may never be earlier than this, no matter how early `avail_start` is. Editable in **Settings → Scheduling Rules**. |
+| `latest_time_out` (default 16:00) | Program-wide hard ceiling: Time-Out may never be later than this, no matter how late `avail_end` runs. |
+| **Placement window** `(in_lo, out_hi)` | The overlap of the two pairs above: `in_lo = max(earliest_time_in, avail_start)`, `out_hi = min(latest_time_out, avail_end)`. The whole attendance block (Time-In → Time-Out) must fit inside it. If the member has no availability row, the window is simply 08:00–16:00 (an "open day"). |
+| `session_length_min` (default 210–240) | The allowed visit length in minutes, measured Time-In → Time-Out. A day is only eligible if its placement window is at least the minimum (3 h 30 m) wide. |
+
+### Other scheduling inputs
+
+| Attribute | Meaning |
+|---|---|
+| `auth_days` | Comma-separated ISO weekday numbers on the authorization, e.g. `"1,3,5"` = Monday/Wednesday/Friday (1 = Mon … 7 = Sun). Only these weekdays can ever be scheduled. |
+| `travel_minutes` | The one-way drive time (in minutes) from the member's home address to the center, from Google Routes (cached in `geo_cache.json`). |
+| `travel_buffer_min` (default 1–5) | A small random pad added to `travel_minutes` when deriving Pick-Up and Drop-Off, so transport times don't all sit exactly one drive-time away. |
+
+### The six generated times
+
+All six describe **one visit on one day**, and are derived from a
+single anchor: the attendance block. Time-In is placed at a random spot
+in the placement window, and everything else is offsets from it.
+
+| Time | Meaning | How it's computed |
+|---|---|---|
+| **Pick-Up** | Transport collects the member at home. | Arrival − (`travel_minutes` + 1–5 min buffer) |
+| **Arrival** | The member arrives at the center. | Time-In − 2 min |
+| **Time-In** | The member is clocked in — the official start of the visit. This is the anchor everything else hangs off. | Random position in the placement window such that the whole block fits |
+| **Time-Out** | The member is clocked out — the official end of the visit. Time-Out − Time-In is the visit length. | Time-In + random length (3 h 30 m – 4 h 0 m) |
+| **Departure** | The member leaves the center. | Time-Out + 2 min |
+| **Drop-Off** | Transport returns the member home. | Departure + (`travel_minutes` + 1–5 min buffer) |
+
+Only Time-In and Time-Out are constrained by the placement window; the
+transport times deliberately spill just outside it. Every generated day
+must satisfy this ordering, or the run reports an error for that member:
+
+```
+Pick-Up < Arrival ≤ Time-In ≤ Time-Out ≤ Departure < Drop-Off
+```
+
+The attendance table in the workbook uses Time-In/Time-Out; the
+transport table uses Pick-Up/Arrival/Departure/Drop-Off — both from the
+same day's anchors, so they always agree.
+
 ## Whole-month early skip
 
 Before walking days, `compute_month_failure` does three coarse checks
