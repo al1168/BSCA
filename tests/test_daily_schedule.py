@@ -103,3 +103,81 @@ def test_validate_schedule_raises_on_time_in_after_time_out():
     with pytest.raises(ValueError):
         # valid ends individually, but time_in (600) > time_out (590)
         validate_schedule(470, 478, 600, 590, 700, 710, rules)
+
+
+# Cutoff = 08:00 + 180 min = 11:00 (660 minutes).
+BAND_RULES = {**SCHEDULE_RULES["Default"], "band_enabled": True}
+
+
+def test_morning_band_caps_time_in():
+    rng = random.Random(3)
+    for _ in range(500):
+        s = build_daily_schedule(BAND_RULES, rng, band="morning")
+        assert _to_min(s["time_in"]) <= 660
+
+
+def test_afternoon_band_floors_time_in():
+    rng = random.Random(4)
+    seen = []
+    for _ in range(500):
+        s = build_daily_schedule(BAND_RULES, rng, band="afternoon")
+        ti = _to_min(s["time_in"])
+        assert ti >= 660
+        seen.append(ti)
+    assert max(seen) > 660  # actually varies inside the band
+
+
+def test_band_draws_still_satisfy_invariants():
+    rng = random.Random(5)
+    for band in ("morning", "afternoon"):
+        for _ in range(200):
+            s = build_daily_schedule(BAND_RULES, rng, band=band)
+            ti, to = _to_min(s["time_in"]), _to_min(s["time_out"])
+            assert ti >= 8 * 60
+            assert to <= 16 * 60
+            assert 210 <= to - ti <= 240
+
+
+def test_afternoon_falls_back_when_window_is_morning_only():
+    # Window 08:00-11:40: latest_in <= 08:10, entirely before the 11:00
+    # cutoff -> the afternoon band cannot fit. Validity wins: the full
+    # window is used and the block still fits inside it.
+    rng = random.Random(6)
+    for _ in range(300):
+        s = build_daily_schedule(BAND_RULES, rng,
+                                 window=(480, 700), band="afternoon")
+        assert _to_min(s["time_in"]) >= 480
+        assert _to_min(s["time_out"]) <= 700
+
+
+def test_morning_falls_back_when_window_starts_after_cutoff():
+    # Window 12:00-16:00 starts after the 11:00 cutoff -> morning band
+    # empty -> full window used.
+    rng = random.Random(7)
+    for _ in range(300):
+        s = build_daily_schedule(BAND_RULES, rng,
+                                 window=(720, 960), band="morning")
+        assert _to_min(s["time_in"]) >= 720
+        assert _to_min(s["time_out"]) <= 960
+
+
+def test_band_none_works_with_legacy_rules_dict():
+    # Callers with pre-feature rules dicts (no band keys) must not crash.
+    legacy = {k: v for k, v in SCHEDULE_RULES["Default"].items()
+              if k not in ("band_enabled", "morning_percent",
+                           "morning_window_min", "morning_members",
+                           "afternoon_members")}
+    rng = random.Random(8)
+    s = build_daily_schedule(legacy, rng)
+    assert set(s) == {"pickup", "arrival", "time_in",
+                      "time_out", "departure", "dropoff"}
+
+
+def test_morning_band_with_snapping_stays_in_band():
+    rules = {**BAND_RULES, "round_to_minutes": 5}
+    rng = random.Random(9)
+    for _ in range(300):
+        s = build_daily_schedule(rules, rng, band="morning")
+        ti = _to_min(s["time_in"])
+        assert ti % 5 == 0
+        assert ti <= 660

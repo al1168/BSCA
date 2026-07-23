@@ -44,7 +44,7 @@ def validate_schedule(pickup, arrival, time_in, time_out, departure, dropoff, ru
         )
 
 
-def build_daily_schedule(rules, rng, window=None):
+def build_daily_schedule(rules, rng, window=None, band=None):
     """Return a dict of 'HH:MM' strings for one eligible day's visit.
 
     `window` (optional) is a (in_lo, out_hi) tuple in minutes: the
@@ -57,6 +57,13 @@ def build_daily_schedule(rules, rng, window=None):
     free time in the window, and the block is dropped at a random
     position so the whole of it (Time-In .. Time-Out) fits inside the
     window. Arrival/Departure and pickup/drop-off are derived around it.
+
+    `band` (optional, 'morning'/'afternoon'/None) narrows WHERE inside
+    the window Time-In is drawn (spec 2026-07-23): morning caps it at
+    `earliest_time_in + morning_window_min`, afternoon floors it there.
+    Validity always wins — when the band does not intersect the valid
+    Time-In interval it is ignored for the day and the full interval is
+    used. None = uniform placement, exactly the pre-feature behavior.
     """
     if window is None:
         in_lo = parse_hhmm(rules["earliest_time_in"])
@@ -74,9 +81,22 @@ def build_daily_schedule(rules, rng, window=None):
 
     # Place the block: Time-In anywhere that keeps Time-Out <= out_hi.
     latest_in = max(in_lo, out_hi - length)
-    time_in = _round_to(rng.randint(in_lo, latest_in), step)
+    # Morning/afternoon band: narrow the Time-In draw interval when the
+    # band fits inside it; otherwise validity wins and the full interval
+    # stays (the band is a soft preference, never an eligibility rule).
+    eff_lo, eff_hi = in_lo, latest_in
+    if band is not None:
+        cutoff = (parse_hhmm(rules["earliest_time_in"])
+                  + rules["morning_window_min"])
+        if band == "morning":
+            lo, hi = in_lo, min(latest_in, cutoff)
+        else:
+            lo, hi = max(in_lo, cutoff), latest_in
+        if lo <= hi:
+            eff_lo, eff_hi = lo, hi
+    time_in = _round_to(rng.randint(eff_lo, eff_hi), step)
     # Snapping can nudge Time-In past the edges — clamp so it still fits.
-    time_in = min(max(time_in, in_lo), latest_in)
+    time_in = min(max(time_in, eff_lo), eff_hi)
     time_out = time_in + length
 
     arrival = time_in - rng.randint(*rules["time_in_drift_min"])
