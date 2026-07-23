@@ -323,6 +323,37 @@ def test_build_rows_stores_into_time_cache_on_miss():
     assert hit["pickup"] == monday["pickup"]
 
 
+def test_cached_times_survive_band_toggle():
+    """Turning the band feature on must NOT invalidate or reshuffle
+    already-cached (printed) days, even when the cached times sit
+    outside the member's new band."""
+    from monthly_schedule.time_cache import store_times, lookup_times
+
+    # Pre-feature cached entry with an early-afternoon Time-In (12:02) —
+    # outside the morning band the feature will assign this member.
+    fixed = {
+        "pickup": "11:47", "arrival": "12:00", "time_in": "12:02",
+        "time_out": "15:32", "departure": "15:34", "dropoff": "15:44",
+    }
+    time_cache = {}
+    for day in (4, 11, 18, 25):
+        store_times(time_cache, 1, date(2026, 5, day), fixed, "HOF", 7)
+
+    rules = {**BAND_PLAN_RULES}  # percent 100 -> member is "morning"
+    out = build_rows(
+        2026, 5, _ctx_full_month("1"), rules, random.Random(0),
+        time_cache=time_cache, center_id=1, plan="HOF", travel_minutes=7,
+    )
+    mondays = [r for r in out if r["day"] == "Mon"]
+    assert len(mondays) == 4
+    for row in mondays:
+        assert row["time_in"] == "12:02"     # cached value, not re-rolled
+    # Entries still present in the cache afterwards.
+    for day in (4, 11, 18, 25):
+        assert lookup_times(time_cache, 1, date(2026, 5, day),
+                            "HOF", 7, (480, 960)) is not None
+
+
 def test_debug_rows_catches_one_off_conflict():
     # Duplicate one-offs would normally raise; debug rows catches per-day
     # so the CSV always completes.
