@@ -27,11 +27,14 @@ class PrintWorker(QThread):
         except Exception:
             pythoncom = None  # non-Windows / pywin32 missing → let it fail below
         try:
-            printed = print_workbooks(
+            result = print_workbooks(
                 self._paths,
-                on_printed=lambda i, total, _p: self.progress.emit(i, total),
+                on_progress=lambda i, total, _p: self.progress.emit(i, total),
             )
-            self.finished.emit(True, {"printed": printed})
+            # Success only when every file actually went to the printer;
+            # partial failures carry the full result for the UI to show.
+            success = not result["failed"] and not result["not_attempted"]
+            self.finished.emit(success, result)
         except Exception as exc:  # noqa: BLE001 - surface, never crash the thread
             self.finished.emit(False, {"error": str(exc)})
         finally:

@@ -27,7 +27,9 @@ from PyQt6.QtWidgets import (
 
 from gui import app_settings
 from gui.i18n import LanguageManager, tr
-from gui.printing import printable_schedules, default_printer_name
+from gui.printing import (
+    printable_schedules, default_printer_name, partition_printed,
+)
 from gui.print_worker import PrintWorker
 from gui.settings_dialog import SettingsDialog
 from gui.worker import ScheduleWorker
@@ -58,6 +60,10 @@ class MainWindow(QWidget):
         self._print_worker = None
         self._last_out_dir = None
         self._last_generated = []   # .xlsx paths from the last run
+        # Abspaths successfully printed this session; lets a re-click
+        # after a printer failure send only the unprinted remainder.
+        # Cleared when a new generation run finishes (files rewritten).
+        self._printed_ok = set()
 
         root = QVBoxLayout(self)
         root.setSpacing(12)
@@ -366,26 +372,64 @@ class MainWindow(QWidget):
             )
             return
         printer = default_printer_name() or tr("print.default_printer")
-        confirm = QMessageBox.question(
-            self,
-            tr("print.confirm.title"),
-            tr("print.confirm.body", count=len(files), printer=printer),
-        )
-        if confirm != QMessageBox.StandardButton.Yes:
+        to_print = self._choose_files_to_print(files, printer)
+        if not to_print:
             return
         # Disable the buttons and stream progress while printing.
         self._print_btn.setEnabled(False)
         self._generate_btn.setEnabled(False)
-        self._progress.setRange(0, len(files))
+        self._progress.setRange(0, len(to_print))
         self._progress.setValue(0)
         self._progress.setVisible(True)
         self._log.setVisible(True)
         self._log.appendPlainText("")
-        self._log.appendPlainText(tr("print.started", count=len(files)))
-        self._print_worker = PrintWorker(files)
+        self._log.appendPlainText(tr("print.started", count=len(to_print)))
+        self._print_worker = PrintWorker(to_print)
         self._print_worker.progress.connect(self._on_print_progress)
         self._print_worker.finished.connect(self._on_print_finished)
         self._print_worker.start()
+
+    def _choose_files_to_print(self, files, printer):
+        """Confirm with the user and return the list to print ([] to
+        cancel). When part of the batch already printed this session
+        (printer failure mid-run), offer remaining-only vs everything."""
+        remaining, already = partition_printed(files, self._printed_ok)
+        if not already:
+            confirm = QMessageBox.question(
+                self,
+                tr("print.confirm.title"),
+                tr("print.confirm.body", count=len(files), printer=printer),
+            )
+            return files if confirm == QMessageBox.StandardButton.Yes else []
+        if not remaining:
+            confirm = QMessageBox.question(
+                self,
+                tr("print.confirm.title"),
+                tr("print.confirm.reprint_all", count=len(files)),
+            )
+            return files if confirm == QMessageBox.StandardButton.Yes else []
+        box = QMessageBox(self)
+        box.setWindowTitle(tr("print.confirm.title"))
+        box.setText(tr("print.confirm.remaining",
+                       remaining=len(remaining), total=len(files),
+                       printer=printer))
+        remaining_btn = box.addButton(
+            tr("print.btn.remaining", count=len(remaining)),
+            QMessageBox.ButtonRole.AcceptRole,
+        )
+        all_btn = box.addButton(
+            tr("print.btn.all", count=len(files)),
+            QMessageBox.ButtonRole.ActionRole,
+        )
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(remaining_btn)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is remaining_btn:
+            return remaining
+        if clicked is all_btn:
+            return files
+        return []
 
     def _on_print_progress(self, done: int, total: int):
         self._progress.setRange(0, total)
@@ -394,14 +438,40 @@ class MainWindow(QWidget):
     def _on_print_finished(self, success: bool, payload: dict):
         self._print_btn.setEnabled(True)
         self._generate_btn.setEnabled(True)
+        # Remember every file that reached the printer, even on partial
+        # failure — a re-click offers to print only the remainder.
+        for p in payload.get("printed", []):
+            self._printed_ok.add(os.path.abspath(p))
         if success:
             self._log.appendPlainText(
-                tr("print.done", count=payload.get("printed", 0))
+                tr("print.done", count=len(payload.get("printed", [])))
             )
-        else:
+            return
+        if "error" in payload:
+            # Whole-batch failure (Excel/pywin32 missing): nothing was
+            # attempted per-file, keep the original message.
             msg = tr("print.failed", error=payload.get("error", ""))
             self._log.appendPlainText(msg)
             QMessageBox.warning(self, tr("print.title"), msg)
+            return
+        failed = payload.get("failed", [])
+        not_attempted = payload.get("not_attempted", [])
+        for path, err in failed:
+            self._log.appendPlainText(
+                tr("print.file_failed",
+                   name=os.path.basename(path), error=err)
+            )
+        if not_attempted:
+            key = ("print.stalled" if payload.get("stalled")
+                   else "print.stopped_early")
+            self._log.appendPlainText(tr(key, count=len(not_attempted)))
+        printed_n = len(payload.get("printed", []))
+        total_n = printed_n + len(failed) + len(not_attempted)
+        summary = tr("print.partial",
+                     printed=printed_n, total=total_n,
+                     failed=len(failed) + len(not_attempted))
+        self._log.appendPlainText(summary)
+        QMessageBox.warning(self, tr("print.title"), summary)
 
     def _validate(self) -> bool:
         mode = self._who_group.checkedId()
@@ -553,6 +623,7 @@ class MainWindow(QWidget):
         self._log.appendPlainText(summary)
         self._generate_btn.setEnabled(True)
         self._last_generated = payload.get("generated_paths", []) or []
+        self._printed_ok.clear()   # fresh files — nothing printed yet
         # Show the folder/print buttons whenever at least one schedule was
         # written — even on a partial run where some members were skipped.
         if self._last_generated:

@@ -36,12 +36,12 @@ def _run_to_completion(worker, timeout_ms=5000):
     return captured[0]
 
 
-def test_print_worker_reports_printed_count(monkeypatch):
-    def fake_print(paths, on_printed=None):
+def test_print_worker_reports_result_on_success(monkeypatch):
+    def fake_print(paths, on_progress=None):
         for i, p in enumerate(paths, start=1):
-            if on_printed:
-                on_printed(i, len(paths), p)
-        return len(paths)
+            if on_progress:
+                on_progress(i, len(paths), p)
+        return {"printed": list(paths), "failed": [], "not_attempted": []}
 
     monkeypatch.setattr("gui.print_worker.print_workbooks", fake_print)
 
@@ -51,12 +51,30 @@ def test_print_worker_reports_printed_count(monkeypatch):
 
     success, payload = _run_to_completion(worker)
     assert success is True
-    assert payload == {"printed": 2}
+    assert payload["printed"] == ["a.xlsx", "b.xlsx"]
+    assert payload["failed"] == []
+    assert payload["not_attempted"] == []
     assert progress == [(1, 2), (2, 2)]
 
 
+def test_print_worker_partial_failure_is_not_success(monkeypatch):
+    def fake_print(paths, on_progress=None):
+        return {"printed": ["a.xlsx"],
+                "failed": [("b.xlsx", "printer offline")],
+                "not_attempted": ["c.xlsx"]}
+
+    monkeypatch.setattr("gui.print_worker.print_workbooks", fake_print)
+
+    worker = PrintWorker(["a.xlsx", "b.xlsx", "c.xlsx"])
+    success, payload = _run_to_completion(worker)
+    assert success is False
+    assert payload["printed"] == ["a.xlsx"]
+    assert payload["failed"] == [("b.xlsx", "printer offline")]
+    assert payload["not_attempted"] == ["c.xlsx"]
+
+
 def test_print_worker_surfaces_errors(monkeypatch):
-    def boom(paths, on_printed=None):
+    def boom(paths, on_progress=None):
         raise RuntimeError("Excel not installed")
 
     monkeypatch.setattr("gui.print_worker.print_workbooks", boom)

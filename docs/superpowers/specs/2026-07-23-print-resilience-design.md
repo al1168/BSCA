@@ -30,6 +30,24 @@ non-technical user no idea what to do.
    fix it and click Print again, already-printed schedules are
    skipped." English + Chinese.
 
+4. **Queue-aware throttle** (user hypothesis, confirmed plausible:
+   dumping ~134 jobs at once backs up the spooler, which is the state
+   that makes Excel throw "No printers are installed"). Before sending
+   each job, poll the default printer's Windows queue via
+   `win32print.EnumJobs`:
+   - queue has ≥ `MAX_QUEUED_JOBS` (10) waiting → wait, polling every
+     2s, until it drains below the cap;
+   - while waiting, if the queue length does not decrease for
+     `QUEUE_STALL_TIMEOUT` (120s), the printer is stalled (paper out /
+     offline): stop cleanly, mark the rest `not_attempted`, flag
+     `stalled: True` so the UI says "printer stopped making progress"
+     instead of an Excel COM error;
+   - queue length unknowable (pywin32 missing, spooler unreachable) →
+     no throttling, behave as before.
+   Time sources (`sleep`, `monotonic`) and the queue-length probe are
+   injectable for tests; the production default probes the real
+   default printer.
+
 ## Components
 
 - `gui/printing.py` — `print_workbooks` returns

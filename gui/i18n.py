@@ -66,6 +66,31 @@ STRINGS: dict[str, dict[str, str]] = {
         "print.started": "Printing {count} schedule(s)…",
         "print.done": "Printed {count} schedule(s).",
         "print.failed": "Printing failed: {error}",
+        "print.confirm.reprint_all": (
+            "All {count} schedule(s) were already printed this session. "
+            "Print them all again?"
+        ),
+        "print.confirm.remaining": (
+            "{remaining} of {total} schedule(s) have not been printed "
+            "yet. Print to {printer}?"
+        ),
+        "print.btn.remaining": "Print remaining {count}",
+        "print.btn.all": "Print all {count}",
+        "print.file_failed": "Print failed: {name} — {error}",
+        "print.stopped_early": (
+            "Stopped after repeated failures; {count} schedule(s) were "
+            "not attempted."
+        ),
+        "print.stalled": (
+            "The printer stopped making progress; {count} schedule(s) "
+            "were not sent. It is likely out of paper or offline."
+        ),
+        "print.partial": (
+            "Printed {printed} of {total} schedule(s); {failed} did not "
+            "print. The printer may be out of paper or offline — fix the "
+            "printer, then click Print All Schedules again. Schedules "
+            "that already printed will be skipped."
+        ),
         # settings dialog
         "settings.welcome": (
             "Before you get started, please fill in the fields "
@@ -278,6 +303,28 @@ STRINGS: dict[str, dict[str, str]] = {
         "print.started": "正在打印 {count} 份日程表……",
         "print.done": "已打印 {count} 份日程表。",
         "print.failed": "打印失败：{error}",
+        "print.confirm.reprint_all": (
+            "本次运行中已打印全部 {count} 份日程表。要全部重新打印吗？"
+        ),
+        "print.confirm.remaining": (
+            "还有 {remaining} 份（共 {total} 份）日程表尚未打印。"
+            "要打印到 {printer} 吗？"
+        ),
+        "print.btn.remaining": "打印剩余 {count} 份",
+        "print.btn.all": "全部打印 {count} 份",
+        "print.file_failed": "打印失败：{name} — {error}",
+        "print.stopped_early": (
+            "连续失败后已停止；{count} 份日程表未尝试打印。"
+        ),
+        "print.stalled": (
+            "打印机长时间没有进展；{count} 份日程表未发送。"
+            "可能缺纸或离线。"
+        ),
+        "print.partial": (
+            "已打印 {printed} 份（共 {total} 份）；{failed} 份未打印。"
+            "打印机可能缺纸或离线——请检修打印机后再次点击"
+            "“打印全部日程表”，已打印的日程表会自动跳过。"
+        ),
         # settings dialog
         "settings.welcome": (
             "开始之前，请填写以下各项。\n"
