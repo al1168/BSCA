@@ -3,6 +3,7 @@ from monthly_schedule.rules import (
     get_rules_for_plan,
     parse_hhmm,
     format_minutes,
+    band_for_member,
 )
 
 
@@ -93,3 +94,91 @@ def test_dropoff_by_avail_end_bool_override_passes_through():
     # are converted to tuples).
     rules = get_rules_for_plan("Default", {"dropoff_by_avail_end": False})
     assert rules["dropoff_by_avail_end"] is False
+
+
+def test_band_defaults_present():
+    d = SCHEDULE_RULES["Default"]
+    assert d["band_enabled"] is False
+    assert d["morning_percent"] == 80
+    assert d["morning_window_min"] == 180
+    assert d["morning_members"] == ()
+    assert d["afternoon_members"] == ()
+
+
+def _band_rules(**over):
+    return {**SCHEDULE_RULES["Default"], "band_enabled": True, **over}
+
+
+def test_band_disabled_returns_none_for_everyone():
+    # band_enabled is False by default; pins are ignored while off.
+    rules = {**SCHEDULE_RULES["Default"],
+             "morning_members": (1,), "afternoon_members": (2,)}
+    for cid in (1, 2, 3, 24010):
+        assert band_for_member(cid, rules) is None
+
+
+def test_band_missing_key_treated_as_disabled():
+    # Settings files saved before this feature have no band_enabled key.
+    rules = {k: v for k, v in SCHEDULE_RULES["Default"].items()
+             if k != "band_enabled"}
+    assert band_for_member(1, rules) is None
+
+
+def test_band_none_center_id_returns_none():
+    assert band_for_member(None, _band_rules()) is None
+
+
+def test_band_deterministic_across_calls():
+    rules = _band_rules()
+    for cid in range(200):
+        assert band_for_member(cid, rules) == band_for_member(cid, rules)
+
+
+def test_band_distribution_near_percent():
+    # Fixed IDs -> deterministic result; md5 is uniform so 1000 IDs land
+    # within a few points of 80/20 (expected 800, sd ~12.6).
+    rules = _band_rules(morning_percent=80)
+    morning = sum(
+        band_for_member(cid, rules) == "morning" for cid in range(1000)
+    )
+    assert 750 <= morning <= 850
+
+
+def test_band_percent_edges():
+    ids = range(50)
+    assert all(band_for_member(c, _band_rules(morning_percent=100))
+               == "morning" for c in ids)
+    assert all(band_for_member(c, _band_rules(morning_percent=0))
+               == "afternoon" for c in ids)
+
+
+def test_band_pins_win_over_hash():
+    rules = _band_rules(morning_percent=100, afternoon_members=(7,))
+    assert band_for_member(7, rules) == "afternoon"
+    rules = _band_rules(morning_percent=0, morning_members=(7,))
+    assert band_for_member(7, rules) == "morning"
+
+
+def test_band_overlap_morning_wins():
+    # GUI blocks this at save; defensively, morning wins.
+    rules = _band_rules(morning_members=(7,), afternoon_members=(7,))
+    assert band_for_member(7, rules) == "morning"
+
+
+def test_band_ignores_junk_in_pin_lists():
+    # Hand-edited settings file: string IDs are cast, junk is skipped.
+    rules = _band_rules(morning_percent=0,
+                        morning_members=("7", "junk", None))
+    assert band_for_member(7, rules) == "morning"
+
+
+def test_band_lists_survive_overrides_merge():
+    # JSON overrides arrive as lists; get_rules_for_plan turns them into
+    # tuples -- membership checks must still work.
+    rules = get_rules_for_plan("Default", {
+        "band_enabled": True,
+        "morning_members": [1, 2],
+        "afternoon_members": [3],
+    })
+    assert band_for_member(1, rules) == "morning"
+    assert band_for_member(3, rules) == "afternoon"

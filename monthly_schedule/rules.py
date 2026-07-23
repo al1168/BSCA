@@ -4,6 +4,8 @@ Adding a restriction = change a number here, or add a key and one
 clamp/validation line in daily_schedule.validate_schedule.
 """
 
+import hashlib
+
 SCHEDULE_RULES = {
     "Default": {
         # Hard day bounds: the attendance block must not start (Time-In)
@@ -25,6 +27,14 @@ SCHEDULE_RULES = {
         # end (home care starts then). Enforced by shrinking the
         # placement window in per_day.compute_day_eligibility.
         "dropoff_by_avail_end": True,
+        # Morning/afternoon distribution (opt-in; spec 2026-07-23).
+        # While band_enabled is falsy, Time-In placement is uniform,
+        # exactly as before — pins and percentages are ignored.
+        "band_enabled": False,
+        "morning_percent": 80,       # % of members assigned morning
+        "morning_window_min": 180,   # band length from earliest_time_in
+        "morning_members": (),       # center_ids pinned morning
+        "afternoon_members": (),     # center_ids pinned afternoon
     },
 }
 
@@ -62,3 +72,39 @@ def format_minutes(total):
     """Minutes since midnight -> 'HH:MM' (wraps within a 24h day)."""
     total %= 24 * 60
     return f"{total // 60:02d}:{total % 60:02d}"
+
+
+def band_for_member(center_id, rules):
+    """Return 'morning'/'afternoon' for this member, or None when the
+    distribution feature is off (or center_id is unknown).
+
+    Pins win over the hash; morning wins if an id is (defensively) in
+    both lists. The md5 bucket is stable across runs and months, so a
+    member keeps their band until the settings change. Non-integer
+    entries in hand-edited pin lists are ignored.
+    """
+    if not rules.get("band_enabled") or center_id is None:
+        return None
+    try:
+        member_id = int(center_id)
+    except (TypeError, ValueError):
+        return None
+
+    def pinned(key):
+        for raw in rules.get(key) or ():
+            try:
+                if int(raw) == member_id:
+                    return True
+            except (TypeError, ValueError):
+                continue
+        return False
+
+    if pinned("morning_members"):
+        return "morning"
+    if pinned("afternoon_members"):
+        return "afternoon"
+    digest = hashlib.md5(str(member_id).encode("ascii")).hexdigest()
+    bucket = int(digest, 16) % 100
+    if bucket < rules.get("morning_percent", 80):
+        return "morning"
+    return "afternoon"
