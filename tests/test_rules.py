@@ -181,6 +181,12 @@ def test_band_golden_values_frozen():
     assert band_for_member(24010, rules) == "morning"
     assert band_for_member(24011, rules) == "morning"
 
+    rules50 = _band_rules(morning_percent=50)
+    assert band_for_member(0, rules50) == "afternoon"      # bucket 50
+    assert band_for_member(7, rules50) == "afternoon"      # bucket 55
+    assert band_for_member(24010, rules50) == "morning"    # bucket 35
+    assert band_for_member(24011, rules50) == "morning"    # bucket 4
+
 
 def test_band_lists_survive_overrides_merge():
     # JSON overrides arrive as lists; get_rules_for_plan turns them into
