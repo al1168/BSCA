@@ -181,3 +181,8 @@ def test_morning_band_with_snapping_stays_in_band():
         ti = _to_min(s["time_in"])
         assert ti % 5 == 0
         assert ti <= 660
+
+
+def test_unknown_band_raises():
+    with pytest.raises(ValueError):
+        build_daily_schedule(BAND_RULES, random.Random(0), band="midday")

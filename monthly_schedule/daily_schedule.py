@@ -90,8 +90,10 @@ def build_daily_schedule(rules, rng, window=None, band=None):
                   + rules["morning_window_min"])
         if band == "morning":
             lo, hi = in_lo, min(latest_in, cutoff)
-        else:
+        elif band == "afternoon":
             lo, hi = max(in_lo, cutoff), latest_in
+        else:
+            raise ValueError(f"unknown band {band!r}")
         if lo <= hi:
             eff_lo, eff_hi = lo, hi
     time_in = _round_to(rng.randint(eff_lo, eff_hi), step)
