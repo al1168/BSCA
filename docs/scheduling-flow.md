@@ -140,7 +140,13 @@ Once a day is eligible:
    derived around it using the configurable buffer values in **Settings
    → Scheduling Rules**. Arrival never lands before the member's
    availability start by more than the small Time-In offset, and
-   Time-In/Time-Out stay within the 08:00–16:00 day bounds.
+   Time-In/Time-Out stay within the 08:00–16:00 day bounds. Once the
+   placement window is set, `band_for_member` (opt-in, off by default)
+   assigns the member to a `morning`/`afternoon` band — by pin or by a
+   stable hash of `center_id` — and `build_daily_schedule` prefers that
+   band when drawing Time-In, falling back to the full window whenever
+   the band doesn't fit; see `docs/time-calculation-overview.md` for
+   the mechanics.
 3. **Time cache.** If a row for this `(center_id, date)` already exists
    in `time_cache.json`, the plan + travel match, and the cached block
    still fits the current placement window, the cached times are reused
@@ -167,4 +173,8 @@ made it ineligible (or `yes` if it was scheduled), a `reason_detail`
 column with the arithmetic behind window rejections (availability,
 drop-off reserve, usable width vs. required minimum), along with the
 availability used, absence/leave type, authorized weekdays, the
-placement window, and the maximum session length that fit.
+placement window, and the maximum session length that fit. A `band`
+column carries the member's `morning`/`afternoon` assignment on every
+row when the distribution feature is on (blank otherwise); it reflects
+the member's current band, not necessarily where an already-cached day's
+time actually landed.

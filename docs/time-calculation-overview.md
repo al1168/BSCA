@@ -35,6 +35,10 @@ override (`get_rules_for_plan`). Current `Default` values:
 | `time_out_drift_min` | (2, 2) | Time-Out is exactly 2 minutes **before** Departure |
 | `round_to_minutes` | 1 | Snap step for Time-In (1 = no snap; 5 = snap to :05) |
 | `dropoff_by_avail_end` | on | When a recurring availability ends before `latest_time_out`, shrink the window so Drop-Off lands at or before `avail_end` (home care). Day goes blank if under 3h30m. |
+| `band_enabled` | off | Morning/afternoon distribution master switch. Off = uniform Time-In placement, exactly the pre-feature behavior; the four keys below are ignored. |
+| `morning_percent` | 80 | % of members assigned to the morning band via a deterministic md5 hash of `center_id` — stable across runs and months, so a member keeps their band until the settings change. Pinned members bypass the hash. |
+| `morning_window_min` | 180 min | Morning band length in minutes measured from `earliest_time_in`; the cutoff for Time-In. |
+| `morning_members` / `afternoon_members` | (empty) | `center_id`s pinned to a band, bypassing the hash (morning wins if an id is somehow in both). |
 
 The earliest/latest bounds and the session length are editable in
 **Settings → Scheduling Rules**; availability further narrows them per
@@ -62,6 +66,22 @@ with the member's availability — minus the drop-off reserve (max drift
 
 Randomness comes from an injected `random.Random` instance, so a
 given seed reproduces the same schedule (used in tests).
+
+**Morning/afternoon banding** (opt-in via `band_enabled`) narrows
+*where inside the valid placement window* Time-In is drawn: morning
+means Time-In ≤ `earliest_time_in + morning_window_min`; afternoon
+means Time-In ≥ that same cutoff (the boundary minute belongs to both
+bands). It never changes the window itself, day eligibility, session
+length, or the drop-off deadline — it only biases step 2 above. If the
+band doesn't fit inside the day's valid Time-In interval (e.g. a short
+availability window), it's silently dropped for that day and the full
+interval is used instead. Two operational notes: already-cached
+(printed) days are reused verbatim when the feature is toggled, so the
+debug CSV's `band` column always reflects the member's *current band
+assignment*, not necessarily where a cached time actually falls; and
+the realized morning/afternoon split is approximate rather than exact,
+both because of the hash's inherent randomness and because of
+per-day validity fallbacks.
 
 ## 4. Invariant check (`validate_schedule`)
 
