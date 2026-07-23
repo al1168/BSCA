@@ -172,6 +172,16 @@ def test_band_ignores_junk_in_pin_lists():
     assert band_for_member(7, rules) == "morning"
 
 
+def test_band_golden_values_frozen():
+    """Pins the id->band mapping: any change to the hash silently
+    re-buckets every real member, so it must fail loudly."""
+    rules = _band_rules()
+    assert band_for_member(0, rules) == "morning"
+    assert band_for_member(7, rules) == "morning"
+    assert band_for_member(24010, rules) == "morning"
+    assert band_for_member(24011, rules) == "morning"
+
+
 def test_band_lists_survive_overrides_merge():
     # JSON overrides arrive as lists; get_rules_for_plan turns them into
     # tuples -- membership checks must still work.

@@ -103,7 +103,9 @@ def band_for_member(center_id, rules):
         return "morning"
     if pinned("afternoon_members"):
         return "afternoon"
-    digest = hashlib.md5(str(member_id).encode("ascii")).hexdigest()
+    digest = hashlib.md5(
+        str(member_id).encode("ascii"), usedforsecurity=False
+    ).hexdigest()
     bucket = int(digest, 16) % 100
     if bucket < rules.get("morning_percent", 80):
         return "morning"
