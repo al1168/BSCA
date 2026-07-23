@@ -347,6 +347,9 @@ class SettingsDialog(QDialog):
         rules_form.addRow(self._morning_window_label,
                           self._morning_window_edit)
 
+        self._saved_morning_ids = list(rules.get("morning_members") or [])
+        self._saved_afternoon_ids = list(rules.get("afternoon_members") or [])
+
         self._morning_ids_edit = QLineEdit(
             _format_member_ids(rules.get("morning_members") or [])
         )
@@ -515,14 +518,16 @@ class SettingsDialog(QDialog):
                     self,
                     tr("settings.rules.band_conflict.title"),
                     tr("settings.rules.band_conflict.body",
-                       ids=", ".join(str(i) for i in overlap)),
+                       ids=_format_member_ids(overlap)),
                 )
                 return
         else:
-            # Fields are disabled while off; keep whatever parses,
-            # defensively dropping junk instead of blocking the save.
-            morning_ids = morning_ids or []
-            afternoon_ids = afternoon_ids or []
+            # Fields are disabled while off; junk left in a field must
+            # not erase the previously saved list.
+            if morning_ids is None:
+                morning_ids = self._saved_morning_ids
+            if afternoon_ids is None:
+                afternoon_ids = self._saved_afternoon_ids
         self._result = {
             "db_path": self._db_row.value(),
             "output_path": self._out_row.value(),
