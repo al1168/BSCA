@@ -81,7 +81,7 @@ def write_debug_csv(rows, path):
 
     `rows` is a list of dicts with keys: center_id, name, date, day,
     scheduled, reason, reason_detail, availability, availability_source,
-    absent, auth_days, placement_window, max_length. `scheduled` is
+    absent, auth_days, placement_window, max_length, band. `scheduled` is
     rendered as 'yes'/'no' for readability when opened in Excel. Returns
     the path written, or None when `rows` is empty (file not created)."""
     if not rows:
@@ -92,6 +92,7 @@ def write_debug_csv(rows, path):
             "center_id", "name", "date", "day", "scheduled", "reason",
             "reason_detail", "availability", "availability_source",
             "absent", "auth_days", "placement_window", "max_length",
+            "band",
         ])
         for row in rows:
             writer.writerow([
@@ -108,6 +109,7 @@ def write_debug_csv(rows, path):
                 row["auth_days"],
                 row["placement_window"],
                 row["max_length"],
+                row["band"],
             ])
     return path
 
@@ -156,7 +158,8 @@ def collect_debug_rows(member, ctx, year, month,
     rows = [
         {"center_id": member["center_id"], "name": name, **r}
         for r in build_debug_rows(
-            year, month, ctx, rules, start_day, end_day
+            year, month, ctx, rules, start_day, end_day,
+            center_id=member["center_id"],
         )
     ]
     if travel_failed:

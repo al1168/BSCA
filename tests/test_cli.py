@@ -726,7 +726,7 @@ def test_debug_flag_writes_per_member_debug_csvs(monkeypatch, tmp_path):
         assert lines[0] == (
             "center_id,name,date,day,scheduled,reason,reason_detail,"
             "availability,availability_source,absent,auth_days,"
-            "placement_window,max_length"
+            "placement_window,max_length,band"
         )
         # auth_days "1.3.4.5" → Mon/Wed/Thu/Fri in May 2026 = 17 days.
         assert len(lines) - 1 == 17
@@ -868,3 +868,48 @@ def test_collect_debug_rows_marks_rows_when_travel_unresolved(monkeypatch):
         "drop-off reserve 14m before 15:00 avail end; "
         "travel unresolved - default offsets shown"
     )
+
+
+def test_write_debug_csv_includes_band_column(tmp_path):
+    import new_monthly_schedule as cli
+    from datetime import date
+    rows = [{
+        "center_id": 1, "name": "Doe, Jane", "date": date(2026, 5, 4),
+        "day": "Mon", "scheduled": True, "reason": "",
+        "reason_detail": "", "availability": "",
+        "availability_source": "", "absent": "no", "auth_days": "1",
+        "placement_window": "08:00-16:00", "max_length": "04:00",
+        "band": "morning",
+    }]
+    path = tmp_path / "debug.csv"
+    cli.write_debug_csv(rows, str(path))
+    header, data = path.read_text(encoding="utf-8").strip().splitlines()
+    assert header.split(",")[-1] == "band"
+    assert data.split(",")[-1] == "morning"
+
+
+def test_collect_debug_rows_carries_band(monkeypatch):
+    import new_monthly_schedule as cli
+    from datetime import date
+    from monthly_schedule.eligibility_context import MemberContext
+
+    member = {"center_id": 1, "first_name": "A", "last_name": "B",
+              "health_plan": None}
+    ctx = MemberContext(
+        enrollments=[{"id": 1, "center_id": 1,
+                      "start_date": date(2026, 1, 1), "end_date": None}],
+        authorizations=[{"id": 1, "center_id": 1,
+                         "auth_start": date(2026, 1, 1),
+                         "auth_end": date(2026, 12, 31),
+                         "effective_start": date(2026, 1, 1),
+                         "effective_end": date(2026, 12, 31),
+                         "auth_days": "1"}],
+        absences=[], availabilities=[], one_offs=[],
+    )
+    rows = cli.collect_debug_rows(
+        member, ctx, 2026, 5,
+        schedule_rules_overrides={"band_enabled": True,
+                                  "morning_percent": 100},
+    )
+    assert rows
+    assert all(r["band"] == "morning" for r in rows)
