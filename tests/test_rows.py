@@ -498,3 +498,80 @@ def test_debug_open_day_has_empty_detail():
     rows = build_debug_rows(2026, 5, ctx, DEADLINE_E2E_RULES)
     assert rows[0]["scheduled"] is True
     assert rows[0]["reason_detail"] == ""
+
+
+# Band feature on; percent 100 -> every hashed member is morning.
+BAND_PLAN_RULES = {**PLAN_RULES,
+                   "band_enabled": True,
+                   "morning_percent": 100,
+                   "morning_window_min": 180,
+                   "morning_members": (),
+                   "afternoon_members": ()}
+
+
+def test_build_rows_applies_member_band():
+    rows = build_rows(2026, 5, _ctx_full_month("1,3,5"), BAND_PLAN_RULES,
+                      random.Random(0), center_id=1)
+    scheduled = [r for r in rows if r["time_in"]]
+    assert scheduled
+    for r in scheduled:
+        assert _to_min(r["time_in"]) <= 11 * 60   # 08:00 + 3h cutoff
+
+
+def test_build_rows_honors_afternoon_pin():
+    rules = {**BAND_PLAN_RULES, "afternoon_members": (1,)}
+    rows = build_rows(2026, 5, _ctx_full_month("1,3,5"), rules,
+                      random.Random(0), center_id=1)
+    scheduled = [r for r in rows if r["time_in"]]
+    assert scheduled
+    for r in scheduled:
+        assert _to_min(r["time_in"]) >= 11 * 60
+
+
+def test_build_rows_band_never_blocks_narrow_availability():
+    # Afternoon-pinned member available only 08:00-11:40: every day must
+    # still be scheduled (validity first), inside the availability.
+    avail = [
+        {"id": d, "center_id": 1,
+         "effective_start_date": date(2026, 1, 1),
+         "effective_end_date": None,
+         "day_of_week": d, "avail_start": "08:00", "avail_end": "11:40"}
+        for d in (1, 3, 5)
+    ]
+    ctx = MemberContext(
+        enrollments=[{"id": 1, "center_id": 1,
+                      "start_date": date(2026, 1, 1), "end_date": None}],
+        authorizations=[{"id": 1, "center_id": 1,
+                         "auth_start": date(2026, 1, 1),
+                         "auth_end": date(2026, 12, 31),
+                         "effective_start": date(2026, 1, 1),
+                         "effective_end": date(2026, 12, 31),
+                         "auth_days": "1,3,5"}],
+        absences=[], availabilities=avail, one_offs=[],
+    )
+    rules = {**BAND_PLAN_RULES, "afternoon_members": (1,)}
+    rows = build_rows(2026, 5, ctx, rules, random.Random(0), center_id=1)
+    scheduled = [r for r in rows if r["time_in"]]
+    assert len(scheduled) == 13          # same Mon/Wed/Fri count as unbanded
+    for r in scheduled:
+        assert _to_min(r["time_in"]) >= _to_min("08:00")
+        assert _to_min(r["time_out"]) <= _to_min("11:40")
+
+
+def test_build_rows_legacy_rules_without_band_keys_still_work():
+    rows = build_rows(2026, 5, _ctx_full_month(), PLAN_RULES,
+                      random.Random(0), center_id=1)
+    assert len(rows) == 31
+
+
+def test_debug_rows_have_band_column():
+    rows = build_debug_rows(2026, 5, _ctx_full_month("1"),
+                            BAND_PLAN_RULES, center_id=1)
+    assert rows
+    assert all(r["band"] == "morning" for r in rows)
+
+
+def test_debug_rows_band_blank_without_center_id():
+    rows = build_debug_rows(2026, 5, _ctx_full_month("1"), PLAN_RULES)
+    assert rows
+    assert all(r["band"] == "" for r in rows)

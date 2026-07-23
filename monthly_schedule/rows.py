@@ -8,7 +8,7 @@ from monthly_schedule.per_day import (
     compute_day_eligibility, OneOffConflict, REASON_DAY_WINDOW_TOO_NARROW,
 )
 from monthly_schedule.daily_schedule import build_daily_schedule
-from monthly_schedule.rules import parse_hhmm, format_minutes
+from monthly_schedule.rules import parse_hhmm, format_minutes, band_for_member
 from monthly_schedule.time_cache import lookup_times, store_times
 
 DAY_ABBR = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun"}
@@ -35,7 +35,11 @@ def build_rows(year, month, ctx, plan_rules, rng,
     times. Cache misses (or stale entries that fail the plan/travel/
     window invalidation guard) are filled by build_daily_schedule and
     stored back into `time_cache` for next time. `time_cache` is mutated
-    in place; the caller persists it."""
+    in place; the caller persists it.
+
+    Time-In placement honors the member's morning/afternoon band
+    (band_for_member) when the feature is enabled; cached days are
+    reused verbatim regardless of band."""
     rows = []
     use_cache = (
         time_cache is not None and center_id is not None
@@ -45,6 +49,7 @@ def build_rows(year, month, ctx, plan_rules, rng,
         parse_hhmm(plan_rules["earliest_time_in"]),
         parse_hhmm(plan_rules["latest_time_out"]),
     )
+    band = band_for_member(center_id, plan_rules)
     for day in get_month_dates(year, month, start_day, end_day):
         row = {"date": day, "day": DAY_ABBR[day.isoweekday()]}
         result = compute_day_eligibility(day, ctx, plan_rules)
@@ -64,6 +69,7 @@ def build_rows(year, month, ctx, plan_rules, rng,
                 times = build_daily_schedule(
                     plan_rules, rng,
                     window=result.placement_window,
+                    band=band,
                 )
                 if use_cache:
                     store_times(
@@ -103,7 +109,7 @@ def _reason_detail(reason, availability, reserve, in_lo, out_hi,
 
 
 def build_debug_rows(year, month, ctx, plan_rules,
-                     start_day=None, end_day=None):
+                     start_day=None, end_day=None, center_id=None):
     """Diagnostic rows for the debug CSV (one per authorized day).
 
     A day is "authorized" iff there's an active authorization on it AND
@@ -118,8 +124,10 @@ def build_debug_rows(year, month, ctx, plan_rules,
     window for the day) and `availability_source` (recurring/one-off/''),
     `absent` ('yes (LeaveType)'/'no'), `auth_days` (e.g. '1,3,5'),
     `placement_window` (day bounds intersected with availability,
-    populated even for REASON_DAY_WINDOW_TOO_NARROW rejections) and
-    `max_length` (the longest session that fits, HH:MM).
+    populated even for REASON_DAY_WINDOW_TOO_NARROW rejections),
+    `max_length` (the longest session that fits, HH:MM) and `band`
+    ("morning"/"afternoon" on every row when the feature is on and a
+    center_id was given; '' otherwise — band is a per-member property).
 
     `scheduled` is True when compute_day_eligibility accepted the day;
     otherwise False with a non-empty `reason` from REASON_DAY_*. A
@@ -127,6 +135,7 @@ def build_debug_rows(year, month, ctx, plan_rules,
     CSV always completes even when the schedule build itself fails.
     """
     rows = []
+    band = band_for_member(center_id, plan_rules) or ""
     for day in get_month_dates(year, month, start_day, end_day):
         auth = ctx.active_authorization(day)
         if auth is None:
@@ -188,6 +197,7 @@ def build_debug_rows(year, month, ctx, plan_rules,
         rows.append({
             "date": day,
             "day": DAY_ABBR[day.isoweekday()],
+            "band": band,
             "scheduled": scheduled,
             "reason": reason,
             "reason_detail": reason_detail,
