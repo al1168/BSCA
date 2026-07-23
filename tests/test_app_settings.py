@@ -167,3 +167,42 @@ def test_dropoff_by_avail_end_saved_false_respected(settings_file):
     from gui import app_settings
     s = app_settings.load()
     assert s["schedule_rules"]["dropoff_by_avail_end"] is False
+
+
+def test_band_defaults_on_fresh_install(settings_file):
+    from gui import app_settings
+    rules = app_settings.load()["schedule_rules"]
+    assert rules["band_enabled"] is False
+    assert rules["morning_percent"] == 80
+    assert rules["morning_window_min"] == 180
+    assert rules["morning_members"] == []
+    assert rules["afternoon_members"] == []
+
+
+def test_band_keys_missing_filled_off(settings_file):
+    # A settings file saved before this feature has no band keys -- the
+    # loader fills them from DEFAULTS with the feature OFF.
+    settings_file.write_text(json.dumps({
+        "schedule_rules": {"earliest_time_in": "09:00"}
+    }))
+    from gui import app_settings
+    rules = app_settings.load()["schedule_rules"]
+    assert rules["band_enabled"] is False
+    assert rules["earliest_time_in"] == "09:00"
+
+
+def test_band_settings_round_trip(settings_file):
+    from gui import app_settings
+    s = app_settings.load()
+    s["schedule_rules"]["band_enabled"] = True
+    s["schedule_rules"]["morning_percent"] = 65
+    s["schedule_rules"]["morning_window_min"] = 120
+    s["schedule_rules"]["morning_members"] = [24010, 24011]
+    s["schedule_rules"]["afternoon_members"] = [24012]
+    app_settings.save(s)
+    rules = app_settings.load()["schedule_rules"]
+    assert rules["band_enabled"] is True
+    assert rules["morning_percent"] == 65
+    assert rules["morning_window_min"] == 120
+    assert rules["morning_members"] == [24010, 24011]
+    assert rules["afternoon_members"] == [24012]

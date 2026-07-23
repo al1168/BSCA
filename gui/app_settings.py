@@ -20,6 +20,11 @@ DEFAULTS = {
         "time_in_drift_min": [2, 2],
         "time_out_drift_min": [2, 2],
         "dropoff_by_avail_end": True,
+        "band_enabled": False,
+        "morning_percent": 80,
+        "morning_window_min": 180,
+        "morning_members": [],
+        "afternoon_members": [],
     },
 }
 
