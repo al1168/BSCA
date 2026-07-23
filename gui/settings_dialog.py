@@ -149,6 +149,23 @@ def _qtime_to_minutes(t: QTime) -> int:
     return t.hour() * 60 + t.minute()
 
 
+def _format_member_ids(ids) -> str:
+    return ", ".join(str(i) for i in ids)
+
+
+def parse_member_ids(text: str):
+    """'24010, 24011' -> [24010, 24011]. Blank -> []. Returns None when
+    any token is not an integer (caller warns and blocks the save)."""
+    tokens = [t for t in text.replace(",", " ").split() if t]
+    ids = []
+    for t in tokens:
+        try:
+            ids.append(int(t))
+        except ValueError:
+            return None
+    return ids
+
+
 class _RangeSpins(QHBoxLayout):
     """Two side-by-side QSpinBoxes for a (min, max) integer range."""
 
@@ -302,6 +319,52 @@ class SettingsDialog(QDialog):
         rules_form.addRow(self._dropoff_deadline_label,
                           self._dropoff_deadline_check)
 
+        self._band_enabled_check = QCheckBox()
+        self._band_enabled_check.setChecked(
+            bool(rules.get("band_enabled", False))
+        )
+        self._band_enabled_label = QLabel()
+        rules_form.addRow(self._band_enabled_label,
+                          self._band_enabled_check)
+
+        self._morning_percent_spin = QSpinBox()
+        self._morning_percent_spin.setRange(0, 100)
+        self._morning_percent_spin.setValue(
+            int(rules.get("morning_percent", 80))
+        )
+        self._morning_percent_spin.setFixedWidth(64)
+        self._morning_percent_label = QLabel()
+        rules_form.addRow(self._morning_percent_label,
+                          self._morning_percent_spin)
+
+        self._morning_window_edit = QTimeEdit()
+        self._morning_window_edit.setDisplayFormat("HH:mm")
+        self._morning_window_edit.setTime(
+            _minutes_to_qtime(int(rules.get("morning_window_min", 180)))
+        )
+        self._morning_window_edit.setFixedWidth(82)
+        self._morning_window_label = QLabel()
+        rules_form.addRow(self._morning_window_label,
+                          self._morning_window_edit)
+
+        self._morning_ids_edit = QLineEdit(
+            _format_member_ids(rules.get("morning_members") or [])
+        )
+        self._morning_ids_label = QLabel()
+        rules_form.addRow(self._morning_ids_label, self._morning_ids_edit)
+
+        self._afternoon_ids_edit = QLineEdit(
+            _format_member_ids(rules.get("afternoon_members") or [])
+        )
+        self._afternoon_ids_label = QLabel()
+        rules_form.addRow(self._afternoon_ids_label,
+                          self._afternoon_ids_edit)
+
+        # Grey out the band fields while the feature is off, so it's
+        # obvious they have no effect.
+        self._band_enabled_check.toggled.connect(self._update_band_enabled)
+        self._update_band_enabled()
+
         layout.addWidget(self._rules_group)
 
         self._test_btn = None
@@ -350,6 +413,25 @@ class SettingsDialog(QDialog):
         self._dropoff_deadline_label.setText(
             tr("settings.rules.dropoff_deadline")
         )
+        self._band_enabled_label.setText(tr("settings.rules.band_enabled"))
+        self._morning_percent_label.setText(
+            tr("settings.rules.morning_percent")
+        )
+        self._morning_window_label.setText(
+            tr("settings.rules.morning_window")
+        )
+        self._morning_ids_label.setText(
+            tr("settings.rules.morning_members")
+        )
+        self._afternoon_ids_label.setText(
+            tr("settings.rules.afternoon_members")
+        )
+
+    def _update_band_enabled(self):
+        on = self._band_enabled_check.isChecked()
+        for w in (self._morning_percent_spin, self._morning_window_edit,
+                  self._morning_ids_edit, self._afternoon_ids_edit):
+            w.setEnabled(on)
 
     def _test_connection(self):
         db_path = self._db_row.value()
@@ -416,6 +498,31 @@ class SettingsDialog(QDialog):
                 tr("settings.rules.invalid_range.body"),
             )
             return
+        band_enabled = self._band_enabled_check.isChecked()
+        morning_ids = parse_member_ids(self._morning_ids_edit.text())
+        afternoon_ids = parse_member_ids(self._afternoon_ids_edit.text())
+        if band_enabled:
+            if morning_ids is None or afternoon_ids is None:
+                QMessageBox.warning(
+                    self,
+                    tr("settings.rules.band_invalid_ids.title"),
+                    tr("settings.rules.band_invalid_ids.body"),
+                )
+                return
+            overlap = sorted(set(morning_ids) & set(afternoon_ids))
+            if overlap:
+                QMessageBox.warning(
+                    self,
+                    tr("settings.rules.band_conflict.title"),
+                    tr("settings.rules.band_conflict.body",
+                       ids=", ".join(str(i) for i in overlap)),
+                )
+                return
+        else:
+            # Fields are disabled while off; keep whatever parses,
+            # defensively dropping junk instead of blocking the save.
+            morning_ids = morning_ids or []
+            afternoon_ids = afternoon_ids or []
         self._result = {
             "db_path": self._db_row.value(),
             "output_path": self._out_row.value(),
@@ -430,6 +537,12 @@ class SettingsDialog(QDialog):
                 "time_out_drift_min": list(time_out),
                 "dropoff_by_avail_end":
                     self._dropoff_deadline_check.isChecked(),
+                "band_enabled": band_enabled,
+                "morning_percent": self._morning_percent_spin.value(),
+                "morning_window_min":
+                    _qtime_to_minutes(self._morning_window_edit.time()),
+                "morning_members": morning_ids,
+                "afternoon_members": afternoon_ids,
             },
         }
         self.accept()

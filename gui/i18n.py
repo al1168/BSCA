@@ -92,6 +92,29 @@ STRINGS: dict[str, dict[str, str]] = {
         "settings.rules.dropoff_deadline": (
             "Drop off by availability end (home care):"
         ),
+        "settings.rules.band_enabled": (
+            "Morning/afternoon distribution:"
+        ),
+        "settings.rules.morning_percent": "Morning members (%):",
+        "settings.rules.morning_window": (
+            "Morning window length (HH:MM after earliest Time-In):"
+        ),
+        "settings.rules.morning_members": (
+            "Always-morning member IDs (comma-separated):"
+        ),
+        "settings.rules.afternoon_members": (
+            "Always-afternoon member IDs (comma-separated):"
+        ),
+        "settings.rules.band_invalid_ids.title": "Invalid Member IDs",
+        "settings.rules.band_invalid_ids.body": (
+            "Member ID lists must be numbers separated by commas "
+            "(e.g. 24010, 24011)."
+        ),
+        "settings.rules.band_conflict.title": "Member In Both Lists",
+        "settings.rules.band_conflict.body": (
+            "These member IDs are in both the morning and afternoon "
+            "lists: {ids}. Remove them from one list."
+        ),
         "settings.rules.invalid_range.title": "Invalid Range",
         "settings.rules.invalid_range.body": (
             "Each minimum value must be on or before its maximum. "
@@ -279,6 +302,26 @@ STRINGS: dict[str, dict[str, str]] = {
         ),
         "settings.rules.dropoff_deadline": (
             "在可用时间结束前送回（家庭护理）："
+        ),
+        "settings.rules.band_enabled": "上午/下午分布：",
+        "settings.rules.morning_percent": "上午成员比例（%）：",
+        "settings.rules.morning_window": (
+            "上午时段长度（最早签到后的 时:分）："
+        ),
+        "settings.rules.morning_members": (
+            "固定上午的成员 ID（逗号分隔）："
+        ),
+        "settings.rules.afternoon_members": (
+            "固定下午的成员 ID（逗号分隔）："
+        ),
+        "settings.rules.band_invalid_ids.title": "成员 ID 无效",
+        "settings.rules.band_invalid_ids.body": (
+            "成员 ID 列表必须是用逗号分隔的数字（例如 24010, 24011）。"
+        ),
+        "settings.rules.band_conflict.title": "成员同时在两个列表中",
+        "settings.rules.band_conflict.body": (
+            "以下成员 ID 同时出现在上午和下午列表中：{ids}。"
+            "请从其中一个列表中移除。"
         ),
         "settings.rules.invalid_range.title": "范围无效",
         "settings.rules.invalid_range.body": (
