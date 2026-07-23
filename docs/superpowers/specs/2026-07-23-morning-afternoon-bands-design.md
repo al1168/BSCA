@@ -33,6 +33,10 @@ today and always win:
 
 ## Decision summary (user-confirmed)
 
+- **Opt-in**: the whole feature sits behind an enable checkbox,
+  **off by default**. Until the user turns it on, every member is
+  placed exactly as today (uniform across the valid window); pins and
+  percentages are ignored while off.
 - **Per person**, not per day: a member's band applies to all their
   days (a "morning person" all month).
 - **Stable across months and runs**: assignment is derived
@@ -49,6 +53,7 @@ today and always win:
 `band_for_member(center_id, rules)`:
 
 ```
+if not band_enabled:                return None   # feature off
 if center_id in morning_members:    return "morning"
 if center_id in afternoon_members:  return "afternoon"
 bucket = int(md5(str(center_id)).hexdigest(), 16) % 100
@@ -77,6 +82,9 @@ Rejected alternatives:
 the settings loader's known-key filter drops keys absent from
 DEFAULTS):
 
+- `"band_enabled": False` — master switch; **off by default**. While
+  off, `band_for_member` returns None for everyone and the scheduler
+  behaves exactly as today.
 - `"morning_percent": 80` — share of members assigned morning, 0–100.
 - `"morning_window_min": 180` — morning band length in minutes,
   measured from `earliest_time_in`.
@@ -119,10 +127,9 @@ Note the band constrains **Time-In only**: a morning member starting
 at 10:59 with a 4h session ends at 14:59 — intended (the user's
 definition is about start times).
 
-Escape hatch: setting the morning window length to cover the whole
-schedulable day (e.g. 05:00) makes the cutoff exceed every
-`latest_in`, so morning members get the full range and afternoon
-members hit the fallback — i.e. today's uniform behavior.
+Turning the feature off (the `band_enabled` checkbox) restores
+today's uniform behavior outright — `band` arrives as None and no
+narrowing happens.
 
 ### 3. Wiring (`monthly_schedule/rows.py`)
 
@@ -150,8 +157,12 @@ verify the realized distribution across a run's CSVs.
 
 ### 6. GUI (`gui/settings_dialog.py`)
 
-Four new rows in the Scheduling Rules group:
+Five new rows in the Scheduling Rules group:
 
+- **Morning/afternoon distribution** — `QCheckBox`, from
+  `band_enabled` (unchecked by default). When unchecked, the four
+  rows below are greyed out (`setEnabled(False)`) so it's obvious
+  they have no effect.
 - **Morning members (%)** — `QSpinBox` 0–100, from
   `morning_percent`.
 - **Morning window length (HH:MM)** — `QTimeEdit` rendered as a
@@ -167,7 +178,11 @@ Save-time validation (extends the existing guardrail message box):
   list; whitespace tolerated).
 - The same ID in both lists → warn and block save.
 
-`gui/i18n.py`: new keys `settings.rules.morning_percent`,
+ID-list validation (below) runs only when the checkbox is on, so a
+disabled feature never blocks saving.
+
+`gui/i18n.py`: new keys `settings.rules.band_enabled`,
+`settings.rules.morning_percent`,
 `settings.rules.morning_window`, `settings.rules.morning_members`,
 `settings.rules.afternoon_members`, plus a
 `settings.rules.band_conflict` warning body — English and Chinese,
@@ -191,7 +206,9 @@ same pattern as the other rule labels.
 
 ## Testing
 
-- `tests/test_rules.py` — `band_for_member`: deterministic across
+- `tests/test_rules.py` — `band_for_member`: feature off (or key
+  missing, e.g. older settings file) → None for every member,
+  including pinned ones; deterministic across
   calls; distribution over ~1,000 synthetic IDs within a few points of
   80/20; percent 0/100 edges; pins win over the hash; pins obey
   morning-wins on (defensive) overlap; non-integer junk in lists
