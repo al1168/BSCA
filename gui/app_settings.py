@@ -1,7 +1,42 @@
 import json
 import os
+import shutil
+import sys
 
-_SETTINGS_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "bsca_settings.json")
+from gui.app_paths import app_data_dir
+
+# Test seam: when set (tests monkeypatch a str path), used verbatim.
+_SETTINGS_FILE = None
+
+_SOURCE_DIR = os.path.dirname(os.path.dirname(__file__))
+
+
+def _settings_path() -> str:
+    """Resolve where bsca_settings.json lives.
+
+    Running from source: the repo root, as always. Frozen (PyInstaller
+    exe): the per-user app-data dir — the onefile exe unpacks into a
+    random temp dir each launch, so a path anchored to __file__
+    evaporates on exit and every launch looked like a first run (bug,
+    2026-07-23). On the first frozen run, a settings file found next to
+    the exe or in its parent folder (the repo root for dist\\ builds)
+    is copied over so the user keeps their existing setup."""
+    if _SETTINGS_FILE:
+        return _SETTINGS_FILE
+    if not getattr(sys, "frozen", False):
+        return os.path.join(_SOURCE_DIR, "bsca_settings.json")
+    path = os.path.join(app_data_dir(), "bsca_settings.json")
+    if not os.path.exists(path):
+        exe_dir = os.path.dirname(sys.executable)
+        for legacy_dir in (exe_dir, os.path.dirname(exe_dir)):
+            legacy = os.path.join(legacy_dir, "bsca_settings.json")
+            if os.path.isfile(legacy):
+                try:
+                    shutil.copyfile(legacy, path)
+                except OSError:
+                    pass  # non-fatal: first-run setup asks again
+                break
+    return path
 
 DEFAULTS = {
     "db_path": r".",
@@ -30,12 +65,12 @@ DEFAULTS = {
 
 
 def exists() -> bool:
-    return os.path.isfile(_SETTINGS_FILE)
+    return os.path.isfile(_settings_path())
 
 
 def load() -> dict:
     try:
-        with open(_SETTINGS_FILE, encoding="utf-8") as f:
+        with open(_settings_path(), encoding="utf-8") as f:
             data = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         # dict() copies top-level keys; schedule_rules needs its own
@@ -64,7 +99,7 @@ def load() -> dict:
 
 
 def save(settings: dict) -> None:
-    with open(_SETTINGS_FILE, "w", encoding="utf-8") as f:
+    with open(_settings_path(), "w", encoding="utf-8") as f:
         json.dump(settings, f, indent=2)
 
 

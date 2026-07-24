@@ -1,4 +1,5 @@
 import json
+import sys
 
 import pytest
 
@@ -206,3 +207,81 @@ def test_band_settings_round_trip(settings_file):
     assert rules["morning_window_min"] == 120
     assert rules["morning_members"] == [24010, 24011]
     assert rules["afternoon_members"] == [24012]
+
+
+# ── Frozen (PyInstaller exe) settings location ──────────────────────
+# The onefile exe unpacks to a random temp dir each launch, so a
+# settings path anchored to __file__ evaporates on exit (the
+# "settings don't save" bug, 2026-07-23). Frozen builds must use the
+# stable per-user app-data dir instead, migrating any legacy file.
+
+@pytest.fixture
+def frozen_env(monkeypatch, tmp_path):
+    """Simulate running as dist\MonthlyScheduleGenerator.exe with a
+    private APPDATA. Returns (expected_appdata_file, exe_dir)."""
+    monkeypatch.setattr("gui.app_settings._SETTINGS_FILE", None)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    exe_dir = tmp_path / "dist"
+    exe_dir.mkdir()
+    monkeypatch.setattr(
+        sys, "executable", str(exe_dir / "MonthlyScheduleGenerator.exe")
+    )
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    expected = (tmp_path / "appdata" / "BowerySeniorCare"
+                / "bsca_settings.json")
+    return expected, exe_dir
+
+
+def test_frozen_settings_persist_in_appdata(frozen_env):
+    expected, _exe_dir = frozen_env
+    from gui import app_settings
+    s = app_settings.load()
+    s["google_api_key"] = "persisted"
+    app_settings.save(s)
+    assert expected.is_file()
+    assert app_settings.exists()
+    assert app_settings.load()["google_api_key"] == "persisted"
+
+
+def test_frozen_migrates_settings_next_to_exe(frozen_env):
+    expected, exe_dir = frozen_env
+    (exe_dir / "bsca_settings.json").write_text(
+        json.dumps({"google_api_key": "from-exe-dir"})
+    )
+    from gui import app_settings
+    assert app_settings.exists()
+    assert app_settings.load()["google_api_key"] == "from-exe-dir"
+    assert expected.is_file()   # copied, not just read in place
+
+
+def test_frozen_migrates_settings_from_exe_parent(frozen_env):
+    # dist\ lives inside the repo, whose root holds the settings from
+    # source-mode runs — the most common migration source.
+    expected, exe_dir = frozen_env
+    (exe_dir.parent / "bsca_settings.json").write_text(
+        json.dumps({"google_api_key": "from-repo-root"})
+    )
+    from gui import app_settings
+    assert app_settings.load()["google_api_key"] == "from-repo-root"
+    assert expected.is_file()
+
+
+def test_frozen_appdata_file_wins_over_legacy(frozen_env):
+    expected, exe_dir = frozen_env
+    expected.parent.mkdir(parents=True)
+    expected.write_text(json.dumps({"google_api_key": "appdata"}))
+    (exe_dir / "bsca_settings.json").write_text(
+        json.dumps({"google_api_key": "legacy"})
+    )
+    from gui import app_settings
+    assert app_settings.load()["google_api_key"] == "appdata"
+
+
+def test_unfrozen_default_path_is_repo_root(monkeypatch):
+    import os
+    monkeypatch.setattr("gui.app_settings._SETTINGS_FILE", None)
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    from gui import app_settings
+    path = app_settings._settings_path()
+    repo_root = os.path.dirname(os.path.dirname(app_settings.__file__))
+    assert path == os.path.join(repo_root, "bsca_settings.json")
