@@ -303,17 +303,17 @@ def scope_caption(counts, mode, plan_code, month_name, year):
         n = str(entry["active"]) if entry else "0"
     else:
         n = str(counts["total_active"])
-    key = "scope.plan" if mode == "plan" else "scope.all"
+    key = "plan_table.scope.plan" if mode == "plan" else "plan_table.scope.all"
     return tr(key, count=n, plan=plan_code, month=month_name, year=year)
 ```
 
 In `gui/i18n.py` add to the **en** block (after `"opts.print"`):
 
 ```python
-        "scope.plan": (
+        "plan_table.scope.plan": (
             "{count} active member(s) for {plan} in {month} {year}"
         ),
-        "scope.all": (
+        "plan_table.scope.all": (
             "{count} active member(s) across all plans in {month} {year}"
         ),
 ```
@@ -321,8 +321,8 @@ In `gui/i18n.py` add to the **en** block (after `"opts.print"`):
 and to the **zh** block (after its `"opts.print"`):
 
 ```python
-        "scope.plan": "{month} {year}：{plan} 共 {count} 名在册成员",
-        "scope.all": "{month} {year}：全部计划共 {count} 名在册成员",
+        "plan_table.scope.plan": "{month} {year}：{plan} 共 {count} 名在册成员",
+        "plan_table.scope.all": "{month} {year}：全部计划共 {count} 名在册成员",
 ```
 
 In `gui/main_window.py`: delete the module-level `PLAN_CODES = [...]` line and add `from gui.plan_counts import PLAN_CODES` with the other `gui.` imports.
@@ -474,7 +474,7 @@ git commit -m "feat(gui): background worker for plan member counts"
 
 No new automated tests in this task (the repo has no QWidget-level test harness); logic stays in the tested view-model, and Step 4 smoke-verifies headlessly.
 
-- [ ] **Step 1: i18n keys.** In `gui/i18n.py` add to **en** (after the `scope.all` key from Task 2):
+- [ ] **Step 1: i18n keys.** In `gui/i18n.py` add to **en** (after the `plan_table.scope.all` key from Task 2 (renamed from the plan's original `scope.*` — those keys already existed for the run summary)):
 
 ```python
         "plan_table.header.plan": "Plan",
