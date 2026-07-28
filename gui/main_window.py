@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
 
 from gui import app_settings
 from gui.i18n import LanguageManager, tr
+from gui.plan_counts import PLAN_CODES
 from gui.printing import (
     printable_schedules, default_printer_name, partition_printed,
 )
@@ -35,8 +36,6 @@ from gui.settings_dialog import SettingsDialog
 from gui.worker import ScheduleWorker
 from new_monthly_schedule import REASON_NOT_FOUND, parse_center_ids, resolve_output_dir
 from monthly_schedule.per_day import REASON_NOT_ENROLLED, REASON_NO_AUTH, REASON_ABSENT_MONTH
-
-PLAN_CODES = ["HF", "HOF", "VCM", "BCBS", "ES", "AE", "HC", "BCSB"]
 
 
 def _translate_reason(reason: str) -> str:

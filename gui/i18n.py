@@ -55,6 +55,14 @@ STRINGS: dict[str, dict[str, str]] = {
         "opts.generate": "Generate Schedule",
         "opts.open_folder": "Open Output Folder",
         "opts.print": "Print All Schedules",
+        # plan-counts scope caption (spec 2026-07-28; distinct from the
+        # scope.* keys used by the run-summary builder below)
+        "plan_table.scope.plan": (
+            "{count} active member(s) for {plan} in {month} {year}"
+        ),
+        "plan_table.scope.all": (
+            "{count} active member(s) across all plans in {month} {year}"
+        ),
         "print.title": "Print Schedules",
         "print.default_printer": "the default printer",
         "print.none": "No generated schedules to print.",
@@ -292,6 +300,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "opts.generate": "生成日程表",
         "opts.open_folder": "打开输出文件夹",
         "opts.print": "打印所有日程表",
+        "plan_table.scope.plan": "{month} {year}：{plan} 共 {count} 名在册成员",
+        "plan_table.scope.all": "{month} {year}：全部计划共 {count} 名在册成员",
         "print.title": "打印日程表",
         "print.default_printer": "默认打印机",
         "print.none": "没有可打印的已生成日程表。",
