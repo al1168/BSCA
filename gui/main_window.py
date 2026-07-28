@@ -4,7 +4,7 @@ import os
 import subprocess
 import sys
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QIntValidator
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -30,6 +30,7 @@ from PyQt6.QtWidgets import (
 )
 
 from gui import app_settings
+from gui.counts_worker import CountsWorker
 from gui.i18n import LanguageManager, tr
 from gui.plan_counts import PLAN_CODES, plan_table_rows, scope_caption
 from gui.printing import (
@@ -61,6 +62,12 @@ class MainWindow(QWidget):
         self._settings = app_settings.load()
         self._worker = None
         self._print_worker = None
+        self._counts_workers = set()  # retain refs until threads finish
+        self._counts_seq = 0          # stale-result guard
+        self._counts_timer = QTimer(self)
+        self._counts_timer.setSingleShot(True)
+        self._counts_timer.setInterval(300)   # debounce month spinning
+        self._counts_timer.timeout.connect(self._start_counts_refresh)
         self._last_out_dir = None
         self._last_generated = []   # .xlsx paths from the last run
         # Abspaths successfully printed this session; lets a re-click
@@ -280,6 +287,12 @@ class MainWindow(QWidget):
         # so a user can't pick April 31 or Feb 29 in a non-leap year.
         self._month_combo.currentIndexChanged.connect(self._update_range_max)
         self._year_spin.valueChanged.connect(self._update_range_max)
+        self._month_combo.currentIndexChanged.connect(
+            lambda _i: self._counts_timer.start()
+        )
+        self._year_spin.valueChanged.connect(
+            lambda _v: self._counts_timer.start()
+        )
         self._update_range_max()
         root.addWidget(self._when_box)
 
@@ -355,6 +368,8 @@ class MainWindow(QWidget):
         LanguageManager.instance().languageChanged.connect(self._retranslate)
         self._retranslate()
 
+        self._start_counts_refresh()
+
     # ── Retranslate ───────────────────────────────────────────────
 
     def _retranslate(self):
@@ -420,7 +435,11 @@ class MainWindow(QWidget):
             return
         rows = self._plan_table.selectionModel().selectedRows()
         if not rows:
-            return   # programmatic clear — mode drives this case
+            # Ctrl+click deselect: snap the highlight back to the mode's
+            # row (runs under the guard inside _sync_plan_selection).
+            if self._who_group.checkedId() in (2, 3):
+                self._sync_plan_selection()
+            return
         self._on_plan_row_clicked(rows[0].row(), 0)
 
     def _sync_plan_selection(self):
@@ -494,14 +513,55 @@ class MainWindow(QWidget):
         if lang:
             LanguageManager.instance().set_language(lang)
 
+    def _start_counts_refresh(self):
+        """Fetch counts for the selected month on a background thread.
+        Only the latest request's result is applied."""
+        self._counts_seq += 1
+        seq = self._counts_seq
+        self._plan_counts = None
+        self._counts_failed = False
+        self._update_plan_table()
+        worker = CountsWorker(
+            self._settings.get("db_path", ""),
+            self._year_spin.value(),
+            self._month_combo.currentIndex() + 1,
+        )
+        worker.finished.connect(
+            lambda ok, payload, w=worker:
+                self._on_counts_finished(seq, w, ok, payload)
+        )
+        self._counts_workers.add(worker)
+        worker.start()
+
+    def _on_counts_finished(self, seq: int, worker, success: bool,
+                            payload: dict):
+        # The worker's custom finished signal fires BEFORE its thread
+        # exits; wait() (near-instant here) then discard, so a running
+        # QThread is never garbage-collected mid-run (hard crash).
+        # This must happen on the stale path too.
+        worker.wait()
+        self._counts_workers.discard(worker)
+        if seq != self._counts_seq:
+            return   # a newer request superseded this one
+        if success:
+            self._plan_counts = payload
+            self._counts_failed = False
+        else:
+            self._plan_counts = None
+            self._counts_failed = True
+        self._update_plan_table()
+
     def _open_settings(self):
         dlg = SettingsDialog(self._settings, self)
         if dlg.exec():
             result = dlg.get_settings()
             if result:
+                old_db = self._settings.get("db_path")
                 self._settings.update(result)
                 app_settings.save(self._settings)
                 self._out_label.setText(self._settings.get("output_path", "."))
+                if self._settings.get("db_path") != old_db:
+                    self._start_counts_refresh()
 
     def _open_output_folder(self):
         if self._last_out_dir and os.path.isdir(self._last_out_dir):

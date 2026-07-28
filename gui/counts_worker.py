@@ -1,7 +1,12 @@
 """Background thread that fetches per-plan member counts.
 
 Counts are informational (spec 2026-07-28): failures are emitted, not
-raised — the main window shows an 'unavailable' caption, never a popup."""
+raised — the main window shows an 'unavailable' caption, never a popup.
+
+Callers must retain a reference to each started worker until its
+thread has actually finished — the custom `finished` signal fires
+before the thread exits, so call wait() in the receiving slot before
+dropping the reference."""
 
 import calendar
 import datetime
