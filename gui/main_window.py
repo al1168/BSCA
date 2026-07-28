@@ -551,6 +551,17 @@ class MainWindow(QWidget):
             self._counts_failed = True
         self._update_plan_table()
 
+    def closeEvent(self, event):
+        """Block close until in-flight counts fetches finish, so a
+        running QThread is never garbage-collected at interpreter
+        teardown (hard crash on exit). Counts queries are short —
+        worst case one ODBC connect timeout. Schedule/print workers
+        keep their pre-existing behavior (their buttons stay disabled
+        while they run)."""
+        for worker in list(self._counts_workers):
+            worker.wait()
+        super().closeEvent(event)
+
     def _open_settings(self):
         dlg = SettingsDialog(self._settings, self)
         if dlg.exec():
