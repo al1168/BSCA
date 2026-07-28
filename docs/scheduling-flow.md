@@ -178,3 +178,16 @@ column carries the member's `morning`/`afternoon` assignment on every
 row when the distribution feature is on (blank otherwise); it reflects
 the member's current band, not necessarily where an already-cached day's
 time actually landed.
+
+## GUI: the Entire Plan table
+
+The GUI's Entire Plan selector is a table, not a plain plan-code
+dropdown. For the selected month, each plan row shows an **active**
+member count (an Enrollment row overlapping any day of the month —
+the same overlap rule `is_enrolled` uses above) and an **inactive**
+count (the plan's remaining Contacts). These counts are informational
+only: they help the user gauge scale before running, but they play no
+part in `compute_day_eligibility` or `compute_month_failure`.
+Eligibility still decides who actually gets scheduled, so an "active"
+member can still be skipped (no active authorization, absent the whole
+month, etc.) and still show up in `skipped_members_<YYYY-MM-DD>.csv`.
