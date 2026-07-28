@@ -7,11 +7,13 @@ import sys
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QIntValidator
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QButtonGroup,
     QCheckBox,
     QComboBox,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -21,13 +23,15 @@ from PyQt6.QtWidgets import (
     QRadioButton,
     QSpinBox,
     QStackedWidget,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from gui import app_settings
 from gui.i18n import LanguageManager, tr
-from gui.plan_counts import PLAN_CODES
+from gui.plan_counts import PLAN_CODES, plan_table_rows, scope_caption
 from gui.printing import (
     printable_schedules, default_printer_name, partition_printed,
 )
@@ -141,17 +145,13 @@ class MainWindow(QWidget):
         self._multi_ids = QLineEdit()
         p1_layout.addWidget(self._multi_ids, 1)
 
-        # Panel 2 — plan
+        # Panel 2 — plan (selection happens in the table below)
         p2 = QWidget()
         p2_layout = QHBoxLayout(p2)
         p2_layout.setContentsMargins(0, 0, 0, 0)
-        self._plan_label_widget = QLabel()
-        p2_layout.addWidget(self._plan_label_widget)
-        self._plan_combo = QComboBox()
-        self._plan_combo.addItems(PLAN_CODES)
-        self._plan_combo.setFixedWidth(120)
-        p2_layout.addWidget(self._plan_combo)
-        p2_layout.addStretch()
+        self._plan_hint_label = QLabel()
+        self._plan_hint_label.setWordWrap(True)
+        p2_layout.addWidget(self._plan_hint_label, 1)
 
         # Panel 3 — all members (informational only, no input)
         p3 = QWidget()
@@ -168,6 +168,63 @@ class MainWindow(QWidget):
 
         who_layout.addLayout(radio_row)
         who_layout.addWidget(self._who_stack)
+
+        # Plan-counts table (spec 2026-07-28): always visible; rows are
+        # the 8 known plans plus a bold All Members total row.
+        self._plan_row = 0            # selected plan index into PLAN_CODES
+        self._plan_counts = None      # last counts result (None=loading)
+        self._counts_failed = False
+
+        self._plan_table = QTableWidget(len(PLAN_CODES) + 1, 3)
+        self._plan_table.verticalHeader().setVisible(False)
+        self._plan_table.setEditTriggers(
+            QAbstractItemView.EditTrigger.NoEditTriggers
+        )
+        self._plan_table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self._plan_table.setSelectionMode(
+            QAbstractItemView.SelectionMode.SingleSelection
+        )
+        self._plan_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._plan_table.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._plan_table.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        header = self._plan_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self._plan_table.setColumnWidth(1, 130)
+        self._plan_table.setColumnWidth(2, 100)
+        for row in range(len(PLAN_CODES) + 1):
+            for col in range(3):
+                item = QTableWidgetItem("")
+                if col > 0:
+                    item.setTextAlignment(
+                        Qt.AlignmentFlag.AlignRight
+                        | Qt.AlignmentFlag.AlignVCenter
+                    )
+                if row == len(PLAN_CODES):
+                    font = QFont()
+                    font.setBold(True)
+                    item.setFont(font)
+                self._plan_table.setItem(row, col, item)
+        self._plan_table.cellClicked.connect(self._on_plan_row_clicked)
+        who_layout.addWidget(self._plan_table)
+
+        caption_row = QHBoxLayout()
+        self._roster_label = QLabel()
+        self._excluded_label = QLabel()
+        for lbl in (self._roster_label, self._excluded_label):
+            lbl.setStyleSheet("color: gray; font-size: 11px;")
+        caption_row.addWidget(self._roster_label)
+        caption_row.addStretch()
+        caption_row.addWidget(self._excluded_label)
+        who_layout.addLayout(caption_row)
+
         root.addWidget(self._who_box)
 
         # ── WHEN ───────────────────────────────────────────────────
@@ -253,6 +310,11 @@ class MainWindow(QWidget):
         self._generate_btn.clicked.connect(self._run)
         root.addWidget(self._generate_btn)
 
+        self._scope_label = QLabel()
+        self._scope_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._scope_label.setStyleSheet("color: gray; font-size: 11px;")
+        root.addWidget(self._scope_label)
+
         # ── Progress + Log ─────────────────────────────────────────
         self._progress = QProgressBar()
         self._progress.setVisible(False)
@@ -278,6 +340,14 @@ class MainWindow(QWidget):
         self._print_btn.clicked.connect(self._print_schedules)
         root.addWidget(self._print_btn)
 
+        self._update_plan_table()
+        row_h = self._plan_table.verticalHeader().defaultSectionSize()
+        self._plan_table.setFixedHeight(
+            self._plan_table.horizontalHeader().sizeHint().height()
+            + row_h * (len(PLAN_CODES) + 1)
+            + 2 * self._plan_table.frameWidth()
+        )
+
         # Wire up live retranslation and apply once.
         LanguageManager.instance().languageChanged.connect(self._retranslate)
         self._retranslate()
@@ -297,7 +367,14 @@ class MainWindow(QWidget):
         self._single_label.setText(tr("who.member_id_label"))
         self._multi_label.setText(tr("who.member_ids_label"))
         self._multi_ids.setPlaceholderText(tr("who.placeholder"))
-        self._plan_label_widget.setText(tr("who.plan_label"))
+        self._plan_hint_label.setText(tr("who.plan_hint"))
+        self._plan_table.setHorizontalHeaderLabels([
+            tr("plan_table.header.plan"),
+            tr("plan_table.header.active"),
+            tr("plan_table.header.inactive"),
+        ])
+        self._excluded_label.setText(tr("plan_table.excluded"))
+        self._update_plan_table()
         self._all_hint_label.setText(tr("who.all_hint"))
 
         self._when_box.setTitle(tr("when.title"))
@@ -323,6 +400,56 @@ class MainWindow(QWidget):
     def _on_who_changed(self, btn_id: int, checked: bool):
         if checked:
             self._who_stack.setCurrentIndex(btn_id)
+            self._sync_plan_selection()
+
+    def _on_plan_row_clicked(self, row: int, _col: int):
+        if row < len(PLAN_CODES):
+            self._plan_row = row
+            self._radio_plan.setChecked(True)
+        else:
+            self._radio_all.setChecked(True)
+        self._sync_plan_selection()
+
+    def _sync_plan_selection(self):
+        """Reflect the Who mode in the table highlight + scope caption."""
+        mode_id = self._who_group.checkedId()
+        if mode_id == 2:
+            self._plan_table.selectRow(self._plan_row)
+        elif mode_id == 3:
+            self._plan_table.selectRow(len(PLAN_CODES))
+        else:
+            self._plan_table.clearSelection()
+        self._update_scope_label()
+
+    def _update_plan_table(self):
+        rows, total = plan_table_rows(self._plan_counts)
+        for i, (code, active, inactive) in enumerate(rows):
+            self._plan_table.item(i, 0).setText(code)
+            self._plan_table.item(i, 1).setText(active)
+            self._plan_table.item(i, 2).setText(inactive)
+        last = len(PLAN_CODES)
+        self._plan_table.item(last, 0).setText(tr("plan_table.all_members"))
+        self._plan_table.item(last, 1).setText(total)
+        self._plan_table.item(last, 2).setText("")
+        month = self._month_combo.currentIndex() + 1
+        if self._counts_failed:
+            self._roster_label.setText(tr("plan_table.unavailable"))
+        else:
+            self._roster_label.setText(tr(
+                "plan_table.roster",
+                month=tr(f"when.month.{month}"),
+                year=self._year_spin.value(),
+            ))
+        self._update_scope_label()
+
+    def _update_scope_label(self):
+        mode_id = self._who_group.checkedId()
+        mode = ["single", "multiple", "plan", "all"][mode_id]
+        month = self._month_combo.currentIndex() + 1
+        self._scope_label.setText(scope_caption(
+            self._plan_counts, mode, PLAN_CODES[self._plan_row],
+            tr(f"when.month.{month}"), self._year_spin.value(),
+        ))
 
     def _on_range_toggled(self, checked: bool):
         self._range_from_spin.setEnabled(checked)
@@ -570,7 +697,7 @@ class MainWindow(QWidget):
         center_ids = (
             parse_center_ids(self._multi_ids.text()) if mode == "multiple" else None
         )
-        plan_code = self._plan_combo.currentText() if mode == "plan" else None
+        plan_code = PLAN_CODES[self._plan_row] if mode == "plan" else None
 
         out_base = self._settings.get("output_path", "").strip() or "."
         out_dir = resolve_output_dir(out_base, plan_code, year, month)
