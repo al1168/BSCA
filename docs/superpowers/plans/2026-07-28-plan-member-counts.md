@@ -394,15 +394,15 @@ def test_counts_worker_passes_month_bounds(monkeypatch):
     monkeypatch.setattr(
         "gui.counts_worker.get_plan_member_counts", fake_counts
     )
-    worker = CountsWorker("some.accdb", 2026, 2)   # Feb 2026 (leap year)
+    worker = CountsWorker("some.accdb", 2024, 2)   # Feb 2024 (leap year)
     success, payload = _run_to_completion(worker)
     assert success is True
     assert payload == {"plans": {}, "total_active": 0}
     import datetime
     assert seen["args"] == (
         "some.accdb",
-        datetime.date(2026, 2, 1),
-        datetime.date(2026, 2, 29),
+        datetime.date(2024, 2, 1),
+        datetime.date(2024, 2, 29),
     )
 
 
