@@ -133,6 +133,81 @@ def get_all_members(db_path):
         conn.close()
 
 
+PLAN_TOTALS_QUERY = (
+    "SELECT [Health Plan], COUNT(*) FROM [Contacts] "
+    "WHERE [Center ID] IS NOT NULL GROUP BY [Health Plan]"
+)
+
+# Access has no COUNT(DISTINCT ...); EXISTS keeps one row per member.
+PLAN_ACTIVE_QUERY = (
+    "SELECT c.[Health Plan], COUNT(*) FROM [Contacts] c "
+    "WHERE c.[Center ID] IS NOT NULL AND EXISTS ("
+    "SELECT 1 FROM [Enrollment] e "
+    "WHERE e.[Center ID] = c.[Center ID] "
+    "AND e.[start_date] <= ? "
+    "AND (e.[end_date] IS NULL OR e.[end_date] >= ?)"
+    ") GROUP BY c.[Health Plan]"
+)
+
+
+def _normalize_plan(value):
+    """' hf ' / None -> 'HF' / '' so hand-typed plan codes merge."""
+    return str(value or "").strip().upper()
+
+
+def merge_plan_counts(total_rows, active_rows):
+    """Merge (plan, count) rows from the two plan-count queries into
+    {"plans": {CODE: {"total": t, "active": a}}, "total_active": n}.
+    Blank/NULL plans land under ''. total_active spans ALL plans,
+    known to the GUI or not (All Members runs schedule everyone)."""
+    plans = {}
+    for plan, count in total_rows:
+        entry = plans.setdefault(_normalize_plan(plan),
+                                 {"total": 0, "active": 0})
+        entry["total"] += int(count)
+    total_active = 0
+    for plan, count in active_rows:
+        entry = plans.setdefault(_normalize_plan(plan),
+                                 {"total": 0, "active": 0})
+        entry["active"] += int(count)
+        total_active += int(count)
+    return {"plans": plans, "total_active": total_active}
+
+
+def get_plan_member_counts(db_path, month_start, month_end):
+    """Per-plan member counts for the month [month_start, month_end].
+
+    A member is ACTIVE when an Enrollment row overlaps any day of the
+    month: start_date <= month_end AND (end_date IS NULL OR end_date
+    >= month_start) — the same overlap rule eligibility uses. Returns
+    merge_plan_counts() output. Raises FileNotFoundError/RuntimeError
+    like the other helpers."""
+    if not os.path.exists(db_path):
+        raise FileNotFoundError(f"Database not found: {db_path}")
+
+    import pyodbc
+
+    try:
+        conn = pyodbc.connect(build_connection_string(db_path))
+    except pyodbc.Error as exc:
+        raise RuntimeError(
+            "Could not open the Access database. Verify the Microsoft "
+            "Access ODBC driver is installed and its bitness matches "
+            "this Python interpreter (spec section 8). "
+            f"Original error: {exc}"
+        )
+    try:
+        cursor = conn.cursor()
+        cursor.execute(PLAN_TOTALS_QUERY)
+        totals = cursor.fetchall()
+        # Param order: start_date <= month_END, end_date >= month_START.
+        cursor.execute(PLAN_ACTIVE_QUERY, month_end, month_start)
+        active = cursor.fetchall()
+        return merge_plan_counts(totals, active)
+    finally:
+        conn.close()
+
+
 ENROLLMENTS_QUERY = (
     "SELECT [ID], [Center ID], [start_date], [end_date] "
     "FROM [Enrollment] "

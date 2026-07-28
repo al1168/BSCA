@@ -293,3 +293,72 @@ def test_get_all_availability_missing_db_raises(tmp_path):
     missing = tmp_path / "nope.accdb"
     with pytest.raises(FileNotFoundError):
         get_all_availability(str(missing))
+
+
+from monthly_schedule.db import (
+    PLAN_TOTALS_QUERY,
+    PLAN_ACTIVE_QUERY,
+    merge_plan_counts,
+    get_plan_member_counts,
+)
+
+
+def test_plan_totals_query_shape():
+    q = PLAN_TOTALS_QUERY
+    assert "[Health Plan]" in q
+    assert "COUNT(*)" in q
+    assert "[Contacts]" in q
+    assert "[Center ID] IS NOT NULL" in q
+    assert "GROUP BY" in q
+
+
+def test_plan_active_query_shape():
+    q = PLAN_ACTIVE_QUERY
+    assert "EXISTS" in q
+    assert "[Enrollment]" in q
+    assert "e.[start_date] <= ?" in q
+    assert "e.[end_date] IS NULL OR e.[end_date] >= ?" in q
+    assert "GROUP BY" in q
+    # COUNT(DISTINCT ...) is not valid Access SQL — the EXISTS form is required.
+    assert "DISTINCT" not in q
+
+
+def test_merge_plan_counts_math():
+    totals = [("HF", 100), ("BCBS", 50)]
+    active = [("HF", 96), ("BCBS", 44)]
+    out = merge_plan_counts(totals, active)
+    assert out["plans"]["HF"] == {"total": 100, "active": 96}
+    assert out["plans"]["BCBS"] == {"total": 50, "active": 44}
+    assert out["total_active"] == 140
+
+
+def test_merge_plan_counts_normalizes_codes():
+    # Access text comparison is case-insensitive and users hand-type
+    # plan codes — ' hf ' and 'HF' are the same plan.
+    out = merge_plan_counts([(" hf ", 2), ("HF", 3)], [("hf", 4)])
+    assert out["plans"]["HF"] == {"total": 5, "active": 4}
+    assert out["total_active"] == 4
+
+
+def test_merge_plan_counts_blank_plan_bucketed():
+    # NULL/blank Health Plan rows count under "" so the All Members
+    # total stays honest (All Members runs schedule everyone).
+    out = merge_plan_counts([(None, 7), ("", 1)], [(None, 3)])
+    assert out["plans"][""] == {"total": 8, "active": 3}
+    assert out["total_active"] == 3
+
+
+def test_merge_plan_counts_active_plan_missing_from_totals():
+    # Defensive: an active row for a plan absent from totals must not crash.
+    out = merge_plan_counts([], [("HF", 2)])
+    assert out["plans"]["HF"] == {"total": 0, "active": 2}
+    assert out["total_active"] == 2
+
+
+def test_get_plan_member_counts_missing_db_raises(tmp_path):
+    import datetime
+    with pytest.raises(FileNotFoundError):
+        get_plan_member_counts(
+            str(tmp_path / "nope.accdb"),
+            datetime.date(2026, 7, 1), datetime.date(2026, 7, 31),
+        )
