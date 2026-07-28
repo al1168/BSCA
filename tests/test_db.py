@@ -362,3 +362,41 @@ def test_get_plan_member_counts_missing_db_raises(tmp_path):
             str(tmp_path / "nope.accdb"),
             datetime.date(2026, 7, 1), datetime.date(2026, 7, 31),
         )
+
+
+def test_get_plan_member_counts_param_order(monkeypatch, tmp_path):
+    """start_date <= month_END binds first, end_date >= month_START
+    second — a swap silently turns 'overlaps the month' into
+    'enrolled for the entire month'."""
+    import datetime
+    import sys
+    import types
+
+    db_file = tmp_path / "fake.accdb"
+    db_file.write_bytes(b"")
+
+    executed = []
+
+    class FakeCursor:
+        def execute(self, query, *params):
+            executed.append((query, params))
+        def fetchall(self):
+            return []
+
+    class FakeConn:
+        def cursor(self):
+            return FakeCursor()
+        def close(self):
+            pass
+
+    fake_pyodbc = types.SimpleNamespace(
+        Error=Exception, connect=lambda _cs: FakeConn()
+    )
+    monkeypatch.setitem(sys.modules, "pyodbc", fake_pyodbc)
+
+    start = datetime.date(2026, 7, 1)
+    end = datetime.date(2026, 7, 31)
+    get_plan_member_counts(str(db_file), start, end)
+
+    active_calls = [p for q, p in executed if "EXISTS" in q]
+    assert active_calls == [(end, start)]   # month_end first, month_start second
