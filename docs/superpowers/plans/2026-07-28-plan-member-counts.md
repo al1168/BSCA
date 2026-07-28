@@ -728,12 +728,14 @@ git commit -m "feat(gui): plan table with member counts replaces plan dropdown"
 
 - [ ] **Step 1: Implement the refresh plumbing.**
 
+0. Extend the `gui/counts_worker.py` module docstring with the lifecycle contract (reviewer-mandated): `Callers must retain a reference to each started worker until its thread has actually finished — the custom finished signal fires before the thread exits, so call wait() in the receiving slot before dropping the reference.`
+
 1. Imports: `from gui.counts_worker import CountsWorker`, `from gui.plan_counts import PLAN_CODES, plan_table_rows, scope_caption` (merge with the Task 2 import), and `QTimer` from `PyQt6.QtCore`.
 
 2. In `__init__` (near `self._print_worker = None`):
 
 ```python
-        self._counts_worker = None
+        self._counts_workers = set()  # retain refs until threads finish
         self._counts_seq = 0          # stale-result guard
         self._counts_timer = QTimer(self)
         self._counts_timer.setSingleShot(True)
@@ -775,12 +777,20 @@ and at the very end of `__init__` (after `_retranslate()`):
             self._month_combo.currentIndex() + 1,
         )
         worker.finished.connect(
-            lambda ok, payload: self._on_counts_finished(seq, ok, payload)
+            lambda ok, payload, w=worker:
+                self._on_counts_finished(seq, w, ok, payload)
         )
-        self._counts_worker = worker
+        self._counts_workers.add(worker)
         worker.start()
 
-    def _on_counts_finished(self, seq: int, success: bool, payload: dict):
+    def _on_counts_finished(self, seq: int, worker, success: bool,
+                            payload: dict):
+        # The worker's custom finished signal fires BEFORE its thread
+        # exits; wait() (near-instant here) then discard, so a running
+        # QThread is never garbage-collected mid-run (hard crash).
+        # This must happen on the stale path too.
+        worker.wait()
+        self._counts_workers.discard(worker)
         if seq != self._counts_seq:
             return   # a newer request superseded this one
         if success:
