@@ -174,6 +174,7 @@ class MainWindow(QWidget):
         self._plan_row = 0            # selected plan index into PLAN_CODES
         self._plan_counts = None      # last counts result (None=loading)
         self._counts_failed = False
+        self._syncing_selection = False
 
         self._plan_table = QTableWidget(len(PLAN_CODES) + 1, 3)
         self._plan_table.verticalHeader().setVisible(False)
@@ -212,7 +213,9 @@ class MainWindow(QWidget):
                     font.setBold(True)
                     item.setFont(font)
                 self._plan_table.setItem(row, col, item)
-        self._plan_table.cellClicked.connect(self._on_plan_row_clicked)
+        self._plan_table.selectionModel().selectionChanged.connect(
+            self._on_plan_selection_changed
+        )
         who_layout.addWidget(self._plan_table)
 
         caption_row = QHBoxLayout()
@@ -410,15 +413,29 @@ class MainWindow(QWidget):
             self._radio_all.setChecked(True)
         self._sync_plan_selection()
 
+    def _on_plan_selection_changed(self, _selected, _deselected):
+        """User-driven selection (click, press, drag) picks a plan; the
+        guard skips our own programmatic selectRow/clearSelection."""
+        if self._syncing_selection:
+            return
+        rows = self._plan_table.selectionModel().selectedRows()
+        if not rows:
+            return   # programmatic clear — mode drives this case
+        self._on_plan_row_clicked(rows[0].row(), 0)
+
     def _sync_plan_selection(self):
         """Reflect the Who mode in the table highlight + scope caption."""
         mode_id = self._who_group.checkedId()
-        if mode_id == 2:
-            self._plan_table.selectRow(self._plan_row)
-        elif mode_id == 3:
-            self._plan_table.selectRow(len(PLAN_CODES))
-        else:
-            self._plan_table.clearSelection()
+        self._syncing_selection = True
+        try:
+            if mode_id == 2:
+                self._plan_table.selectRow(self._plan_row)
+            elif mode_id == 3:
+                self._plan_table.selectRow(len(PLAN_CODES))
+            else:
+                self._plan_table.clearSelection()
+        finally:
+            self._syncing_selection = False
         self._update_scope_label()
 
     def _update_plan_table(self):
@@ -444,6 +461,9 @@ class MainWindow(QWidget):
 
     def _update_scope_label(self):
         mode_id = self._who_group.checkedId()
+        if mode_id < 0:
+            self._scope_label.setText("")
+            return
         mode = ["single", "multiple", "plan", "all"][mode_id]
         month = self._month_combo.currentIndex() + 1
         self._scope_label.setText(scope_caption(
