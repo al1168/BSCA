@@ -57,11 +57,15 @@ class DayEligibility:
     `dropoff_reserve` is the minutes subtracted from avail_end to keep
     Drop-Off at or before it (max time-out drift + max drop-off
     trail); 0 when the deadline did not apply.
+    `pickup_reserve` is the minutes added to avail_start to keep
+    Pick-Up at or after it (max time-in drift + max pick-up lead);
+    0 when the constraint did not apply.
     """
     eligible: bool
     placement_window: Optional[Tuple[int, int]] = None
     reason: Optional[str] = None
     dropoff_reserve: int = 0
+    pickup_reserve: int = 0
 
 
 def compute_day_eligibility(day: date, ctx, plan_rules) -> DayEligibility:
@@ -119,14 +123,26 @@ def compute_day_eligibility(day: date, ctx, plan_rules) -> DayEligibility:
         reserve = (plan_rules["time_out_drift_min"][1]
                    + plan_rules["dropoff_trail_min"][1])
         out_hi = avail_hi - reserve
+    # Mirror constraint at the head: recurring availability starting
+    # after the day bound means the member is busy until avail_start,
+    # so the whole transport lead (drift + drive + buffer) must fit
+    # after it. Reserving the maximum of each random range guarantees
+    # Pick-Up >= avail_start for any draw. One-off rows are exempt.
+    head_reserve = 0
+    if (plan_rules.get("pickup_by_avail_start")
+            and not one_offs and avail_lo > earliest_in):
+        head_reserve = (plan_rules["time_in_drift_min"][1]
+                        + plan_rules["pickup_lead_min"][1])
+        in_lo = avail_lo + head_reserve
     if out_hi - in_lo < length_min:
         return DayEligibility(
             eligible=False, reason=REASON_DAY_WINDOW_TOO_NARROW,
             placement_window=(in_lo, out_hi), dropoff_reserve=reserve,
+            pickup_reserve=head_reserve,
         )
     return DayEligibility(
         eligible=True, placement_window=(in_lo, out_hi),
-        dropoff_reserve=reserve,
+        dropoff_reserve=reserve, pickup_reserve=head_reserve,
     )
 
 

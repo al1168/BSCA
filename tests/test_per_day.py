@@ -392,6 +392,134 @@ def test_deadline_too_narrow_day_blank_with_numbers():
     assert result.dropoff_reserve == 36
 
 
+HEAD_RULES = {
+    "earliest_time_in": "08:00",
+    "latest_time_out": "16:00",
+    "session_length_min": (210, 240),
+    "time_in_drift_min": (2, 2),
+    "pickup_lead_min": (23, 27),     # travel 22 + buffer 1-5
+    "time_out_drift_min": (2, 2),
+    "dropoff_trail_min": (30, 34),   # travel-adjusted in real runs
+    "pickup_by_avail_start": True,
+    "dropoff_by_avail_end": True,
+}
+
+FRIDAY_AVAIL_12_TO_16 = {
+    "id": 1, "center_id": 1,
+    "effective_start_date": date(2026, 1, 1),
+    "effective_end_date": None,
+    "day_of_week": 5,
+    "avail_start": "12:00", "avail_end": "16:00",
+}
+
+FRIDAY = date(2026, 7, 3)
+
+
+def test_head_reserve_raises_in_lo():
+    # avail_start 12:00 (720) > earliest_in 08:00 → reserve = 2 + 27 =
+    # 29 → in_lo = 749 (12:29). avail_end == latest_out → no tail.
+    # Width 211 >= 210 → still eligible (the member-25182 case).
+    result = compute_day_eligibility(
+        FRIDAY, _ctx(availability=FRIDAY_AVAIL_12_TO_16), HEAD_RULES
+    )
+    assert result.eligible is True
+    assert result.placement_window == (749, 960)
+    assert result.pickup_reserve == 29
+    assert result.dropoff_reserve == 0
+
+
+def test_head_reserve_off_keeps_legacy_window():
+    rules = {**HEAD_RULES, "pickup_by_avail_start": False}
+    result = compute_day_eligibility(
+        FRIDAY, _ctx(availability=FRIDAY_AVAIL_12_TO_16), rules
+    )
+    assert result.placement_window == (720, 960)
+    assert result.pickup_reserve == 0
+
+
+def test_head_reserve_skipped_when_avail_start_at_day_bound():
+    # avail_start == earliest_time_in → member is free before pickup;
+    # in_lo unchanged. Tail reserve still applies (avail_end 15:00).
+    avail = {**FRIDAY_AVAIL_12_TO_16,
+             "avail_start": "08:00", "avail_end": "15:00"}
+    result = compute_day_eligibility(
+        FRIDAY, _ctx(availability=avail), HEAD_RULES
+    )
+    assert result.placement_window == (480, 864)
+    assert result.pickup_reserve == 0
+    assert result.dropoff_reserve == 36
+
+
+def test_head_reserve_not_applied_to_one_off():
+    # One-off 12:00-16:00: per the spec, one-offs keep legacy behavior.
+    one_off = {"id": 99, "center_id": 1, "date": FRIDAY,
+               "avail_start": "12:00", "avail_end": "16:00"}
+    result = compute_day_eligibility(
+        FRIDAY, _ctx(one_offs=[one_off]), HEAD_RULES
+    )
+    assert result.placement_window == (720, 960)
+    assert result.pickup_reserve == 0
+    assert result.dropoff_reserve == 0
+
+
+def test_head_reserve_too_narrow_day_blank_with_numbers():
+    # avail 13:00-16:00: in_lo = 780 + 29 = 809 → width 151 < 210 →
+    # ineligible, but the window/reserve are still reported for debug.
+    from monthly_schedule.per_day import REASON_DAY_WINDOW_TOO_NARROW
+    avail = {**FRIDAY_AVAIL_12_TO_16, "avail_start": "13:00"}
+    result = compute_day_eligibility(
+        FRIDAY, _ctx(availability=avail), HEAD_RULES
+    )
+    assert result.eligible is False
+    assert result.reason == REASON_DAY_WINDOW_TOO_NARROW
+    assert result.placement_window == (809, 960)
+    assert result.pickup_reserve == 29
+
+
+def test_both_reserves_combine():
+    # avail 09:00-15:00: in_lo = 540 + 29 = 569, out_hi = 900 - 36 =
+    # 864. Width 295 → eligible.
+    avail = {**FRIDAY_AVAIL_12_TO_16,
+             "avail_start": "09:00", "avail_end": "15:00"}
+    result = compute_day_eligibility(
+        FRIDAY, _ctx(availability=avail), HEAD_RULES
+    )
+    assert result.eligible is True
+    assert result.placement_window == (569, 864)
+    assert result.pickup_reserve == 29
+    assert result.dropoff_reserve == 36
+
+
+def test_both_reserves_too_narrow():
+    # avail 10:30-14:30: (630+29, 870-36) = (659, 834) → width 175 <
+    # 210 → blank, both reserves reported.
+    from monthly_schedule.per_day import REASON_DAY_WINDOW_TOO_NARROW
+    avail = {**FRIDAY_AVAIL_12_TO_16,
+             "avail_start": "10:30", "avail_end": "14:30"}
+    result = compute_day_eligibility(
+        FRIDAY, _ctx(availability=avail), HEAD_RULES
+    )
+    assert result.eligible is False
+    assert result.reason == REASON_DAY_WINDOW_TOO_NARROW
+    assert result.placement_window == (659, 834)
+    assert result.pickup_reserve == 29
+    assert result.dropoff_reserve == 36
+
+
+def test_tail_only_sunday_shape_unaffected_by_head_flag():
+    # Sunday shape 08:00-12:30: head exempt (start at bound), tail
+    # applies → (480, 750-36=714). Width 234 → eligible.
+    avail = {**FRIDAY_AVAIL_12_TO_16,
+             "avail_start": "08:00", "avail_end": "12:30"}
+    result = compute_day_eligibility(
+        FRIDAY, _ctx(availability=avail), HEAD_RULES
+    )
+    assert result.eligible is True
+    assert result.placement_window == (480, 714)
+    assert result.pickup_reserve == 0
+    assert result.dropoff_reserve == 36
+
+
 def test_legacy_too_narrow_also_reports_window():
     # Flag absent (module PLAN_RULES): the too-narrow rejection now
     # carries the window it computed instead of None.
