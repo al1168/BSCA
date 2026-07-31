@@ -27,6 +27,11 @@ SCHEDULE_RULES = {
         # end (home care starts then). Enforced by shrinking the
         # placement window in per_day.compute_day_eligibility.
         "dropoff_by_avail_end": True,
+        # When truthy: on days with a RECURRING availability starting
+        # after earliest_time_in, the member is busy before avail_start,
+        # so Pick-Up must not precede it. Enforced by shrinking the
+        # placement window in per_day.compute_day_eligibility.
+        "pickup_by_avail_start": True,
         # Morning/afternoon distribution (opt-in; spec 2026-07-23).
         # While band_enabled is falsy, Time-In placement is uniform,
         # exactly as before — pins and percentages are ignored.

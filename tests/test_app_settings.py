@@ -170,6 +170,33 @@ def test_dropoff_by_avail_end_saved_false_respected(settings_file):
     assert s["schedule_rules"]["dropoff_by_avail_end"] is False
 
 
+def test_pickup_by_avail_start_default_on_fresh_install(settings_file):
+    from gui import app_settings
+    s = app_settings.load()
+    assert s["schedule_rules"]["pickup_by_avail_start"] is True
+
+
+def test_pickup_by_avail_start_missing_key_filled_on(settings_file):
+    # A settings file saved before this feature has no key — the loader
+    # must fill it from DEFAULTS (i.e., turn it on).
+    settings_file.write_text(json.dumps({
+        "schedule_rules": {"earliest_time_in": "09:00"}
+    }))
+    from gui import app_settings
+    s = app_settings.load()
+    assert s["schedule_rules"]["pickup_by_avail_start"] is True
+    assert s["schedule_rules"]["earliest_time_in"] == "09:00"
+
+
+def test_pickup_by_avail_start_saved_false_respected(settings_file):
+    settings_file.write_text(json.dumps({
+        "schedule_rules": {"pickup_by_avail_start": False}
+    }))
+    from gui import app_settings
+    s = app_settings.load()
+    assert s["schedule_rules"]["pickup_by_avail_start"] is False
+
+
 def test_band_defaults_on_fresh_install(settings_file):
     from gui import app_settings
     rules = app_settings.load()["schedule_rules"]

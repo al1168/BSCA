@@ -96,6 +96,15 @@ def test_dropoff_by_avail_end_bool_override_passes_through():
     assert rules["dropoff_by_avail_end"] is False
 
 
+def test_pickup_by_avail_start_defaults_on():
+    assert SCHEDULE_RULES["Default"]["pickup_by_avail_start"] is True
+
+
+def test_pickup_by_avail_start_bool_override_passes_through():
+    rules = get_rules_for_plan("Default", {"pickup_by_avail_start": False})
+    assert rules["pickup_by_avail_start"] is False
+
+
 def test_band_defaults_present():
     d = SCHEDULE_RULES["Default"]
     assert d["band_enabled"] is False
