@@ -35,6 +35,7 @@ override (`get_rules_for_plan`). Current `Default` values:
 | `time_out_drift_min` | (2, 2) | Time-Out is exactly 2 minutes **before** Departure |
 | `round_to_minutes` | 1 | Snap step for Time-In (1 = no snap; 5 = snap to :05) |
 | `dropoff_by_avail_end` | on | When a recurring availability ends before `latest_time_out`, shrink the window so Drop-Off lands at or before `avail_end` (home care). Day goes blank if under 3h30m. |
+| `pickup_by_avail_start` | on | When a recurring availability starts after `earliest_time_in`, shrink the window so Pick-Up lands at or after `avail_start` (member busy before). Day goes blank if under 3h30m. |
 | `band_enabled` | off | Morning/afternoon distribution master switch. Off = uniform Time-In placement, exactly the pre-feature behavior; the four keys below are ignored. |
 | `morning_percent` | 80 | % of members assigned to the morning band via a deterministic md5 hash of `center_id` — stable across runs and months, so a member keeps their band until the settings change. Pinned members bypass the hash. |
 | `morning_window_min` | 180 min | Morning band length in minutes measured from `earliest_time_in`; the cutoff for Time-In. |
@@ -50,8 +51,10 @@ The attendance block (**Time-In → Time-Out**) is the anchor; the
 transport times are derived around it. The day is given a **placement
 window** `(in_lo, out_hi)` — the 08:00–16:00 day bounds intersected
 with the member's availability — minus the drop-off reserve (max drift
-+ drive time + max buffer) when `dropoff_by_avail_end` applies (just
-08:00–16:00 when there is no availability rule).
++ drive time + max buffer) on `out_hi` when `dropoff_by_avail_end`
+applies, plus the same-sized pick-up reserve on `in_lo` when
+`pickup_by_avail_start` applies (just 08:00–16:00 when there is no
+availability rule).
 
 1. **Length** = random minute count in `session_length_min` (210–240),
    capped to `out_hi − in_lo` so it can't exceed the free time.
