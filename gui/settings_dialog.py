@@ -319,6 +319,14 @@ class SettingsDialog(QDialog):
         rules_form.addRow(self._dropoff_deadline_label,
                           self._dropoff_deadline_check)
 
+        self._pickup_deadline_check = QCheckBox()
+        self._pickup_deadline_check.setChecked(
+            bool(rules.get("pickup_by_avail_start", True))
+        )
+        self._pickup_deadline_label = QLabel()
+        rules_form.addRow(self._pickup_deadline_label,
+                          self._pickup_deadline_check)
+
         self._band_enabled_check = QCheckBox()
         self._band_enabled_check.setChecked(
             bool(rules.get("band_enabled", False))
@@ -415,6 +423,9 @@ class SettingsDialog(QDialog):
         self._time_out_label.setText(tr("settings.rules.time_out"))
         self._dropoff_deadline_label.setText(
             tr("settings.rules.dropoff_deadline")
+        )
+        self._pickup_deadline_label.setText(
+            tr("settings.rules.pickup_deadline")
         )
         self._band_enabled_label.setText(tr("settings.rules.band_enabled"))
         self._morning_percent_label.setText(
@@ -542,6 +553,8 @@ class SettingsDialog(QDialog):
                 "time_out_drift_min": list(time_out),
                 "dropoff_by_avail_end":
                     self._dropoff_deadline_check.isChecked(),
+                "pickup_by_avail_start":
+                    self._pickup_deadline_check.isChecked(),
                 "band_enabled": band_enabled,
                 "morning_percent": self._morning_percent_spin.value(),
                 "morning_window_min":

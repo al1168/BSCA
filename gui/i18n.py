@@ -135,6 +135,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "settings.rules.dropoff_deadline": (
             "Drop off by availability end (home care):"
         ),
+        "settings.rules.pickup_deadline": (
+            "Pick up after availability start (member busy before):"
+        ),
         "settings.rules.band_enabled": (
             "Morning/afternoon distribution:"
         ),
@@ -377,6 +380,9 @@ STRINGS: dict[str, dict[str, str]] = {
         ),
         "settings.rules.dropoff_deadline": (
             "在可用时间结束前送回（家庭护理）："
+        ),
+        "settings.rules.pickup_deadline": (
+            "在可用时间开始后接送（此前成员不便）："
         ),
         "settings.rules.band_enabled": "上午/下午分布：",
         "settings.rules.morning_percent": "上午成员比例（%）：",
