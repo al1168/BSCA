@@ -440,6 +440,91 @@ def test_dropoff_never_past_avail_end_across_seeds():
             )
 
 
+HEAD_E2E_RULES = {
+    **DEADLINE_E2E_RULES,
+    "pickup_lead_min": (23, 27),      # travel 22 + buffer 1-5
+    "pickup_by_avail_start": True,
+}
+
+
+def _avail_ctx(avail_start, avail_end):
+    return MemberContext(
+        enrollments=[{"id": 1, "center_id": 1,
+                      "start_date": date(2026, 1, 1), "end_date": None}],
+        authorizations=[{"id": 1, "center_id": 1,
+                         "auth_start": date(2026, 1, 1),
+                         "auth_end": date(2026, 12, 31),
+                         "effective_start": date(2026, 1, 1),
+                         "effective_end": date(2026, 12, 31),
+                         "auth_days": "1"}],
+        absences=[],
+        availabilities=[{"id": 1, "center_id": 1,
+                         "effective_start_date": date(2026, 1, 1),
+                         "effective_end_date": None,
+                         "day_of_week": 1,
+                         "avail_start": avail_start,
+                         "avail_end": avail_end}],
+        one_offs=[],
+    )
+
+
+def test_pickup_never_before_avail_start_across_seeds():
+    # The guarantee the head reserve rests on: for ANY random draw,
+    # Pick-Up >= avail_start on recurring-availability days.
+    start = parse_hhmm("12:00")
+    ctx = _avail_ctx("12:00", "16:00")
+    for seed in range(50):
+        rows = build_rows(2026, 5, ctx, HEAD_E2E_RULES,
+                          random.Random(seed))
+        scheduled = [r for r in rows if r["pickup"]]
+        assert scheduled, "expected Mondays to be scheduled"
+        for r in scheduled:
+            pickup_min = parse_hhmm(r["pickup"])
+            assert pickup_min >= start, (
+                f"seed {seed} {r['date']}: pickup {r['pickup']} "
+                f"before {format_minutes(start)}"
+            )
+            length = parse_hhmm(r["time_out"]) - parse_hhmm(r["time_in"])
+            assert 210 <= length <= 240, (
+                f"seed {seed} {r['date']}: session {length}m outside 210-240"
+            )
+
+
+def test_pickup_and_dropoff_both_bounded_across_seeds():
+    # Both reserves at once: pickup >= 09:00 AND dropoff <= 15:00.
+    start = parse_hhmm("09:00")
+    end = parse_hhmm("15:00")
+    ctx = _avail_ctx("09:00", "15:00")
+    for seed in range(50):
+        rows = build_rows(2026, 5, ctx, HEAD_E2E_RULES,
+                          random.Random(seed))
+        scheduled = [r for r in rows if r["pickup"]]
+        assert scheduled, "expected Mondays to be scheduled"
+        for r in scheduled:
+            assert parse_hhmm(r["pickup"]) >= start, (
+                f"seed {seed} {r['date']}: pickup {r['pickup']} before 09:00"
+            )
+            assert parse_hhmm(r["dropoff"]) <= end, (
+                f"seed {seed} {r['date']}: dropoff {r['dropoff']} past 15:00"
+            )
+
+
+def test_pickup_flag_off_allows_early_pickup():
+    # With the flag off, some draw lands Pick-Up before avail_start —
+    # proving the flag (not luck) provides the guarantee above.
+    rules = {**HEAD_E2E_RULES, "pickup_by_avail_start": False}
+    start = parse_hhmm("12:00")
+    ctx = _avail_ctx("12:00", "16:00")
+    early = False
+    for seed in range(50):
+        rows = build_rows(2026, 5, ctx, rules, random.Random(seed))
+        if any(r["pickup"] and parse_hhmm(r["pickup"]) < start
+               for r in rows):
+            early = True
+            break
+    assert early, "expected at least one pickup before 12:00 with flag off"
+
+
 def test_debug_too_narrow_day_has_window_and_detail():
     # avail 08:00-11:30, reserve 2+34=36 → usable 08:00-10:54 (2h54m),
     # under the 3h30m minimum.
