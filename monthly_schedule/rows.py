@@ -91,21 +91,30 @@ def _fmt_duration(minutes):
 
 
 def _reason_detail(reason, availability, reserve, in_lo, out_hi,
-                    plan_rules, avail_row):
+                    plan_rules, avail_row, pickup_reserve=0):
     """Free-text arithmetic behind a window decision ('' when the
     numbers add nothing: open days, non-window rejections)."""
     if reason == REASON_DAY_WINDOW_TOO_NARROW:
         usable = (f"usable {format_minutes(in_lo)}-{format_minutes(out_hi)} "
                   f"({_fmt_duration(out_hi - in_lo)})")
         min_len = plan_rules["session_length_min"][0]
+        subtracted = []
+        if pickup_reserve:
+            subtracted.append(f"{pickup_reserve}m pick-up reserve")
         if reserve:
-            return (f"avail {availability} minus {reserve}m "
-                    f"drop-off reserve -> {usable} < min {_fmt_duration(min_len)}")
+            subtracted.append(f"{reserve}m drop-off reserve")
+        if subtracted:
+            return (f"avail {availability} minus {' and '.join(subtracted)} "
+                    f"-> {usable} < min {_fmt_duration(min_len)}")
         return f"{usable} < min {_fmt_duration(min_len)}"
+    notes = []
+    if pickup_reserve:
+        notes.append(f"pick-up reserve {pickup_reserve}m after "
+                     f"{avail_row['avail_start']} avail start")
     if reserve:
-        return (f"drop-off reserve {reserve}m before "
-                f"{avail_row['avail_end']} avail end")
-    return ""
+        notes.append(f"drop-off reserve {reserve}m before "
+                     f"{avail_row['avail_end']} avail end")
+    return "; ".join(notes)
 
 
 def build_debug_rows(year, month, ctx, plan_rules,
@@ -166,11 +175,13 @@ def build_debug_rows(year, month, ctx, plan_rules,
             reason = "" if scheduled else (result.reason or "")
             window = result.placement_window
             reserve = result.dropoff_reserve
+            pickup_reserve = result.pickup_reserve
         except OneOffConflict as exc:
             scheduled = False
             reason = exc.reason
             window = None
             reserve = 0
+            pickup_reserve = 0
 
         # The placement window actually used: the narrowed window, or
         # the open-day bounds when no availability rule applies.
@@ -188,7 +199,7 @@ def build_debug_rows(year, month, ctx, plan_rules,
             max_length = format_minutes(max_len)
             reason_detail = _reason_detail(
                 reason, availability, reserve, in_lo, out_hi,
-                plan_rules, avail_row,
+                plan_rules, avail_row, pickup_reserve,
             )
         else:
             placement = ""

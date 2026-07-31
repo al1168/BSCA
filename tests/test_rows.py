@@ -571,6 +571,57 @@ def test_debug_eligible_day_notes_reserve():
     )
 
 
+def test_debug_too_narrow_day_has_pickup_reserve_detail():
+    # avail 13:00-16:00, reserve 2+27=29 → usable 13:29-16:00 (2h31m),
+    # under the 3h30m minimum.
+    rows = build_debug_rows(2026, 5, _avail_ctx("13:00", "16:00"),
+                            HEAD_E2E_RULES)
+    row = rows[0]
+    assert row["scheduled"] is False
+    assert row["placement_window"] == "13:29-16:00"
+    assert row["reason_detail"] == (
+        "avail 13:00-16:00 minus 29m pick-up reserve -> "
+        "usable 13:29-16:00 (2h31m) < min 3h30m"
+    )
+
+
+def test_debug_eligible_day_notes_pickup_reserve():
+    rows = build_debug_rows(2026, 5, _avail_ctx("12:00", "16:00"),
+                            HEAD_E2E_RULES)
+    row = rows[0]
+    assert row["scheduled"] is True
+    assert row["placement_window"] == "12:29-16:00"
+    assert row["reason_detail"] == (
+        "pick-up reserve 29m after 12:00 avail start"
+    )
+
+
+def test_debug_eligible_day_notes_both_reserves():
+    # avail 09:00-15:00: head 29, tail 2+30=32 → window 09:29-14:28.
+    rows = build_debug_rows(2026, 5, _avail_ctx("09:00", "15:00"),
+                            HEAD_E2E_RULES)
+    row = rows[0]
+    assert row["scheduled"] is True
+    assert row["placement_window"] == "09:29-14:28"
+    assert row["reason_detail"] == (
+        "pick-up reserve 29m after 09:00 avail start; "
+        "drop-off reserve 32m before 15:00 avail end"
+    )
+
+
+def test_debug_too_narrow_day_lists_both_reserves():
+    # avail 10:30-14:30: (630+29, 870-32) = 10:59-13:58 → 2h59m < min.
+    rows = build_debug_rows(2026, 5, _avail_ctx("10:30", "14:30"),
+                            HEAD_E2E_RULES)
+    row = rows[0]
+    assert row["scheduled"] is False
+    assert row["placement_window"] == "10:59-13:58"
+    assert row["reason_detail"] == (
+        "avail 10:30-14:30 minus 29m pick-up reserve and "
+        "32m drop-off reserve -> usable 10:59-13:58 (2h59m) < min 3h30m"
+    )
+
+
 def test_debug_too_narrow_without_deadline_shows_width():
     # Legacy narrow window (12:00-13:30, no deadline): detail carries
     # the arithmetic that used to be invisible.
