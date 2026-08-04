@@ -54,6 +54,22 @@ def test_missing_format_arg_raises():
         i18n.tr("worker.wrote")  # missing 'filename'
 
 
+def test_no_eligible_days_reason_key_present_in_both_languages():
+    from gui.i18n import STRINGS
+    assert "summary.reason.no_eligible_days" in STRINGS["en"]
+    assert "summary.reason.no_eligible_days" in STRINGS["zh"]
+
+
+def test_translate_reason_no_eligible_days():
+    from gui import i18n
+    from gui.main_window import _translate_reason
+    from monthly_schedule.per_day import REASON_NO_ELIGIBLE_DAYS
+    i18n.set_language("zh")
+    assert _translate_reason(REASON_NO_ELIGIBLE_DAYS) == (
+        i18n.STRINGS["zh"]["summary.reason.no_eligible_days"]
+    )
+
+
 def test_set_language_persists(_isolate_settings):
     from gui import i18n
     i18n.set_language("zh")

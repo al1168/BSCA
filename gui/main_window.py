@@ -40,7 +40,12 @@ from gui.print_worker import PrintWorker
 from gui.settings_dialog import SettingsDialog
 from gui.worker import ScheduleWorker
 from new_monthly_schedule import REASON_NOT_FOUND, parse_center_ids, resolve_output_dir
-from monthly_schedule.per_day import REASON_NOT_ENROLLED, REASON_NO_AUTH, REASON_ABSENT_MONTH
+from monthly_schedule.per_day import (
+    REASON_NOT_ENROLLED,
+    REASON_NO_AUTH,
+    REASON_ABSENT_MONTH,
+    REASON_NO_ELIGIBLE_DAYS,
+)
 
 
 def _translate_reason(reason: str) -> str:
@@ -52,6 +57,8 @@ def _translate_reason(reason: str) -> str:
         return tr("summary.reason.no_auth")
     if reason == REASON_ABSENT_MONTH:
         return tr("summary.reason.absent_month")
+    if reason == REASON_NO_ELIGIBLE_DAYS:
+        return tr("summary.reason.no_eligible_days")
     return reason
 
 

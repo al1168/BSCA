@@ -165,6 +165,74 @@ def test_month_failure_partial_absence_is_not_whole_month():
     assert compute_month_failure(2026, 5, ctx) is None
 
 
+def _window_ctx(enroll_start, enroll_end, auth_start=date(2026, 1, 1),
+                auth_end=date(2026, 12, 31), auth_days="1,2,3,4,5",
+                absences=None):
+    """MemberContext with explicit enrollment/authorization windows, for
+    the month-gate tests that need dates other than _ctx's defaults."""
+    return MemberContext(
+        enrollments=[{"id": 1, "center_id": 1,
+                      "start_date": enroll_start, "end_date": enroll_end}],
+        authorizations=[{"id": 1, "center_id": 1,
+                         "auth_start": auth_start, "auth_end": auth_end,
+                         "effective_start": auth_start,
+                         "effective_end": auth_end,
+                         "auth_days": auth_days}],
+        absences=list(absences or []),
+        availabilities=[],
+        one_offs=[],
+    )
+
+
+def test_month_failure_enrollment_starts_after_month():
+    # First enrollment starts Nov 1; generating September → no sheet.
+    ctx = _window_ctx(date(2026, 11, 1), None)
+    from monthly_schedule.per_day import REASON_NOT_ENROLLED
+    assert compute_month_failure(2026, 9, ctx) == REASON_NOT_ENROLLED
+
+
+def test_month_failure_enrollment_ended_before_month():
+    ctx = _window_ctx(date(2025, 1, 1), date(2026, 8, 15))
+    from monthly_schedule.per_day import REASON_NOT_ENROLLED
+    assert compute_month_failure(2026, 9, ctx) == REASON_NOT_ENROLLED
+
+
+def test_month_failure_none_for_partial_enrollment():
+    # Enrolled 9/1–9/15 only → the sheet must still be generated.
+    ctx = _window_ctx(date(2026, 9, 1), date(2026, 9, 15))
+    assert compute_month_failure(2026, 9, ctx) is None
+
+
+def test_month_failure_enrolled_days_outside_auth_weekdays():
+    # Enrolled only Sat 9/5–Sun 9/6; authorized weekdays are Mon–Fri.
+    # No day is both enrolled and authorized → the sheet would be
+    # entirely blank, so the member must be skipped.
+    ctx = _window_ctx(date(2026, 9, 5), date(2026, 9, 6))
+    from monthly_schedule.per_day import REASON_NO_ELIGIBLE_DAYS
+    assert compute_month_failure(2026, 9, ctx) == REASON_NO_ELIGIBLE_DAYS
+
+
+def test_month_failure_enrollment_and_auth_windows_disjoint():
+    # Enrolled 9/1–9/10 but the authorization only starts 9/15.
+    ctx = _window_ctx(date(2026, 9, 1), date(2026, 9, 10),
+                      auth_start=date(2026, 9, 15))
+    from monthly_schedule.per_day import REASON_NO_ELIGIBLE_DAYS
+    assert compute_month_failure(2026, 9, ctx) == REASON_NO_ELIGIBLE_DAYS
+
+
+def test_month_failure_absent_on_all_enrolled_authorized_days():
+    # Enrolled 9/1–9/15 with an absence blanketing exactly that range:
+    # every schedulable day is blocked even though later September days
+    # are authorized (but not enrolled) → absent-for-the-month skip.
+    absence = [{"id": 1, "center_id": 1, "leave_type": "Vacation",
+                "start_date": date(2026, 9, 1),
+                "end_date": date(2026, 9, 15)}]
+    ctx = _window_ctx(date(2026, 9, 1), date(2026, 9, 15),
+                      absences=absence)
+    from monthly_schedule.per_day import REASON_ABSENT_MONTH
+    assert compute_month_failure(2026, 9, ctx) == REASON_ABSENT_MONTH
+
+
 def test_one_off_conflict_exception_carries_fields():
     from datetime import date
     from monthly_schedule.per_day import OneOffConflict

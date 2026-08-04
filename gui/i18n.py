@@ -276,6 +276,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "summary.reason.not_enrolled": "not enrolled during this month",
         "summary.reason.no_auth": "no active authorization for this month",
         "summary.reason.absent_month": "absent for the entire month",
+        "summary.reason.no_eligible_days": (
+            "no day is both enrolled and authorized this month"
+        ),
         # scope (used by GUI summary builder)
         "scope.plan": "plan {code} {period}",
         "scope.all": "all members {period}",
@@ -537,6 +540,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "summary.reason.not_enrolled": "本月未入册",
         "summary.reason.no_auth": "本月无有效授权",
         "summary.reason.absent_month": "整月缺席",
+        "summary.reason.no_eligible_days": "本月没有同时在册且有授权的日子",
         # scope
         "scope.plan": "计划 {code} {period}",
         "scope.all": "所有成员 {period}",

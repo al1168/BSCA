@@ -13,6 +13,9 @@ from monthly_schedule.rules import parse_hhmm
 REASON_NOT_ENROLLED = "not enrolled during this month"
 REASON_NO_AUTH = "no active authorization for this month"
 REASON_ABSENT_MONTH = "absent for the entire month"
+REASON_NO_ELIGIBLE_DAYS = (
+    "no day is both enrolled and authorized this month"
+)
 
 # Per-day rejection reasons surfaced by compute_day_eligibility().
 # Stable strings so the debug CSV and i18n table can key off them.
@@ -158,23 +161,30 @@ def compute_month_failure(year: int, month: int, ctx,
     if not any(ctx.active_authorization(d) is not None for d in days):
         return REASON_NO_AUTH
 
-    # Check whether the absences blanket every authorized day in the month.
-    has_authorized_unblocked = False
+    # A day is schedulable only when the member is enrolled AND an
+    # authorization covers it AND its weekday is authorized. Track that
+    # separately from the absence blanket so a member whose enrolled
+    # days never coincide with authorized days (an all-blank sheet) is
+    # skipped with its own reason instead of slipping through.
+    has_schedulable = False
+    has_unblocked = False
     for d in days:
+        if not ctx.is_enrolled(d):
+            continue
         auth = ctx.active_authorization(d)
         if auth is None:
             continue
         if d.isoweekday() not in get_authorized_weekdays(auth["auth_days"]):
             continue
+        has_schedulable = True
         if ctx.is_absent(d):
             continue
-        has_authorized_unblocked = True
+        has_unblocked = True
         break
 
-    if not has_authorized_unblocked:
-        # Distinguish "absent for entire month" from "no authorized days at
-        # all this month" (the latter is rare but possible). Both reduce to
-        # the same surfaced reason: nothing to schedule.
+    if not has_schedulable:
+        return REASON_NO_ELIGIBLE_DAYS
+    if not has_unblocked:
         return REASON_ABSENT_MONTH
 
     return None
