@@ -968,6 +968,77 @@ def test_process_member_calls_on_rows_after_success(monkeypatch, tmp_path):
     assert calls == [(sentinel_rows, {1, 3, 5})]
 
 
+def _swap_ctx(authorizations):
+    from datetime import date
+    from monthly_schedule.eligibility_context import MemberContext
+
+    return MemberContext(
+        enrollments=[{"id": 1, "center_id": 1,
+                      "start_date": date(2026, 1, 1), "end_date": None}],
+        authorizations=authorizations,
+        absences=[], availabilities=[], one_offs=[],
+    )
+
+
+def _auth_row(rid, start, end, auth_days):
+    return {"id": rid, "center_id": 1,
+            "auth_start": start, "auth_end": end,
+            "effective_start": start, "effective_end": end,
+            "auth_days": auth_days}
+
+
+def test_process_member_auth_weekdays_use_latest_auth(monkeypatch, tmp_path):
+    # Mid-month swap: Mon,Tue for 9/1-9/14, then Wed,Fri from 9/15.
+    # The header (and the billing row via on_rows) must show only the
+    # later days — {3, 5} — not the whole-month union.
+    from datetime import date
+    cli, sentinel_rows = _on_rows_pipeline(monkeypatch)
+    captured = {}
+
+    def capture_workbook(member, rows, path, auth_weekdays=None):
+        captured["weekdays"] = auth_weekdays
+    monkeypatch.setattr(cli, "build_workbook", capture_workbook)
+
+    ctx = _swap_ctx([
+        _auth_row(1, date(2026, 9, 1), date(2026, 9, 14), "1,2"),
+        _auth_row(2, date(2026, 9, 15), date(2026, 9, 30), "3,5"),
+    ])
+    member = {"center_id": 1, "first_name": "A", "last_name": "B",
+              "health_plan": "HF"}
+    calls = []
+    ok, stage, reason, day = cli.process_member(
+        member, ctx, 2026, 9, str(tmp_path), "K", {},
+        on_rows=lambda rows, weekdays: calls.append(weekdays),
+    )
+    assert ok is True
+    assert captured["weekdays"] == {3, 5}
+    assert calls == [{3, 5}]
+
+
+def test_process_member_auth_weekdays_from_last_covered_day(
+        monkeypatch, tmp_path):
+    # Authorization ends mid-month with nothing after: the latest auth
+    # in the month is still the one covering 9/14 → its days show.
+    from datetime import date
+    cli, sentinel_rows = _on_rows_pipeline(monkeypatch)
+    captured = {}
+
+    def capture_workbook(member, rows, path, auth_weekdays=None):
+        captured["weekdays"] = auth_weekdays
+    monkeypatch.setattr(cli, "build_workbook", capture_workbook)
+
+    ctx = _swap_ctx([
+        _auth_row(1, date(2026, 9, 1), date(2026, 9, 14), "1,2"),
+    ])
+    member = {"center_id": 1, "first_name": "A", "last_name": "B",
+              "health_plan": "HF"}
+    ok, stage, reason, day = cli.process_member(
+        member, ctx, 2026, 9, str(tmp_path), "K", {},
+    )
+    assert ok is True
+    assert captured["weekdays"] == {1, 2}
+
+
 def test_process_member_skips_on_rows_when_write_fails(monkeypatch, tmp_path):
     cli, _rows = _on_rows_pipeline(monkeypatch, fail_write=True)
     member = {"center_id": 1, "first_name": "A", "last_name": "B",

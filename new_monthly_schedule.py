@@ -364,13 +364,15 @@ def process_member(member, ctx, year, month, out_dir,
             member["center_id"], year, month, start_day, end_day
         ),
     )
-    # Authorized weekdays across the range (union over any mid-month
-    # authorization changes), shown in each timesheet header.
+    # Authorized weekdays from the latest authorization in the range —
+    # on a mid-month auth swap the newer days win, in the timesheet
+    # headers and the billing AUTH. DAYS / NUM DAYS columns alike.
     auth_weekdays = set()
-    for day in get_month_dates(year, month, start_day, end_day):
+    for day in reversed(get_month_dates(year, month, start_day, end_day)):
         auth = ctx.active_authorization(day)
-        if auth:
-            auth_weekdays |= get_authorized_weekdays(auth["auth_days"])
+        if auth is not None:
+            auth_weekdays = get_authorized_weekdays(auth["auth_days"])
+            break
     try:
         build_workbook(member, rows, path, auth_weekdays=auth_weekdays)
     except Exception as exc:  # reported in the run summary
