@@ -162,9 +162,10 @@ def _write_ruled_label(ws, row, label, label_col, rule_cols):
     label_cell.font = _REGULAR
     for col in range(lo, hi + 1):
         ws.cell(row=row, column=col).border = _RULE
-    ws.merge_cells(
-        start_row=row, start_column=lo, end_row=row, end_column=hi,
-    )
+    if hi > lo:
+        ws.merge_cells(
+            start_row=row, start_column=lo, end_row=row, end_column=hi,
+        )
 
 
 def _write_footer(ws, data_last_row, first_col, last_col, caption,
@@ -270,8 +271,8 @@ def build_workbook(member, rows, output_path, auth_weekdays=None):
     _write_footer(
         ws, last_data_row, LEFT_FIRST_COL, left_last_col,
         LEFT_CAPTION,
-        sig_label_col=1, sig_rule_cols=(2,),
-        date_label_col=3, date_rule_cols=(4,),
+        sig_label_col=1, sig_rule_cols=(2, 3),
+        date_label_col=4, date_rule_cols=(),
     )
     _write_footer(
         ws, last_data_row, RIGHT_FIRST_COL, right_last_col,
@@ -302,8 +303,8 @@ def build_workbook(member, rows, output_path, auth_weekdays=None):
     _autosize_columns(ws, table_header_row, last_data_row)
     # Footer write-on lines span the full merged label+rule cells; grow
     # those spans (not the narrow Day column) to guarantee a usable line.
-    _ensure_line_min(ws, (1, 2), _SIG_LINE_MIN)    # left signature (A:B)
-    _ensure_line_min(ws, (3, 4), _DATE_LINE_MIN)   # left date (C:D)
+    _ensure_line_min(ws, (1, 2, 3), _SIG_LINE_MIN)  # left signature (A:C)
+    _ensure_line_min(ws, (4,), _DATE_LINE_MIN)      # left date (D)
     _ensure_line_min(ws, (7, 8), _SIG_LINE_MIN)    # right signature
     _ensure_line_min(ws, (10, 11), _DATE_LINE_MIN)  # right date (J,K)
 

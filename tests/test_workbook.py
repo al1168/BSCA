@@ -110,15 +110,19 @@ def test_side_by_side_workbook_structure(tmp_path):
     # --- signature/date row 11: each label shares ONE merged cell with
     #     its extended write-on line, bottom-bordered across the span ---
     assert ws.cell(row=11, column=1).value == "Signature:"
-    assert ws.cell(row=11, column=3).value == "Date:"
+    assert ws.cell(row=11, column=4).value == "Date:"
     assert ws.cell(row=11, column=6).value == "Signature:"
     assert ws.cell(row=11, column=9).value == "Date:"
     # the label cell AND its rule cells all carry the bottom rule
     for c in (1, 2, 3, 4, 6, 7, 8, 9, 10, 11):
         assert ws.cell(row=11, column=c).border.bottom.style == "thin"
-    # label + line is one merged cell per field, in both footers
-    for rng in ("A11:B11", "C11:D11", "F11:H11", "I11:K11"):
+    # label + line is one merged cell per field, in both footers; the
+    # left Signature takes A:C (like the transport F:H) so its line is
+    # the long one, leaving the Date label + line on column D alone
+    for rng in ("A11:C11", "F11:H11", "I11:K11"):
         assert rng in merged
+    assert "A11:B11" not in merged
+    assert "C11:D11" not in merged
 
     # --- horizontal print centering on ---
     assert ws.print_options.horizontalCentered is True
@@ -136,12 +140,12 @@ def test_side_by_side_workbook_structure(tmp_path):
     assert ws.column_dimensions["D"].width >= 22          # Time-Out, wide
 
     # --- guaranteed Signature/Date line lengths: the merged write-on
-    #     spans (A:B sig, C:D date) stay long enough without forcing the
+    #     spans (A:C sig, D date) stay long enough without forcing the
     #     Day column wide ---
     assert (ws.column_dimensions["A"].width
-            + ws.column_dimensions["B"].width) >= 22 - 1e-6   # left sig
-    assert (ws.column_dimensions["C"].width
-            + ws.column_dimensions["D"].width) >= 14 - 1e-6   # left date
+            + ws.column_dimensions["B"].width
+            + ws.column_dimensions["C"].width) >= 22 - 1e-6   # left sig
+    assert ws.column_dimensions["D"].width >= 14 - 1e-6       # left date
     assert (ws.column_dimensions["G"].width
             + ws.column_dimensions["H"].width) >= 22 - 1e-6
     assert (ws.column_dimensions["J"].width
