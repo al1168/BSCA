@@ -9,6 +9,13 @@ from monthly_schedule.db import (
     get_all_members,
     get_all_enrollments, get_all_authorizations,
     get_all_absences, get_all_availability, get_all_one_offs,
+    get_all_billing_fields,
+    get_billing_codes,
+)
+from monthly_schedule.billing_workbook import (
+    build_billing_workbook,
+    collect_billing_row,
+    save_billing_workbook,
 )
 from monthly_schedule.eligibility_context import MemberContext
 from monthly_schedule.per_day import OneOffConflict
@@ -174,6 +181,30 @@ class ScheduleWorker(QThread):
         avail_idx = get_all_availability(self.db_path)
         one_off_idx = get_all_one_offs(self.db_path)
 
+        # The All-Members billing workbook needs demographics (gender,
+        # DOB, admission date, Medicaid #) the scheduler never reads.
+        # A roster-fetch failure must not block the run — the workbook
+        # is still built, with those columns blank.
+        billing_rows = []
+        billing_extra = {}
+        billing_codes = {}
+        billing_error = None
+        if self.mode == "all":
+            try:
+                billing_extra = get_all_billing_fields(self.db_path)
+            except Exception as exc:  # noqa: BLE001 - degrade, don't abort
+                billing_error = f"{type(exc).__name__}: {exc}"
+            # SADC/transportation codes live in the Codes lookup table
+            # of the same DB. Without it the sheet still generates,
+            # with '????' in the code columns.
+            try:
+                billing_codes = get_billing_codes(self.db_path)
+            except Exception as exc:  # noqa: BLE001 - degrade, don't abort
+                self.log_line.emit(
+                    "worker.billing_codes_failed",
+                    {"error": f"{type(exc).__name__}: {exc}"},
+                )
+
         for i, member in enumerate(members):
             try:
                 cid = member["center_id"]
@@ -216,6 +247,50 @@ class ScheduleWorker(QThread):
                             "worker.wrote_debug_csv",
                             {"filename": os.path.basename(written)},
                         )
+                on_rows = None
+                if self.mode == "all":
+                    # Default args pin this iteration's member/ctx (the
+                    # late-binding closure trap). Collection errors are
+                    # logged, never allowed to fail the member's
+                    # already-written timesheet.
+                    def on_rows(rows, auth_weekdays,
+                                member=member, ctx=ctx):
+                        try:
+                            billing_row = collect_billing_row(
+                                member, ctx,
+                                billing_extra.get(
+                                    member["center_id"], {},
+                                ),
+                                rows, auth_weekdays,
+                                self.year, self.month,
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            self.log_line.emit(
+                                "worker.billing_row_failed",
+                                {
+                                    "center_id": member["center_id"],
+                                    "error": (
+                                        f"{type(exc).__name__}: {exc}"
+                                    ),
+                                },
+                            )
+                            return
+                        if billing_row is None:
+                            self.log_line.emit(
+                                "worker.billing_unmapped_plan",
+                                {
+                                    "center_id": member["center_id"],
+                                    "name": (
+                                        f"{member['last_name']}, "
+                                        f"{member['first_name']}"
+                                    ),
+                                    "plan": str(
+                                        member.get("health_plan") or ""
+                                    ),
+                                },
+                            )
+                        else:
+                            billing_rows.append(billing_row)
                 ok, stage, reason, day = process_member(
                     member, ctx,
                     self.year, self.month, member_out_dir,
@@ -223,6 +298,7 @@ class ScheduleWorker(QThread):
                     start_day=self.start_day, end_day=self.end_day,
                     time_cache=time_cache,
                     schedule_rules_overrides=self.schedule_rules,
+                    on_rows=on_rows,
                 )
             except OneOffConflict as exc:
                 # process_member catches OneOffConflict internally and
@@ -291,7 +367,41 @@ class ScheduleWorker(QThread):
         # Per-member debug CSVs are written inside the loop, next to
         # each member's schedule.
 
+        # Aggregate billing workbook (All-Members runs only). Lives at
+        # the base output dir like the skipped CSV; any failure here is
+        # reported but never fails the run.
+        billing_path = None
+        if self.mode == "all" and success > 0:
+            def _billing_fallback(primary, actual):
+                self.log_line.emit(
+                    "worker.billing_fallback",
+                    {
+                        "primary": os.path.basename(primary),
+                        "filename": os.path.basename(actual),
+                    },
+                )
+            try:
+                billing_wb = build_billing_workbook(
+                    self.year, self.month, billing_rows,
+                    codes=billing_codes,
+                )
+                billing_path = save_billing_workbook(
+                    billing_wb, self.out_dir, self.year, self.month,
+                    on_fallback=_billing_fallback,
+                )
+                self.log_line.emit(
+                    "worker.wrote_billing",
+                    {"filename": os.path.basename(billing_path)},
+                )
+            except Exception as exc:  # noqa: BLE001 - degrade, don't abort
+                billing_error = f"{type(exc).__name__}: {exc}"
+                self.log_line.emit(
+                    "worker.billing_failed", {"error": billing_error}
+                )
+
         payload = {
+            "billing_path": billing_path,
+            "billing_error": billing_error,
             "generated_paths": generated_paths,
             "verb_key": "summary.verb.wrote",
             "success": success,

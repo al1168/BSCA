@@ -913,3 +913,69 @@ def test_collect_debug_rows_carries_band(monkeypatch):
     )
     assert rows
     assert all(r["band"] == "morning" for r in rows)
+
+
+def _on_rows_pipeline(monkeypatch, fail_write=False):
+    """Stub process_member's heavy deps: travel resolves instantly,
+    build_rows returns a sentinel list, build_workbook writes nothing
+    (or raises when fail_write)."""
+    import new_monthly_schedule as cli
+
+    sentinel_rows = [{"date": None, "time_in": "09:00"}]
+    monkeypatch.setattr(cli, "compute_month_failure",
+                        lambda *a, **k: None)
+    monkeypatch.setattr(cli, "resolve_travel_minutes",
+                        lambda member, api_key, cache: 10)
+    monkeypatch.setattr(cli, "build_rows",
+                        lambda *a, **k: sentinel_rows)
+    if fail_write:
+        def boom(*a, **k):
+            raise OSError("disk full")
+        monkeypatch.setattr(cli, "build_workbook", boom)
+    else:
+        monkeypatch.setattr(cli, "build_workbook",
+                            lambda *a, **k: None)
+    return cli, sentinel_rows
+
+
+def _on_rows_ctx():
+    from datetime import date
+    from monthly_schedule.eligibility_context import MemberContext
+
+    return MemberContext(
+        enrollments=[{"id": 1, "center_id": 1,
+                      "start_date": date(2026, 1, 1), "end_date": None}],
+        authorizations=[{"id": 1, "center_id": 1,
+                         "auth_start": date(2026, 1, 1),
+                         "auth_end": date(2026, 12, 31),
+                         "effective_start": date(2026, 1, 1),
+                         "effective_end": date(2026, 12, 31),
+                         "auth_days": "1,3,5"}],
+        absences=[], availabilities=[], one_offs=[],
+    )
+
+
+def test_process_member_calls_on_rows_after_success(monkeypatch, tmp_path):
+    cli, sentinel_rows = _on_rows_pipeline(monkeypatch)
+    member = {"center_id": 1, "first_name": "A", "last_name": "B",
+              "health_plan": "HF"}
+    calls = []
+    ok, stage, reason, day = cli.process_member(
+        member, _on_rows_ctx(), 2026, 6, str(tmp_path), "K", {},
+        on_rows=lambda rows, weekdays: calls.append((rows, weekdays)),
+    )
+    assert ok is True
+    assert calls == [(sentinel_rows, {1, 3, 5})]
+
+
+def test_process_member_skips_on_rows_when_write_fails(monkeypatch, tmp_path):
+    cli, _rows = _on_rows_pipeline(monkeypatch, fail_write=True)
+    member = {"center_id": 1, "first_name": "A", "last_name": "B",
+              "health_plan": "HF"}
+    calls = []
+    ok, stage, reason, day = cli.process_member(
+        member, _on_rows_ctx(), 2026, 6, str(tmp_path), "K", {},
+        on_rows=lambda rows, weekdays: calls.append(1),
+    )
+    assert ok is False and stage == "write"
+    assert calls == []

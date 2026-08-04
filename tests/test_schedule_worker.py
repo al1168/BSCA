@@ -138,3 +138,98 @@ def test_worker_warns_when_skipped_csv_unwritable(monkeypatch, tmp_path):
     assert not any(
         key == "worker.wrote_skipped_csv" for key, _args in log_events
     )
+
+
+def test_worker_single_mode_has_no_billing_workbook(monkeypatch, tmp_path):
+    """Non-all modes never build the billing workbook; the payload
+    still carries the keys (None) so the summary code stays simple."""
+    _stub_db_and_caches(monkeypatch, tmp_path)
+    worker = _make_worker(tmp_path)
+    success, payload = _run_to_completion(worker)
+    assert payload["billing_path"] is None
+    assert payload["billing_error"] is None
+
+
+def test_worker_all_mode_writes_billing_workbook(monkeypatch, tmp_path):
+    """An All-Members run collects billing rows via the on_rows hook and
+    writes the aggregate billing workbook at the base output dir."""
+    from datetime import date as _d
+
+    _stub_db_and_caches(monkeypatch, tmp_path)
+    member = {"center_id": 1, "last_name": "B", "first_name": "A",
+              "health_plan": "HF", "address": "x", "long_lat": "0,0"}
+    monkeypatch.setattr("gui.worker.get_all_members",
+                        lambda db: [member])
+    monkeypatch.setattr(
+        "gui.worker.get_all_billing_fields",
+        lambda db: {1: {"gender": "M", "dob": "2/1/1953",
+                        "admission_date": "1/1/2024",
+                        "medicaid": "AB123"}},
+    )
+
+    def fake_process_member(member, ctx, year, month, out_dir,
+                            api_key, cache, on_rows=None, **kwargs):
+        if on_rows is not None:
+            on_rows([{"date": _d(year, month, 1), "time_in": "09:00"}],
+                    {1, 3, 5})
+        return (True, None, None, None)
+
+    monkeypatch.setattr("gui.worker.process_member", fake_process_member)
+
+    worker = _make_worker(tmp_path)
+    worker.mode = "all"
+    log_events = []
+    worker.log_line.connect(lambda key, args: log_events.append(key))
+
+    success, payload = _run_to_completion(worker)
+
+    assert success is True
+    assert payload["billing_error"] is None
+    assert payload["billing_path"] is not None
+    import os as _os
+    assert _os.path.exists(payload["billing_path"])
+    assert _os.path.dirname(payload["billing_path"]) == str(tmp_path)
+    assert "worker.wrote_billing" in log_events
+
+    from openpyxl import load_workbook
+    ws = load_workbook(payload["billing_path"])["Sheet1"]
+    # the HF member landed in the HealthFirst section with its ID
+    found = [c.value for row in ws.iter_rows(min_col=2, max_col=2)
+             for c in row]
+    assert 1 in found
+
+
+def test_worker_all_mode_uses_codes_table(monkeypatch, tmp_path):
+    """Codes come from db.get_billing_codes; a member whose plan is in
+    the table gets its codes, others would get '????'."""
+    from datetime import date as _d
+
+    _stub_db_and_caches(monkeypatch, tmp_path)
+    member = {"center_id": 2, "last_name": "B", "first_name": "A",
+              "health_plan": "HF", "address": "x", "long_lat": "0,0"}
+    monkeypatch.setattr("gui.worker.get_all_members",
+                        lambda db: [member])
+    monkeypatch.setattr("gui.worker.get_all_billing_fields",
+                        lambda db: {})
+    monkeypatch.setattr("gui.worker.get_billing_codes",
+                        lambda db: {"HF": ("S5105", "T2003")})
+
+    def fake_process_member(member, ctx, year, month, out_dir,
+                            api_key, cache, on_rows=None, **kwargs):
+        if on_rows is not None:
+            on_rows([{"date": _d(year, month, 1), "time_in": "09:00"}],
+                    {1, 2, 3})
+        return (True, None, None, None)
+
+    monkeypatch.setattr("gui.worker.process_member", fake_process_member)
+
+    worker = _make_worker(tmp_path)
+    worker.mode = "all"
+    success, payload = _run_to_completion(worker)
+
+    from openpyxl import load_workbook
+    ws = load_workbook(payload["billing_path"])["Sheet1"]
+    hf_row = next(r[0].row for r in ws.iter_rows(min_col=2, max_col=2)
+                  if r[0].value == 2)
+    assert ws.cell(row=hf_row, column=8).value == "S5105"
+    assert ws.cell(row=hf_row, column=9).value == "T2003"

@@ -427,6 +427,93 @@ def get_all_one_offs(db_path: str) -> dict:
     return _index_by_center_id(rows)
 
 
+ALL_BILLING_FIELDS_QUERY = (
+    "SELECT [Center ID], [Gender], [DOB], [Admission Date], [Medicaid] "
+    "FROM [Contacts] WHERE [Center ID] IS NOT NULL"
+)
+
+
+def get_all_billing_fields(db_path: str) -> dict:
+    """Return {center_id: {gender, dob, admission_date, medicaid}} for
+    every Contacts row, one ODBC round-trip. Values pass through raw —
+    DOB / Admission Date are Short Text in the live DB (with occasional
+    typos), so normalization is left to billing_workbook.parse_flex_date
+    (which also handles a future migration to real Date/Time columns)."""
+    if not os.path.exists(db_path):
+        raise FileNotFoundError(f"Database not found: {db_path}")
+
+    import pyodbc
+
+    try:
+        conn = pyodbc.connect(build_connection_string(db_path))
+    except pyodbc.Error as exc:
+        raise RuntimeError(
+            "Could not open the Access database. Verify the Microsoft "
+            "Access ODBC driver is installed and its bitness matches "
+            "this Python interpreter (spec section 8). "
+            f"Original error: {exc}"
+        )
+    try:
+        cursor = conn.cursor()
+        cursor.execute(ALL_BILLING_FIELDS_QUERY)
+        return {
+            int(row[0]): {
+                "gender": row[1],
+                "dob": row[2],
+                "admission_date": row[3],
+                "medicaid": row[4],
+            }
+            for row in cursor.fetchall()
+        }
+    finally:
+        conn.close()
+
+
+BILLING_CODES_QUERY = (
+    "SELECT [Health Plan], [SADC Code], [Trans Code] FROM [Codes]"
+)
+
+
+def get_billing_codes(db_path: str) -> dict:
+    """Return {normalized plan code: (sadc_code, trans_code)} from the
+    Codes lookup table. Plans are normalized like everywhere else
+    (' hf ' -> 'HF'). Raises FileNotFoundError when the DB is absent,
+    RuntimeError when it can't be opened or has no Codes table — the
+    caller decides how to degrade (the billing sheet falls back to
+    '????' codes)."""
+    if not os.path.exists(db_path):
+        raise FileNotFoundError(f"Database not found: {db_path}")
+
+    import pyodbc
+
+    try:
+        conn = pyodbc.connect(build_connection_string(db_path))
+    except pyodbc.Error as exc:
+        raise RuntimeError(
+            "Could not open the Access database. Verify the Microsoft "
+            "Access ODBC driver is installed and its bitness matches "
+            "this Python interpreter (spec section 8). "
+            f"Original error: {exc}"
+        )
+    try:
+        cursor = conn.cursor()
+        try:
+            cursor.execute(BILLING_CODES_QUERY)
+        except pyodbc.Error as exc:
+            raise RuntimeError(
+                f"Could not read the Codes table: {exc}"
+            )
+        return {
+            _normalize_plan(row[0]): (
+                str(row[1] or "").strip(), str(row[2] or "").strip()
+            )
+            for row in cursor.fetchall()
+            if _normalize_plan(row[0])
+        }
+    finally:
+        conn.close()
+
+
 def _index_by_center_id(rows):
     """Group a flat list of row-dicts into {center_id: [rows]}."""
     out: dict[int, list] = {}

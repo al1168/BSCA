@@ -225,6 +225,30 @@ STRINGS: dict[str, dict[str, str]] = {
             "({error}). The skipped members are listed in the summary."
         ),
         "worker.wrote_debug_csv": "Wrote debug report: {filename}",
+        "worker.wrote_billing": (
+            "Wrote billing attendance workbook: {filename}"
+        ),
+        "worker.billing_failed": (
+            "Warning: could not write the billing attendance workbook "
+            "({error}). The timesheets were still generated."
+        ),
+        "worker.billing_fallback": (
+            "Warning: {primary} is locked (open in Excel?) — saved the "
+            "billing attendance workbook as {filename} instead."
+        ),
+        "worker.billing_unmapped_plan": (
+            "ID {center_id} ({name}): health plan '{plan}' is not "
+            "recognized — left out of the billing attendance workbook."
+        ),
+        "worker.billing_row_failed": (
+            "ID {center_id}: could not add to the billing attendance "
+            "workbook ({error})."
+        ),
+        "worker.billing_codes_failed": (
+            "Warning: could not read the Codes table from the database "
+            "({error}) — the billing workbook will show '????' for the "
+            "SADC/transportation codes."
+        ),
         "worker.no_members": "No members found in the database.",
         "worker.no_members_for_plan": "No members found for plan {plan}.",
         "worker.cannot_create_folder": "Cannot create output folder: {error}",
@@ -236,6 +260,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "summary.failures_header": "Failures:",
         "summary.failure_row_named": "  - ID {center_id} ({name}): {stage} — {reason}",
         "summary.failure_row_unnamed": "  - ID {center_id}: {stage} — {reason}",
+        "summary.billing": "Billing attendance workbook: {filename}",
+        "summary.billing_failed": (
+            "Billing attendance workbook could not be written: {error}"
+        ),
         "summary.stage.geocode": "geocode",
         "summary.stage.route": "route",
         "summary.stage.generate": "generate",
@@ -464,6 +492,26 @@ STRINGS: dict[str, dict[str, str]] = {
             "被跳过的成员已在摘要中列出。"
         ),
         "worker.wrote_debug_csv": "已写入调试报告：{filename}",
+        "worker.wrote_billing": "已写入计费出勤工作簿：{filename}",
+        "worker.billing_failed": (
+            "警告：无法写入计费出勤工作簿（{error}）。"
+            "考勤表仍已生成。"
+        ),
+        "worker.billing_fallback": (
+            "警告：{primary} 已被占用（可能在 Excel 中打开）——"
+            "已将计费出勤工作簿另存为 {filename}。"
+        ),
+        "worker.billing_unmapped_plan": (
+            "编号 {center_id}（{name}）：无法识别保险计划“{plan}”——"
+            "未列入计费出勤工作簿。"
+        ),
+        "worker.billing_row_failed": (
+            "编号 {center_id}：无法加入计费出勤工作簿（{error}）。"
+        ),
+        "worker.billing_codes_failed": (
+            "警告：无法从数据库读取 Codes 代码表（{error}）——"
+            "计费出勤工作簿的 SADC/交通代码将显示为“????”。"
+        ),
         "worker.no_members": "数据库中找不到成员。",
         "worker.no_members_for_plan": "计划 {plan} 中找不到成员。",
         "worker.cannot_create_folder": "无法创建输出文件夹：{error}",
@@ -475,6 +523,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "summary.failures_header": "失败：",
         "summary.failure_row_named": "  - 编号 {center_id}（{name}）：{stage} — {reason}",
         "summary.failure_row_unnamed": "  - 编号 {center_id}：{stage} — {reason}",
+        "summary.billing": "计费出勤工作簿：{filename}",
+        "summary.billing_failed": "无法写入计费出勤工作簿：{error}",
         "summary.stage.geocode": "地理编码",
         "summary.stage.route": "路线",
         "summary.stage.generate": "生成",

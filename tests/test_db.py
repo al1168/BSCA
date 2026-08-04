@@ -400,3 +400,66 @@ def test_get_plan_member_counts_param_order(monkeypatch, tmp_path):
 
     active_calls = [p for q, p in executed if "EXISTS" in q]
     assert active_calls == [(end, start)]   # month_end first, month_start second
+
+
+def test_all_billing_fields_query_columns():
+    from monthly_schedule.db import ALL_BILLING_FIELDS_QUERY
+    for col in ("[Center ID]", "[Gender]", "[DOB]",
+                "[Admission Date]", "[Medicaid]"):
+        assert col in ALL_BILLING_FIELDS_QUERY
+    assert "FROM [Contacts]" in ALL_BILLING_FIELDS_QUERY
+    # NULL Center IDs can't key the roster dict.
+    assert "WHERE [Center ID] IS NOT NULL" in ALL_BILLING_FIELDS_QUERY
+
+
+def test_get_all_billing_fields_missing_db_raises(tmp_path):
+    from monthly_schedule.db import get_all_billing_fields
+    missing = tmp_path / "nope.accdb"
+    with pytest.raises(FileNotFoundError):
+        get_all_billing_fields(str(missing))
+
+
+def test_billing_codes_query_columns():
+    from monthly_schedule.db import BILLING_CODES_QUERY
+    for col in ("[Health Plan]", "[SADC Code]", "[Trans Code]"):
+        assert col in BILLING_CODES_QUERY
+    assert "FROM [Codes]" in BILLING_CODES_QUERY
+
+
+def test_get_billing_codes_missing_db_raises(tmp_path):
+    from monthly_schedule.db import get_billing_codes
+    missing = tmp_path / "nope.accdb"
+    with pytest.raises(FileNotFoundError):
+        get_billing_codes(str(missing))
+
+
+def test_get_billing_codes_missing_table_raises_runtime(monkeypatch,
+                                                        tmp_path):
+    """A DB without the Codes table surfaces as RuntimeError (the
+    worker catches it and falls back to '????' codes)."""
+    import sys
+    import types
+    from monthly_schedule.db import get_billing_codes
+
+    db_file = tmp_path / "fake.accdb"
+    db_file.write_bytes(b"")
+
+    class OdbcError(Exception):
+        pass
+
+    class FakeCursor:
+        def execute(self, query, *params):
+            raise OdbcError("no such table 'Codes'")
+
+    class FakeConn:
+        def cursor(self):
+            return FakeCursor()
+        def close(self):
+            pass
+
+    fake_pyodbc = types.SimpleNamespace(
+        Error=OdbcError, connect=lambda _cs: FakeConn()
+    )
+    monkeypatch.setitem(sys.modules, "pyodbc", fake_pyodbc)
+    with pytest.raises(RuntimeError, match="Codes table"):
+        get_billing_codes(str(db_file))

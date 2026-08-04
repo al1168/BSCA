@@ -875,6 +875,18 @@ class MainWindow(QWidget):
         if data["failures"]:
             head += tr("summary.failed_tail", n=len(data["failures"]))
 
+        # Billing attendance workbook (All-Members runs): success shows
+        # the filename; a build failure is noted without failing the run.
+        if data.get("billing_path"):
+            head += "\n" + tr(
+                "summary.billing",
+                filename=os.path.basename(data["billing_path"]),
+            )
+        elif data.get("billing_error"):
+            head += "\n" + tr(
+                "summary.billing_failed", error=data["billing_error"]
+            )
+
         if not data["failures"]:
             return head
 

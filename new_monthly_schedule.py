@@ -314,7 +314,8 @@ def parse_args(argv):
 
 def process_member(member, ctx, year, month, out_dir,
                    api_key, cache, start_day=None, end_day=None,
-                   time_cache=None, schedule_rules_overrides=None):
+                   time_cache=None, schedule_rules_overrides=None,
+                   on_rows=None):
     """Run the per-member pipeline. Returns (ok, stage, reason, day).
     On success ok is True and stage/reason/day are None. On failure
     stage is one of 'eligibility'/'geocode'/'route'/'one_off_conflict'/
@@ -324,7 +325,10 @@ def process_member(member, ctx, year, month, out_dir,
     times are reused across runs (idempotency for partial schedules).
     `schedule_rules_overrides` is the user's settings-configured rules
     (earliest_time_in, latest_time_out, session_length_min,
-    travel_buffer_min, etc.) that replace the built-in defaults."""
+    travel_buffer_min, etc.) that replace the built-in defaults.
+    `on_rows(rows, auth_weekdays)` is called only after the workbook is
+    written successfully, so callers (the All-Members billing sheet)
+    see exactly the members that actually received a timesheet."""
     failure = compute_month_failure(year, month, ctx, start_day, end_day)
     if failure is not None:
         return (False, "eligibility", failure, None)
@@ -371,6 +375,8 @@ def process_member(member, ctx, year, month, out_dir,
         build_workbook(member, rows, path, auth_weekdays=auth_weekdays)
     except Exception as exc:  # reported in the run summary
         return (False, "write", f"{type(exc).__name__} — {exc}", None)
+    if on_rows is not None:
+        on_rows(rows, auth_weekdays)
     print(f"Wrote {path}")
     return (True, None, None, None)
 
