@@ -186,15 +186,64 @@ def test_availability_window_honored():
     assert _to_min(mon["time_out"]) <= _to_min("15:00")
 
 
-def test_debug_rows_only_authorized_weekdays():
-    # auth_days "1,3,5" → Mon/Wed/Fri only. May 2026 has 13 such days.
+def test_debug_rows_cover_every_day_of_month():
+    # Every calendar day of May 2026 gets a row, weekends included.
     rows = build_debug_rows(2026, 5, _ctx_full_month("1,3,5"), PLAN_RULES)
-    assert len(rows) == 13
-    days = {r["day"] for r in rows}
-    assert days == {"Mon", "Wed", "Fri"}
-    # All days scheduled.
-    assert all(r["scheduled"] is True for r in rows)
-    assert all(r["reason"] == "Scheduled" for r in rows)
+    assert len(rows) == 31
+    # Authorized weekdays (Mon/Wed/Fri) are scheduled.
+    mon = next(r for r in rows if r["date"] == date(2026, 5, 4))
+    assert mon["scheduled"] is True
+    assert mon["reason"] == "Scheduled"
+    # 2026-05-02 is a Saturday → plain sentence naming the day and the
+    # authorized days.
+    sat = next(r for r in rows if r["date"] == date(2026, 5, 2))
+    assert sat["scheduled"] is False
+    assert sat["reason"] == (
+        "Saturday is not an authorized day (authorized: Mon, Wed, Fri)"
+    )
+    assert sat["auth_days"] == "1,3,5"
+
+
+def test_debug_rows_no_auth_day_sentence():
+    # Authorization ends 2026-05-15 → later days have no authorization.
+    ctx = MemberContext(
+        enrollments=[{"id": 1, "center_id": 1,
+                      "start_date": date(2026, 1, 1), "end_date": None}],
+        authorizations=[{"id": 1, "center_id": 1,
+                         "auth_start": date(2026, 1, 1),
+                         "auth_end": date(2026, 5, 15),
+                         "effective_start": date(2026, 1, 1),
+                         "effective_end": date(2026, 5, 15),
+                         "auth_days": "1,3,5"}],
+        absences=[], availabilities=[], one_offs=[],
+    )
+    rows = build_debug_rows(2026, 5, ctx, PLAN_RULES)
+    assert len(rows) == 31
+    # 2026-05-18 is a Monday after the authorization ended.
+    mon = next(r for r in rows if r["date"] == date(2026, 5, 18))
+    assert mon["scheduled"] is False
+    assert mon["reason"] == "No authorization covers this day"
+    assert mon["auth_days"] == ""
+
+
+def test_debug_rows_not_enrolled_day_sentence():
+    # Enrollment starts mid-month → earlier days are not enrolled.
+    ctx = MemberContext(
+        enrollments=[{"id": 1, "center_id": 1,
+                      "start_date": date(2026, 5, 15), "end_date": None}],
+        authorizations=[{"id": 1, "center_id": 1,
+                         "auth_start": date(2026, 1, 1),
+                         "auth_end": date(2026, 12, 31),
+                         "effective_start": date(2026, 1, 1),
+                         "effective_end": date(2026, 12, 31),
+                         "auth_days": "1,3,5"}],
+        absences=[], availabilities=[], one_offs=[],
+    )
+    rows = build_debug_rows(2026, 5, ctx, PLAN_RULES)
+    # 2026-05-04 is a Monday before enrollment started.
+    mon = next(r for r in rows if r["date"] == date(2026, 5, 4))
+    assert mon["scheduled"] is False
+    assert mon["reason"] == "Not enrolled at the center on this day"
 
 
 def test_debug_rows_records_absence_reason():
@@ -595,6 +644,12 @@ def test_pickup_flag_off_allows_early_pickup():
     assert early, "expected at least one pickup before 12:00 with flag off"
 
 
+def _first_monday(rows):
+    # 2026-05-04 is the first Monday of May 2026 — the first authorized
+    # day in the auth_days "1" contexts these tests use.
+    return next(r for r in rows if r["date"] == date(2026, 5, 4))
+
+
 def test_debug_too_narrow_day_has_window_and_detail():
     # avail 08:00-11:30, reserve 2+34=36 → usable 08:00-10:54 (2h54m),
     # under the 3h30m minimum.
@@ -618,8 +673,7 @@ def test_debug_too_narrow_day_has_window_and_detail():
         one_offs=[],
     )
     rows = build_debug_rows(2026, 5, ctx, rules)
-    assert rows, "expected one row per authorized Monday"
-    row = rows[0]
+    row = _first_monday(rows)
     assert row["scheduled"] is False
     assert row["placement_window"] == "08:00-10:54"
     assert row["max_length"] == "02:54"
@@ -633,7 +687,7 @@ def test_debug_eligible_day_notes_reserve():
     rules = {**DEADLINE_E2E_RULES, "dropoff_trail_min": (30, 34)}
     ctx = _deadline_ctx()  # avail 08:00-15:00 → reserve 36, eligible
     rows = build_debug_rows(2026, 5, ctx, rules)
-    row = rows[0]
+    row = _first_monday(rows)
     assert row["scheduled"] is True
     assert row["placement_window"] == "08:00-14:24"
     assert row["reason_detail"] == (
@@ -646,7 +700,7 @@ def test_debug_too_narrow_day_has_pickup_reserve_detail():
     # under the 3h30m minimum.
     rows = build_debug_rows(2026, 5, _avail_ctx("13:00", "16:00"),
                             HEAD_E2E_RULES)
-    row = rows[0]
+    row = _first_monday(rows)
     assert row["scheduled"] is False
     assert row["placement_window"] == "13:29-16:00"
     assert row["reason_detail"] == (
@@ -658,7 +712,7 @@ def test_debug_too_narrow_day_has_pickup_reserve_detail():
 def test_debug_eligible_day_notes_pickup_reserve():
     rows = build_debug_rows(2026, 5, _avail_ctx("12:00", "16:00"),
                             HEAD_E2E_RULES)
-    row = rows[0]
+    row = _first_monday(rows)
     assert row["scheduled"] is True
     assert row["placement_window"] == "12:29-16:00"
     assert row["reason_detail"] == (
@@ -670,7 +724,7 @@ def test_debug_eligible_day_notes_both_reserves():
     # avail 09:00-15:00: head 29, tail 2+30=32 → window 09:29-14:28.
     rows = build_debug_rows(2026, 5, _avail_ctx("09:00", "15:00"),
                             HEAD_E2E_RULES)
-    row = rows[0]
+    row = _first_monday(rows)
     assert row["scheduled"] is True
     assert row["placement_window"] == "09:29-14:28"
     assert row["reason_detail"] == (
@@ -683,7 +737,7 @@ def test_debug_too_narrow_day_lists_both_reserves():
     # avail 10:30-14:30: (630+29, 870-32) = 10:59-13:58 → 2h59m < min.
     rows = build_debug_rows(2026, 5, _avail_ctx("10:30", "14:30"),
                             HEAD_E2E_RULES)
-    row = rows[0]
+    row = _first_monday(rows)
     assert row["scheduled"] is False
     assert row["placement_window"] == "10:59-13:58"
     assert row["reason_detail"] == (
@@ -714,7 +768,7 @@ def test_debug_too_narrow_without_deadline_shows_width():
         one_offs=[],
     )
     rows = build_debug_rows(2026, 5, ctx, rules)
-    row = rows[0]
+    row = _first_monday(rows)
     assert row["scheduled"] is False
     assert row["placement_window"] == "12:00-13:30"
     assert row["reason_detail"] == "usable 12:00-13:30 (1h30m) < min 3h30m"
@@ -733,8 +787,9 @@ def test_debug_open_day_has_empty_detail():
         absences=[], availabilities=[], one_offs=[],
     )
     rows = build_debug_rows(2026, 5, ctx, DEADLINE_E2E_RULES)
-    assert rows[0]["scheduled"] is True
-    assert rows[0]["reason_detail"] == ""
+    row = _first_monday(rows)
+    assert row["scheduled"] is True
+    assert row["reason_detail"] == ""
 
 
 # Band feature on; percent 100 -> every hashed member is morning.

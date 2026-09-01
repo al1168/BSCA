@@ -168,12 +168,13 @@ def _simple_conflict_reason(detail):
 
 def build_debug_rows(year, month, ctx, plan_rules,
                      start_day=None, end_day=None, center_id=None):
-    """Diagnostic rows for the debug CSV (one per authorized day).
+    """Diagnostic rows for the debug CSV (one per calendar day).
 
-    A day is "authorized" iff there's an active authorization on it AND
-    that day's weekday is in the authorization's auth_days. Non-
-    authorized days are skipped (the user only wants reasons for days
-    they expected to be scheduled).
+    Every day of the requested range (defaults to the full month,
+    weekends included) gets a row, so the CSV explains the whole month:
+    days outside the authorization, wrong weekdays, and non-enrolled
+    days each carry their plain-English rejection sentence. On days
+    with no active authorization the `auth_days` column is ''.
 
     Each row is {date, day, scheduled, reason} plus diagnostic fields
     explaining the decision: `reason_detail` (free-text arithmetic
@@ -198,11 +199,8 @@ def build_debug_rows(year, month, ctx, plan_rules,
     band = band_for_member(center_id, plan_rules) or ""
     for day in get_month_dates(year, month, start_day, end_day):
         auth = ctx.active_authorization(day)
-        if auth is None:
-            continue
-        authorized = get_authorized_weekdays(auth["auth_days"])
-        if day.isoweekday() not in authorized:
-            continue
+        authorized = (get_authorized_weekdays(auth["auth_days"])
+                      if auth else set())
 
         # The availability that applies: a one-off overrides the
         # recurring rule for that date.

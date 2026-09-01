@@ -728,8 +728,8 @@ def test_debug_flag_writes_per_member_debug_csvs(monkeypatch, tmp_path):
             "availability,availability_source,absent,auth_days,"
             "placement_window,max_length,band"
         )
-        # auth_days "1.3.4.5" → Mon/Wed/Thu/Fri in May 2026 = 17 days.
-        assert len(lines) - 1 == 17
+        # Every calendar day of May 2026 gets a row.
+        assert len(lines) - 1 == 31
         ids = {line.split(",", 1)[0] for line in lines[1:]}
         assert ids == {cid}
 
@@ -791,10 +791,11 @@ def test_collect_debug_rows_uses_travel_adjusted_offsets(monkeypatch):
     )
     rows = cli.collect_debug_rows(member, ctx, 2026, 5,
                                   api_key="K", cache={})
+    mon = next(r for r in rows if r["date"] == date(2026, 5, 4))
     # travel 25 + buffer max 5 + drift max 2 = 32 min reserve
     # → out_hi = 15:00 - 32m = 14:28 (default rules, flag on).
-    assert rows[0]["placement_window"] == "08:00-14:28"
-    assert rows[0]["reason_detail"] == (
+    assert mon["placement_window"] == "08:00-14:28"
+    assert mon["reason_detail"] == (
         "drop-off reserve 32m before 15:00 avail end"
     )
 
@@ -827,8 +828,9 @@ def test_collect_debug_rows_without_cache_uses_defaults(monkeypatch):
         one_offs=[],
     )
     rows = cli.collect_debug_rows(member, ctx, 2026, 5)
+    mon = next(r for r in rows if r["date"] == date(2026, 5, 4))
     # Default offsets: drift max 2 + dropoff trail max 12 = 14 min.
-    assert rows[0]["placement_window"] == "08:00-14:46"
+    assert mon["placement_window"] == "08:00-14:46"
 
 
 def test_collect_debug_rows_marks_rows_when_travel_unresolved(monkeypatch):
@@ -863,9 +865,14 @@ def test_collect_debug_rows_marks_rows_when_travel_unresolved(monkeypatch):
                                   api_key="K", cache={})
     # Travel unresolved -> falls back to default offsets, and every row
     # is stamped so the CSV reader knows they aren't the real run's.
-    assert rows[0]["placement_window"] == "08:00-14:46"
-    assert rows[0]["reason_detail"] == (
+    mon = next(r for r in rows if r["date"] == date(2026, 5, 4))
+    assert mon["placement_window"] == "08:00-14:46"
+    assert mon["reason_detail"] == (
         "drop-off reserve 14m before 15:00 avail end; "
+        "travel unresolved - default offsets shown"
+    )
+    # Rows without their own detail still get the stamp.
+    assert rows[0]["reason_detail"] == (
         "travel unresolved - default offsets shown"
     )
 
@@ -955,12 +962,52 @@ def _on_rows_ctx():
     )
 
 
+def test_process_member_returns_one_off_conflict_detail(monkeypatch, tmp_path):
+    """The structured detail has to reach the caller so the GUI can
+    translate the conflict; the CSV keeps the English `reason`."""
+    from datetime import date
+    import new_monthly_schedule as cli
+    from monthly_schedule.eligibility_context import MemberContext
+
+    monkeypatch.setattr(cli, "resolve_travel_minutes",
+                        lambda member, api_key, cache: 10)
+    ctx = MemberContext(
+        enrollments=[{"id": 1, "center_id": 1,
+                      "start_date": date(2026, 1, 1), "end_date": None}],
+        authorizations=[{"id": 1, "center_id": 1,
+                         "auth_start": date(2026, 1, 1),
+                         "auth_end": date(2026, 12, 31),
+                         "effective_start": date(2026, 1, 1),
+                         "effective_end": date(2026, 12, 31),
+                         "auth_days": "1,2,3,4,5,6,7"}],
+        absences=[{"id": 14, "center_id": 1, "leave_type": "Vacation",
+                   "start_date": date(2026, 6, 1),
+                   "end_date": date(2026, 6, 2)}],
+        availabilities=[],
+        one_offs=[{"id": 4, "center_id": 1, "date": date(2026, 6, 1),
+                   "avail_start": "09:00", "avail_end": "12:00"}],
+    )
+    member = {"center_id": 1, "first_name": "A", "last_name": "B",
+              "health_plan": "HF"}
+    ok, stage, reason, day, detail = cli.process_member(
+        member, ctx, 2026, 6, str(tmp_path), "K", {},
+    )
+    assert ok is False
+    assert stage == "one_off_conflict"
+    assert day == date(2026, 6, 1)
+    assert "OneOffAvailability row 4" in reason
+    assert "Absences row 14" in reason
+    assert detail["kind"] == "absence"
+    assert detail["one_offs"][0]["id"] == 4
+    assert detail["absence"]["id"] == 14
+
+
 def test_process_member_calls_on_rows_after_success(monkeypatch, tmp_path):
     cli, sentinel_rows = _on_rows_pipeline(monkeypatch)
     member = {"center_id": 1, "first_name": "A", "last_name": "B",
               "health_plan": "HF"}
     calls = []
-    ok, stage, reason, day = cli.process_member(
+    ok, stage, reason, day, detail = cli.process_member(
         member, _on_rows_ctx(), 2026, 6, str(tmp_path), "K", {},
         on_rows=lambda rows, weekdays: calls.append((rows, weekdays)),
     )
@@ -1006,7 +1053,7 @@ def test_process_member_auth_weekdays_use_latest_auth(monkeypatch, tmp_path):
     member = {"center_id": 1, "first_name": "A", "last_name": "B",
               "health_plan": "HF"}
     calls = []
-    ok, stage, reason, day = cli.process_member(
+    ok, stage, reason, day, detail = cli.process_member(
         member, ctx, 2026, 9, str(tmp_path), "K", {},
         on_rows=lambda rows, weekdays: calls.append(weekdays),
     )
@@ -1032,7 +1079,7 @@ def test_process_member_auth_weekdays_from_last_covered_day(
     ])
     member = {"center_id": 1, "first_name": "A", "last_name": "B",
               "health_plan": "HF"}
-    ok, stage, reason, day = cli.process_member(
+    ok, stage, reason, day, detail = cli.process_member(
         member, ctx, 2026, 9, str(tmp_path), "K", {},
     )
     assert ok is True
@@ -1044,7 +1091,7 @@ def test_process_member_skips_on_rows_when_write_fails(monkeypatch, tmp_path):
     member = {"center_id": 1, "first_name": "A", "last_name": "B",
               "health_plan": "HF"}
     calls = []
-    ok, stage, reason, day = cli.process_member(
+    ok, stage, reason, day, detail = cli.process_member(
         member, _on_rows_ctx(), 2026, 6, str(tmp_path), "K", {},
         on_rows=lambda rows, weekdays: calls.append(1),
     )
