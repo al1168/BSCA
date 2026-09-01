@@ -167,17 +167,22 @@ absent to member partially constrained**:
 4. The placement-window check is last because it depends on the plan's
    day bounds and the chosen availability row.
 
-If you turn on the **Debug** checkbox in the GUI, each authorized day
-gets a row in `Debug_<YYYY-MM>.csv` recording which of these checks
-made it ineligible (or `yes` if it was scheduled), a `reason_detail`
-column with the arithmetic behind window rejections (availability,
-drop-off reserve, usable width vs. required minimum), along with the
-availability used, absence/leave type, authorized weekdays, the
-placement window, and the maximum session length that fit. A `band`
+If you turn on the **Debug** checkbox in the GUI, every day of the
+selected month (weekends included) gets a row in
+`Debug_<center_id>_<YYYY-MM>.csv`. The `reason` column is a
+plain-English sentence — `Scheduled`, or why not (e.g. "Saturday is not
+an authorized day (authorized: Mon, Wed, Fri)", "Marked absent
+(Vacation)", "Available time (08:00-11:00) is too short to fit a
+session"). The technical columns follow for troubleshooting: a
+`reason_detail` column with the arithmetic behind window rejections
+(availability, drop-off reserve, usable width vs. required minimum) —
+or, for one-off conflicts, the exact Access rows that disagree — along
+with the availability used, absence/leave type, authorized weekdays,
+the placement window, and the maximum session length that fit. A `band`
 column carries the member's `morning`/`afternoon` assignment on every
 row when the distribution feature is on (blank otherwise); it reflects
-the member's current band, not necessarily where an already-cached day's
-time actually landed.
+the member's current band, not necessarily where an already-cached
+day's time actually landed.
 
 ## GUI: the Entire Plan table
 
