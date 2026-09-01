@@ -169,7 +169,9 @@ absent to member partially constrained**:
 
 If you turn on the **Debug** checkbox in the GUI, every day of the
 selected month (weekends included) gets a row in
-`Debug_<center_id>_<YYYY-MM>.csv`. The `reason` column is a
+`Debug_<center_id>_<YYYY-MM>.csv`, written into a flat
+`Debug <YYYY-MM>` folder under the run's output directory — so
+schedules, activity logs, and debug files each get their own folder. The `reason` column is a
 plain-English sentence — `Scheduled`, or why not (e.g. "Saturday is not
 an authorized day (authorized: Mon, Wed, Fri)", "Marked absent
 (Vacation)", "Available time (08:00-11:00) is too short to fit a
