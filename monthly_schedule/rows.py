@@ -5,13 +5,17 @@ from monthly_schedule.auth_days import (
 )
 from monthly_schedule.month_dates import get_month_dates
 from monthly_schedule.per_day import (
-    compute_day_eligibility, OneOffConflict, REASON_DAY_WINDOW_TOO_NARROW,
+    compute_day_eligibility, OneOffConflict, REASON_DAY_ABSENT,
+    REASON_DAY_NOT_ENROLLED, REASON_DAY_NO_AUTH,
+    REASON_DAY_WRONG_WEEKDAY, REASON_DAY_WINDOW_TOO_NARROW,
 )
 from monthly_schedule.daily_schedule import build_daily_schedule
 from monthly_schedule.rules import parse_hhmm, format_minutes, band_for_member
 from monthly_schedule.time_cache import lookup_times, store_times
 
 DAY_ABBR = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun"}
+DAY_NAME = {1: "Monday", 2: "Tuesday", 3: "Wednesday", 4: "Thursday",
+            5: "Friday", 6: "Saturday", 7: "Sunday"}
 TIME_KEYS = ("pickup", "arrival", "time_in", "time_out", "departure", "dropoff")
 
 
@@ -28,6 +32,11 @@ def build_rows(year, month, ctx, plan_rules, rng,
     Ineligible days have '' for every time key. Eligible days are filled
     via build_daily_schedule, honoring the placement window (day bounds
     intersected with availability) the member's Availability rule imposes.
+
+    Each row also carries `status`: "attended" (eligible), "absent"
+    (rejected by REASON_DAY_ABSENT) or "ineligible" (any other
+    rejection). The activity log workbook keys off it so its day grid
+    mirrors the timesheet exactly.
 
     When `time_cache` is provided (along with `center_id`, `plan`, and
     `travel_minutes`), each eligible day is first looked up in the cache
@@ -77,9 +86,12 @@ def build_rows(year, month, ctx, plan_rules, rng,
                         times, plan, travel_minutes,
                     )
             row.update(times)
+            row["status"] = "attended"
         else:
             for key in TIME_KEYS:
                 row[key] = ""
+            row["status"] = ("absent" if result.reason == REASON_DAY_ABSENT
+                             else "ineligible")
         rows.append(row)
     return rows
 
@@ -117,6 +129,43 @@ def _reason_detail(reason, availability, reserve, in_lo, out_hi,
     return "; ".join(notes)
 
 
+def _simple_reason(reason, day, authorized, absence, availability):
+    """One plain-English sentence for the debug CSV `reason` column.
+
+    `authorized` is the weekday set from the day's authorization (empty
+    set when there is none), `absence` the Absences row covering the day
+    (or None), `availability` the effective HH:MM-HH:MM window ('' when
+    none applies)."""
+    if reason == REASON_DAY_NOT_ENROLLED:
+        return "Not enrolled at the center on this day"
+    if reason == REASON_DAY_NO_AUTH:
+        return "No authorization covers this day"
+    if reason == REASON_DAY_WRONG_WEEKDAY:
+        names = ", ".join(DAY_ABBR[d] for d in sorted(authorized))
+        detail = (f"authorized: {names}" if names
+                  else "no authorized days on file")
+        return (f"{DAY_NAME[day.isoweekday()]} is not an authorized day "
+                f"({detail})")
+    if reason == REASON_DAY_ABSENT:
+        leave = str(absence["leave_type"] or "").strip() if absence else ""
+        return f"Marked absent ({leave})" if leave else "Marked absent"
+    if reason == REASON_DAY_WINDOW_TOO_NARROW:
+        if availability:
+            return (f"Available time ({availability}) is too short "
+                    "to fit a session")
+        return "Available time is too short to fit a session"
+    return reason
+
+
+def _simple_conflict_reason(detail):
+    """Plain-English sentence for a OneOffConflictDetail."""
+    if detail.kind == "duplicate":
+        return (f"{len(detail.one_offs)} conflicting one-off availability "
+                "entries exist for this day")
+    return ("A one-off availability entry conflicts with an absence "
+            "on this day")
+
+
 def build_debug_rows(year, month, ctx, plan_rules,
                      start_day=None, end_day=None, center_id=None):
     """Diagnostic rows for the debug CSV (one per authorized day).
@@ -138,10 +187,12 @@ def build_debug_rows(year, month, ctx, plan_rules,
     ("morning"/"afternoon" on every row when the feature is on and a
     center_id was given; '' otherwise — band is a per-member property).
 
-    `scheduled` is True when compute_day_eligibility accepted the day;
-    otherwise False with a non-empty `reason` from REASON_DAY_*. A
-    OneOffConflict is caught per-day and reported as the reason, so the
-    CSV always completes even when the schedule build itself fails.
+    `scheduled` is True when compute_day_eligibility accepted the day.
+    `reason` is a plain-English sentence: "Scheduled" for accepted days,
+    otherwise a one-line explanation of the rejection. A OneOffConflict
+    is caught per-day — its simple sentence goes in `reason` and its
+    detailed sentence (with the Access row IDs) in `reason_detail` — so
+    the CSV always completes even when the schedule build itself fails.
     """
     rows = []
     band = band_for_member(center_id, plan_rules) or ""
@@ -169,16 +220,22 @@ def build_debug_rows(year, month, ctx, plan_rules,
         absence = ctx.absence_for(day)
         absent = f"yes ({absence['leave_type']})" if absence else "no"
 
+        conflict_detail = ""
         try:
             result = compute_day_eligibility(day, ctx, plan_rules)
             scheduled = result.eligible
-            reason = "" if scheduled else (result.reason or "")
+            raw_reason = None if scheduled else (result.reason or "")
+            reason = ("Scheduled" if scheduled
+                      else _simple_reason(raw_reason, day, authorized,
+                                          absence, availability))
             window = result.placement_window
             reserve = result.dropoff_reserve
             pickup_reserve = result.pickup_reserve
         except OneOffConflict as exc:
             scheduled = False
-            reason = exc.reason
+            raw_reason = ""
+            reason = _simple_conflict_reason(exc.detail)
+            conflict_detail = exc.reason
             window = None
             reserve = 0
             pickup_reserve = 0
@@ -190,7 +247,7 @@ def build_debug_rows(year, month, ctx, plan_rules,
                 parse_hhmm(plan_rules["earliest_time_in"]),
                 parse_hhmm(plan_rules["latest_time_out"]),
             )
-        reason_detail = ""
+        reason_detail = conflict_detail
         if window is not None:
             in_lo, out_hi = window
             placement = f"{format_minutes(in_lo)}-{format_minutes(out_hi)}"
@@ -198,7 +255,7 @@ def build_debug_rows(year, month, ctx, plan_rules,
                                  out_hi - in_lo))
             max_length = format_minutes(max_len)
             reason_detail = _reason_detail(
-                reason, availability, reserve, in_lo, out_hi,
+                raw_reason, availability, reserve, in_lo, out_hi,
                 plan_rules, avail_row, pickup_reserve,
             )
         else:

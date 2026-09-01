@@ -4,10 +4,6 @@ from datetime import date
 from monthly_schedule.eligibility_context import MemberContext
 from monthly_schedule.rows import build_rows, build_debug_rows
 from monthly_schedule.rules import parse_hhmm, format_minutes
-from monthly_schedule.per_day import (
-    REASON_DAY_ABSENT,
-    REASON_DAY_WINDOW_TOO_NARROW,
-)
 
 
 PLAN_RULES = {
@@ -86,7 +82,44 @@ def test_build_rows_row_shape():
     rows = build_rows(2026, 5, _ctx_full_month(), PLAN_RULES, random.Random(0))
     keys = set(rows[0].keys())
     assert keys == {"date", "day", "pickup", "arrival",
-                    "time_in", "time_out", "departure", "dropoff"}
+                    "time_in", "time_out", "departure", "dropoff", "status"}
+
+
+def test_build_rows_status_attended():
+    rows = build_rows(2026, 5, _ctx_full_month("1,3,5"),
+                      PLAN_RULES, random.Random(0))
+    # 2026-05-04 is Monday → scheduled.
+    mon = next(r for r in rows if r["date"] == date(2026, 5, 4))
+    assert mon["status"] == "attended"
+
+
+def test_build_rows_status_ineligible():
+    rows = build_rows(2026, 5, _ctx_full_month("1,3,5"),
+                      PLAN_RULES, random.Random(0))
+    # 2026-05-02 is Saturday → not authorized.
+    sat = next(r for r in rows if r["date"] == date(2026, 5, 2))
+    assert sat["status"] == "ineligible"
+
+
+def test_build_rows_status_absent():
+    ctx = MemberContext(
+        enrollments=[{"id": 1, "center_id": 1,
+                      "start_date": date(2026, 1, 1), "end_date": None}],
+        authorizations=[{"id": 1, "center_id": 1,
+                         "auth_start": date(2026, 1, 1),
+                         "auth_end": date(2026, 12, 31),
+                         "effective_start": date(2026, 1, 1),
+                         "effective_end": date(2026, 12, 31),
+                         "auth_days": "1,3,5"}],
+        absences=[{"id": 1, "center_id": 1, "leave_type": "Vacation",
+                   "start_date": date(2026, 5, 4),
+                   "end_date": date(2026, 5, 4)}],
+        availabilities=[],
+        one_offs=[],
+    )
+    rows = build_rows(2026, 5, ctx, PLAN_RULES, random.Random(0))
+    mon = next(r for r in rows if r["date"] == date(2026, 5, 4))
+    assert mon["status"] == "absent"
 
 
 def test_unauthorized_days_have_blank_times():
@@ -159,9 +192,9 @@ def test_debug_rows_only_authorized_weekdays():
     assert len(rows) == 13
     days = {r["day"] for r in rows}
     assert days == {"Mon", "Wed", "Fri"}
-    # All days scheduled, no rejection reason.
+    # All days scheduled.
     assert all(r["scheduled"] is True for r in rows)
-    assert all(r["reason"] == "" for r in rows)
+    assert all(r["reason"] == "Scheduled" for r in rows)
 
 
 def test_debug_rows_records_absence_reason():
@@ -183,7 +216,7 @@ def test_debug_rows_records_absence_reason():
     rows = build_debug_rows(2026, 5, ctx, PLAN_RULES)
     monday = next(r for r in rows if r["date"] == date(2026, 5, 4))
     assert monday["scheduled"] is False
-    assert monday["reason"] == REASON_DAY_ABSENT
+    assert monday["reason"] == "Marked absent (Vacation)"
     assert monday["absent"] == "yes (Vacation)"
 
 
@@ -264,7 +297,9 @@ def test_debug_rows_records_window_too_narrow():
     rows = build_debug_rows(2026, 5, ctx, PLAN_RULES)
     monday = next(r for r in rows if r["date"] == date(2026, 5, 4))
     assert monday["scheduled"] is False
-    assert monday["reason"] == REASON_DAY_WINDOW_TOO_NARROW
+    assert monday["reason"] == (
+        "Available time (12:00-13:30) is too short to fit a session"
+    )
 
 
 def test_build_rows_uses_time_cache_when_hit(monkeypatch):
@@ -379,7 +414,42 @@ def test_debug_rows_catches_one_off_conflict():
     rows = build_debug_rows(2026, 5, ctx, PLAN_RULES)
     monday = next(r for r in rows if r["date"] == date(2026, 5, 4))
     assert monday["scheduled"] is False
-    assert "duplicate one-off rows" in monday["reason"]
+    assert monday["reason"] == (
+        "2 conflicting one-off availability entries exist for this day"
+    )
+    assert monday["reason_detail"] == (
+        "2 one-off rows for 2026-05-04: 09:00-12:00 (row 1) "
+        "and 10:00-13:00 (row 2)"
+    )
+
+
+def test_debug_rows_one_off_absence_conflict_sentence():
+    one_off = {"id": 4, "center_id": 1, "date": date(2026, 5, 4),
+               "avail_start": "09:00", "avail_end": "12:00"}
+    ctx = MemberContext(
+        enrollments=[{"id": 1, "center_id": 1,
+                      "start_date": date(2026, 1, 1), "end_date": None}],
+        authorizations=[{"id": 1, "center_id": 1,
+                         "auth_start": date(2026, 1, 1),
+                         "auth_end": date(2026, 12, 31),
+                         "effective_start": date(2026, 1, 1),
+                         "effective_end": date(2026, 12, 31),
+                         "auth_days": "1,3,5"}],
+        absences=[{"id": 14, "center_id": 1, "leave_type": "Hospital",
+                   "start_date": date(2026, 5, 4),
+                   "end_date": date(2026, 5, 8)}],
+        availabilities=[],
+        one_offs=[one_off],
+    )
+    rows = build_debug_rows(2026, 5, ctx, PLAN_RULES)
+    monday = next(r for r in rows if r["date"] == date(2026, 5, 4))
+    assert monday["scheduled"] is False
+    assert monday["reason"] == (
+        "A one-off availability entry conflicts with an absence on this day"
+    )
+    # The detailed sentence (with the Access row IDs) is preserved.
+    assert "OneOffAvailability row 4" in monday["reason_detail"]
+    assert "Absences row 14" in monday["reason_detail"]
 
 
 # Shared by the deadline property test below and the debug-detail tests (Task 4).
