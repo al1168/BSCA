@@ -572,6 +572,10 @@ def test_debug_filename_without_range():
     assert cli.debug_filename(24010, 2026, 5) == "Debug_24010_2026-05.csv"
 
 
+def test_debug_subdir():
+    assert cli.debug_subdir(2026, 5) == "Debug 2026-05"
+
+
 def test_all_members_subdir_single_folder():
     # Default: everyone shares one month-named folder, plan-independent.
     assert cli.all_members_subdir(2026, 6, "HOF", False) == "June_2026_Timesheets"
@@ -718,9 +722,12 @@ def test_debug_flag_writes_per_member_debug_csvs(monkeypatch, tmp_path):
     sub = tmp_path / "HOF_2026-05"
     # No combined file.
     assert not (sub / "Debug_2026-05.csv").exists()
-    # One file per member, each with its own rows.
+    # Debug CSVs live in their own flat folder inside the run's
+    # output dir, not next to the timesheets.
+    debug_dir = sub / "Debug 2026-05"
+    assert not list(sub.glob("Debug_*.csv"))
     for cid in ("24010", "24011"):
-        path = sub / f"Debug_{cid}_2026-05.csv"
+        path = debug_dir / f"Debug_{cid}_2026-05.csv"
         assert path.exists()
         lines = path.read_text(encoding="utf-8").splitlines()
         assert lines[0] == (

@@ -11,7 +11,16 @@ from monthly_schedule.db import (
     get_all_absences, get_all_availability, get_all_one_offs,
     get_all_billing_fields,
     get_billing_codes,
+    get_activities,
 )
+from monthly_schedule.activity_log_workbook import (
+    activity_log_subdir,
+    activity_program,
+    build_activity_log,
+    latest_auth_member_id,
+    save_activity_log,
+)
+from monthly_schedule.cathay_activity_log import build_cathay_activity_log
 from monthly_schedule.billing_workbook import (
     build_billing_workbook,
     collect_billing_row,
@@ -30,6 +39,7 @@ from new_monthly_schedule import (
     all_members_subdir,
     collect_debug_rows,
     debug_filename,
+    debug_subdir,
     parse_center_ids,
     process_member,
     resolve_output_dir,
@@ -61,6 +71,8 @@ class ScheduleWorker(QThread):
         end_day=None,
         schedule_rules=None,
         separate_by_plan=False,
+        billing_name="",
+        program_name="",
         parent=None,
     ):
         super().__init__(parent)
@@ -79,9 +91,107 @@ class ScheduleWorker(QThread):
         self.end_day = end_day
         self.schedule_rules = schedule_rules
         self.separate_by_plan = separate_by_plan
+        self.billing_name = billing_name
+        self.program_name = program_name
 
     def _emit_error(self, text: str):
         self.finished.emit(False, {"error_text": text})
+
+    def _collect_billing(self, member, ctx, rows, auth_weekdays,
+                         billing_extra, billing_rows):
+        """Collect one member's billing row (All-Members runs)."""
+        try:
+            billing_row = collect_billing_row(
+                member, ctx,
+                billing_extra.get(member["center_id"], {}),
+                rows, auth_weekdays,
+                self.year, self.month,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.log_line.emit(
+                "worker.billing_row_failed",
+                {
+                    "center_id": member["center_id"],
+                    "error": f"{type(exc).__name__}: {exc}",
+                },
+            )
+            return
+        if billing_row is None:
+            self.log_line.emit(
+                "worker.billing_unmapped_plan",
+                {
+                    "center_id": member["center_id"],
+                    "name": (
+                        f"{member['last_name']}, "
+                        f"{member['first_name']}"
+                    ),
+                    "plan": str(member.get("health_plan") or ""),
+                },
+            )
+        else:
+            billing_rows.append(billing_row)
+
+    def _write_activity_log(self, program, member, ctx, rows,
+                            auth_weekdays, activities,
+                            billing_extra, member_out_dir):
+        """Build and save one member's activity log using the template
+        `program` selects ("bowery" or "cathay"). All-Members runs
+        group logs by insurance plan under the base output dir
+        (regardless of the MLTC-folders checkbox); other modes save
+        next to the timesheet. Never appended to generated_paths — the
+        Print button must not print activity logs."""
+        cid = member["center_id"]
+        try:
+            if self.mode == "all":
+                log_dir = os.path.join(
+                    self.out_dir,
+                    activity_log_subdir(
+                        self.year, self.month,
+                        member.get("health_plan"),
+                    ),
+                )
+                os.makedirs(log_dir, exist_ok=True)
+            else:
+                log_dir = member_out_dir
+            if program == "cathay":
+                wb = build_cathay_activity_log(
+                    member, rows, activities, self.year, self.month,
+                    auth_weekdays=auth_weekdays or frozenset(),
+                )
+            else:  # bowery
+                extra = billing_extra.get(cid) or {}
+                wb = build_activity_log(
+                    member, rows, activities, self.year, self.month,
+                    dob=extra.get("dob"),
+                    member_id=latest_auth_member_id(
+                        ctx, self.year, self.month,
+                    ),
+                )
+
+            def _fallback(primary, actual):
+                self.log_line.emit(
+                    "worker.activity_log_fallback",
+                    {
+                        "primary": os.path.basename(primary),
+                        "filename": os.path.basename(actual),
+                    },
+                )
+            path = save_activity_log(
+                wb, log_dir, cid, self.year, self.month,
+                on_fallback=_fallback,
+            )
+            self.log_line.emit(
+                "worker.wrote_activity_log",
+                {"filename": os.path.basename(path)},
+            )
+        except Exception as exc:  # noqa: BLE001 - degrade per member
+            self.log_line.emit(
+                "worker.activity_log_failed",
+                {
+                    "center_id": cid,
+                    "error": f"{type(exc).__name__}: {exc}",
+                },
+            )
 
     def run(self):
         try:
@@ -185,15 +295,38 @@ class ScheduleWorker(QThread):
         # DOB, admission date, Medicaid #) the scheduler never reads.
         # A roster-fetch failure must not block the run — the workbook
         # is still built, with those columns blank.
+        # Activity logs are driven by the Settings "Program name":
+        # "bowery" and "cathay" each select their own template/builder.
+        # A missing Activities table warns and skips the logs — the
+        # timesheets still generate.
+        program = activity_program(self.program_name)
+        activity_enabled = program is not None
+        activities = {}
+        if activity_enabled:
+            try:
+                activities = get_activities(self.db_path)
+            except Exception as exc:  # noqa: BLE001 - degrade, don't abort
+                activity_enabled = False
+                self.log_line.emit(
+                    "worker.activities_failed",
+                    {"error": f"{type(exc).__name__}: {exc}"},
+                )
+
         billing_rows = []
         billing_extra = {}
         billing_codes = {}
         billing_error = None
-        if self.mode == "all":
+        # The Bowery activity log's DOB comes from the same roster
+        # fetch the billing workbook uses, so run it for either
+        # consumer (Cathay's log carries no DOB); only All-Members runs
+        # surface the failure in the billing summary.
+        if self.mode == "all" or (activity_enabled and program == "bowery"):
             try:
                 billing_extra = get_all_billing_fields(self.db_path)
             except Exception as exc:  # noqa: BLE001 - degrade, don't abort
-                billing_error = f"{type(exc).__name__}: {exc}"
+                if self.mode == "all":
+                    billing_error = f"{type(exc).__name__}: {exc}"
+        if self.mode == "all":
             # SADC/transportation codes live in the Codes lookup table
             # of the same DB. Without it the sheet still generates,
             # with '????' in the code columns.
@@ -234,8 +367,13 @@ class ScheduleWorker(QThread):
                         schedule_rules_overrides=self.schedule_rules,
                         api_key=api_key, cache=cache,
                     )
+                    debug_dir = os.path.join(
+                        self.out_dir,
+                        debug_subdir(self.year, self.month),
+                    )
+                    os.makedirs(debug_dir, exist_ok=True)
                     debug_path = os.path.join(
-                        member_out_dir,
+                        debug_dir,
                         debug_filename(
                             member["center_id"], self.year, self.month,
                             self.start_day, self.end_day,
@@ -248,50 +386,27 @@ class ScheduleWorker(QThread):
                             {"filename": os.path.basename(written)},
                         )
                 on_rows = None
-                if self.mode == "all":
-                    # Default args pin this iteration's member/ctx (the
-                    # late-binding closure trap). Collection errors are
+                if self.mode == "all" or activity_enabled:
+                    # Default args pin this iteration's member/ctx/dir
+                    # (the late-binding closure trap). Fires only after
+                    # a successful timesheet write; errors here are
                     # logged, never allowed to fail the member's
                     # already-written timesheet.
                     def on_rows(rows, auth_weekdays,
-                                member=member, ctx=ctx):
-                        try:
-                            billing_row = collect_billing_row(
-                                member, ctx,
-                                billing_extra.get(
-                                    member["center_id"], {},
-                                ),
-                                rows, auth_weekdays,
-                                self.year, self.month,
+                                member=member, ctx=ctx,
+                                member_out_dir=member_out_dir):
+                        if self.mode == "all":
+                            self._collect_billing(
+                                member, ctx, rows, auth_weekdays,
+                                billing_extra, billing_rows,
                             )
-                        except Exception as exc:  # noqa: BLE001
-                            self.log_line.emit(
-                                "worker.billing_row_failed",
-                                {
-                                    "center_id": member["center_id"],
-                                    "error": (
-                                        f"{type(exc).__name__}: {exc}"
-                                    ),
-                                },
+                        if activity_enabled:
+                            self._write_activity_log(
+                                program, member, ctx, rows,
+                                auth_weekdays, activities,
+                                billing_extra, member_out_dir,
                             )
-                            return
-                        if billing_row is None:
-                            self.log_line.emit(
-                                "worker.billing_unmapped_plan",
-                                {
-                                    "center_id": member["center_id"],
-                                    "name": (
-                                        f"{member['last_name']}, "
-                                        f"{member['first_name']}"
-                                    ),
-                                    "plan": str(
-                                        member.get("health_plan") or ""
-                                    ),
-                                },
-                            )
-                        else:
-                            billing_rows.append(billing_row)
-                ok, stage, reason, day = process_member(
+                ok, stage, reason, day, detail = process_member(
                     member, ctx,
                     self.year, self.month, member_out_dir,
                     api_key, cache,
@@ -308,11 +423,13 @@ class ScheduleWorker(QThread):
                 stage = "one_off_conflict"
                 reason = exc.reason
                 day = exc.day
+                detail = exc.detail.as_dict()
             except Exception as exc:  # noqa: BLE001 - surface in summary, never kill run
                 ok = False
                 stage = "worker"
                 reason = f"{type(exc).__name__}: {exc}"
                 day = None
+                detail = None
             if ok:
                 success += 1
                 fname = schedule_filename(
@@ -328,7 +445,7 @@ class ScheduleWorker(QThread):
                     Failure(
                         member["center_id"],
                         f"{member['last_name']}, {member['first_name']}",
-                        stage, reason, day,
+                        stage, reason, day, detail,
                     )
                 )
             self.progress.emit(i + 1, len(members))
@@ -364,8 +481,8 @@ class ScheduleWorker(QThread):
                 "worker.wrote_skipped_csv",
                 {"filename": os.path.basename(csv_path)},
             )
-        # Per-member debug CSVs are written inside the loop, next to
-        # each member's schedule.
+        # Per-member debug CSVs are written inside the loop, into the
+        # run's `Debug <YYYY-MM>` folder under the base output dir.
 
         # Aggregate billing workbook (All-Members runs only). Lives at
         # the base output dir like the skipped CSV; any failure here is
@@ -387,6 +504,7 @@ class ScheduleWorker(QThread):
                 )
                 billing_path = save_billing_workbook(
                     billing_wb, self.out_dir, self.year, self.month,
+                    self.billing_name,
                     on_fallback=_billing_fallback,
                 )
                 self.log_line.emit(
@@ -419,6 +537,7 @@ class ScheduleWorker(QThread):
                     "name": f.name,
                     "stage": f.stage,
                     "reason": f.reason,
+                    "detail": f.detail,
                 }
                 for f in failures
             ],

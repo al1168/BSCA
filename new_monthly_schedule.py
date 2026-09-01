@@ -76,6 +76,14 @@ def debug_filename(center_id, year, month, start_day=None, end_day=None):
     return f"Debug_{center_id}_{year:04d}-{month:02d}{suffix}.csv"
 
 
+def debug_subdir(year, month):
+    """Subfolder (under the run's output dir) holding every debug CSV,
+    so schedules, activity logs, and debug files each get their own
+    folder. Naming matches the activity logs' 'Activity Logs YYYY-MM'
+    style."""
+    return f"Debug {year:04d}-{month:02d}"
+
+
 def write_debug_csv(rows, path):
     """Write one member's per-day diagnostic rows to `path`.
 
@@ -197,7 +205,12 @@ def resolve_output_dir(base, plan_code, year, month):
     return os.path.join(base, sub)
 
 
-Failure = namedtuple("Failure", "center_id name stage reason day")
+# `detail` carries the structured one-off conflict (per_day's
+# OneOffConflictDetail.as_dict()) for callers that re-render the reason
+# in another language; None for every other failure stage.
+Failure = namedtuple(
+    "Failure", "center_id name stage reason day detail", defaults=(None,)
+)
 
 REASON_NOT_FOUND = "not found in database"
 
@@ -316,10 +329,12 @@ def process_member(member, ctx, year, month, out_dir,
                    api_key, cache, start_day=None, end_day=None,
                    time_cache=None, schedule_rules_overrides=None,
                    on_rows=None):
-    """Run the per-member pipeline. Returns (ok, stage, reason, day).
-    On success ok is True and stage/reason/day are None. On failure
+    """Run the per-member pipeline. Returns (ok, stage, reason, day,
+    detail). On success ok is True and the rest are None. On failure
     stage is one of 'eligibility'/'geocode'/'route'/'one_off_conflict'/
-    'generate'/'write' with the reason; day is set for one_off_conflict.
+    'generate'/'write' with the reason; day and detail are set for
+    one_off_conflict (detail is OneOffConflictDetail.as_dict(), so the
+    GUI can rebuild the sentence in the user's language).
     When start_day/end_day are supplied, only the inclusive sub-range
     of the month is scheduled. When `time_cache` is supplied, daily
     times are reused across runs (idempotency for partial schedules).
@@ -331,12 +346,12 @@ def process_member(member, ctx, year, month, out_dir,
     see exactly the members that actually received a timesheet."""
     failure = compute_month_failure(year, month, ctx, start_day, end_day)
     if failure is not None:
-        return (False, "eligibility", failure, None)
+        return (False, "eligibility", failure, None, None)
 
     try:
         travel_minutes = resolve_travel_minutes(member, api_key, cache)
     except TravelError as exc:
-        return (False, exc.stage, exc.reason, None)
+        return (False, exc.stage, exc.reason, None, None)
 
     rng = random.Random()
     try:
@@ -354,9 +369,11 @@ def process_member(member, ctx, year, month, out_dir,
             travel_minutes=travel_minutes,
         )
     except OneOffConflict as exc:
-        return (False, "one_off_conflict", exc.reason, exc.day)
+        return (False, "one_off_conflict", exc.reason, exc.day,
+                exc.detail.as_dict())
     except Exception as exc:  # reported in the run summary
-        return (False, "generate", f"{type(exc).__name__} — {exc}", None)
+        return (False, "generate", f"{type(exc).__name__} — {exc}", None,
+                None)
 
     path = os.path.join(
         out_dir,
@@ -376,11 +393,12 @@ def process_member(member, ctx, year, month, out_dir,
     try:
         build_workbook(member, rows, path, auth_weekdays=auth_weekdays)
     except Exception as exc:  # reported in the run summary
-        return (False, "write", f"{type(exc).__name__} — {exc}", None)
+        return (False, "write", f"{type(exc).__name__} — {exc}", None,
+                None)
     if on_rows is not None:
         on_rows(rows, auth_weekdays)
     print(f"Wrote {path}")
-    return (True, None, None, None)
+    return (True, None, None, None, None)
 
 
 def main(argv=None):
@@ -464,8 +482,12 @@ def main(argv=None):
                 args.start_day, args.end_day,
                 api_key=api_key, cache=cache,
             )
+            debug_dir = os.path.join(
+                out_dir, debug_subdir(args.year, args.month)
+            )
+            os.makedirs(debug_dir, exist_ok=True)
             debug_path = os.path.join(
-                out_dir,
+                debug_dir,
                 debug_filename(
                     member["center_id"], args.year, args.month,
                     args.start_day, args.end_day,
@@ -474,7 +496,7 @@ def main(argv=None):
             written = write_debug_csv(member_debug_rows, debug_path)
             if written is not None:
                 print(f"Wrote debug report: {written}", file=sys.stderr)
-        ok, stage, reason, day = process_member(
+        ok, stage, reason, day, detail = process_member(
             member, ctx, args.year, args.month, out_dir,
             api_key, cache,
             start_day=args.start_day, end_day=args.end_day,
@@ -487,7 +509,7 @@ def main(argv=None):
                 Failure(
                     member["center_id"],
                     f"{member['last_name']}, {member['first_name']}",
-                    stage, reason, day,
+                    stage, reason, day, detail,
                 )
             )
 
