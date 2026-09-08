@@ -12,7 +12,9 @@ from monthly_schedule.db import (
     get_all_billing_fields,
     get_billing_codes,
     get_activities,
+    get_holidays, get_operating_days,
 )
+from monthly_schedule.center_calendar import CenterCalendar
 from monthly_schedule.activity_log_workbook import (
     activity_log_subdir,
     activity_program,
@@ -291,6 +293,13 @@ class ScheduleWorker(QThread):
         avail_idx = get_all_availability(self.db_path)
         one_off_idx = get_all_one_offs(self.db_path)
 
+        # Center-wide calendar: holidays and weekly hours. Missing
+        # tables fail the run like any other supporting table (re-run
+        # Setup to create them).
+        calendar = CenterCalendar(
+            get_holidays(self.db_path), get_operating_days(self.db_path),
+        )
+
         # The All-Members billing workbook needs demographics (gender,
         # DOB, admission date, Medicaid #) the scheduler never reads.
         # A roster-fetch failure must not block the run — the workbook
@@ -366,6 +375,7 @@ class ScheduleWorker(QThread):
                         self.start_day, self.end_day,
                         schedule_rules_overrides=self.schedule_rules,
                         api_key=api_key, cache=cache,
+                        calendar=calendar,
                     )
                     debug_dir = os.path.join(
                         self.out_dir,
@@ -414,6 +424,7 @@ class ScheduleWorker(QThread):
                     time_cache=time_cache,
                     schedule_rules_overrides=self.schedule_rules,
                     on_rows=on_rows,
+                    calendar=calendar,
                 )
             except OneOffConflict as exc:
                 # process_member catches OneOffConflict internally and

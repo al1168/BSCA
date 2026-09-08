@@ -3,6 +3,13 @@ import new_monthly_schedule as cli
 from datetime import date
 
 
+_OPEN_ALL_WEEK = [
+    {"id": d, "day_name": "", "day_of_week": d,
+     "opening_time": "08:00", "closing_time": "16:00"}
+    for d in range(1, 8)
+]
+
+
 def _fake_enrollments(cid=24010):
     return [{"id": 1, "center_id": cid,
              "start_date": date(2026, 1, 1), "end_date": None}]
@@ -73,6 +80,8 @@ def _stub_travel(monkeypatch):
     monkeypatch.setattr(cli, "get_absences", lambda cid, db: [])
     monkeypatch.setattr(cli, "get_availability", lambda cid, db: [])
     monkeypatch.setattr(cli, "get_one_offs", lambda cid, db: [])
+    monkeypatch.setattr(cli, "get_holidays", lambda db: [])
+    monkeypatch.setattr(cli, "get_operating_days", lambda db: _OPEN_ALL_WEEK)
 
 
 def test_no_member_returns_2(monkeypatch, tmp_path, capsys):
@@ -1104,3 +1113,23 @@ def test_process_member_skips_on_rows_when_write_fails(monkeypatch, tmp_path):
     )
     assert ok is False and stage == "write"
     assert calls == []
+
+
+def test_main_passes_calendar_to_process_member(monkeypatch, tmp_path):
+    # The autouse `_stub_travel` fixture already stubs the DB fetchers.
+    seen = {}
+
+    def fake_process_member(member, ctx, year, month, out_dir, api_key,
+                            cache, **kwargs):
+        seen["calendar"] = kwargs.get("calendar")
+        return (True, None, None, None, None)
+
+    monkeypatch.setattr(cli, "get_member", lambda cid, db: {
+        "center_id": 1, "last_name": "B", "first_name": "A",
+        "health_plan": "HF", "address": "x", "long_lat": "0,0"})
+    monkeypatch.setattr(cli, "process_member", fake_process_member)
+    rc = cli.main(["--center-id", "1", "--year", "2026", "--month", "5",
+                   "--output-path", str(tmp_path)])
+    assert rc == 0
+    from monthly_schedule.center_calendar import CenterCalendar
+    assert isinstance(seen["calendar"], CenterCalendar)

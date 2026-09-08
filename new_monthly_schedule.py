@@ -12,9 +12,10 @@ from datetime import date as _date
 from monthly_schedule.db import (
     get_member, get_members_by_plan,
     get_enrollments, get_authorizations, get_absences, get_availability,
-    get_one_offs,
+    get_one_offs, get_holidays, get_operating_days,
 )
 from monthly_schedule.auth_days import get_authorized_weekdays
+from monthly_schedule.center_calendar import CenterCalendar
 from monthly_schedule.month_dates import get_month_dates
 from monthly_schedule.eligibility_context import MemberContext
 from monthly_schedule.per_day import compute_month_failure, OneOffConflict
@@ -139,7 +140,7 @@ def apply_travel_offsets(rules, travel_minutes):
 def collect_debug_rows(member, ctx, year, month,
                        start_day=None, end_day=None,
                        schedule_rules_overrides=None,
-                       api_key=None, cache=None):
+                       api_key=None, cache=None, calendar=None):
     """Build the run-level debug rows for one member: each row from
     build_debug_rows annotated with center_id + 'Last, First' name.
 
@@ -168,6 +169,7 @@ def collect_debug_rows(member, ctx, year, month,
         for r in build_debug_rows(
             year, month, ctx, rules, start_day, end_day,
             center_id=member["center_id"],
+            calendar=calendar,
         )
     ]
     if travel_failed:
@@ -328,7 +330,7 @@ def parse_args(argv):
 def process_member(member, ctx, year, month, out_dir,
                    api_key, cache, start_day=None, end_day=None,
                    time_cache=None, schedule_rules_overrides=None,
-                   on_rows=None):
+                   on_rows=None, calendar=None):
     """Run the per-member pipeline. Returns (ok, stage, reason, day,
     detail). On success ok is True and the rest are None. On failure
     stage is one of 'eligibility'/'geocode'/'route'/'one_off_conflict'/
@@ -343,8 +345,11 @@ def process_member(member, ctx, year, month, out_dir,
     travel_buffer_min, etc.) that replace the built-in defaults.
     `on_rows(rows, auth_weekdays)` is called only after the workbook is
     written successfully, so callers (the All-Members billing sheet)
-    see exactly the members that actually received a timesheet."""
-    failure = compute_month_failure(year, month, ctx, start_day, end_day)
+    see exactly the members that actually received a timesheet.
+    `calendar` is the run's CenterCalendar (holidays, closed weekdays,
+    per-weekday hours); None means always open."""
+    failure = compute_month_failure(year, month, ctx, start_day, end_day,
+                                    calendar=calendar)
     if failure is not None:
         return (False, "eligibility", failure, None, None)
 
@@ -367,6 +372,7 @@ def process_member(member, ctx, year, month, out_dir,
             center_id=member["center_id"],
             plan=str(member.get("health_plan") or "").strip().upper() or None,
             travel_minutes=travel_minutes,
+            calendar=calendar,
         )
     except OneOffConflict as exc:
         return (False, "one_off_conflict", exc.reason, exc.day,
@@ -450,6 +456,14 @@ def main(argv=None):
         print(exc, file=sys.stderr)
         return 1
 
+    try:
+        calendar = CenterCalendar(
+            get_holidays(args.db_path), get_operating_days(args.db_path),
+        )
+    except (FileNotFoundError, RuntimeError) as exc:
+        print(exc, file=sys.stderr)
+        return 1
+
     period = f"{args.year:04d}-{args.month:02d}"
     if plan_code is not None:
         scope = f"plan {plan_code.upper()} {period}"
@@ -480,7 +494,7 @@ def main(argv=None):
             member_debug_rows = collect_debug_rows(
                 member, ctx, args.year, args.month,
                 args.start_day, args.end_day,
-                api_key=api_key, cache=cache,
+                api_key=api_key, cache=cache, calendar=calendar,
             )
             debug_dir = os.path.join(
                 out_dir, debug_subdir(args.year, args.month)
@@ -500,7 +514,7 @@ def main(argv=None):
             member, ctx, args.year, args.month, out_dir,
             api_key, cache,
             start_day=args.start_day, end_day=args.end_day,
-            time_cache=time_cache,
+            time_cache=time_cache, calendar=calendar,
         )
         if ok:
             success += 1

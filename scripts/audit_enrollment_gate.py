@@ -31,7 +31,10 @@ from monthly_schedule.db import (  # noqa: E402
     get_all_enrollments,
     get_all_members,
     get_all_one_offs,
+    get_holidays,
+    get_operating_days,
 )
+from monthly_schedule.center_calendar import CenterCalendar  # noqa: E402
 from monthly_schedule.eligibility_context import MemberContext  # noqa: E402
 from monthly_schedule.month_dates import get_month_dates  # noqa: E402
 from monthly_schedule.per_day import compute_month_failure  # noqa: E402
@@ -92,11 +95,14 @@ def auth_overlaps_month(auths, year, month):
 
 
 def audit_member(member, enrollments, auths, absences, availabilities,
-                 one_offs, year, month):
-    """Build one audit-CSV row dict for a member."""
+                 one_offs, year, month, calendar=None):
+    """Build one audit-CSV row dict for a member.
+
+    `calendar` is the center's CenterCalendar (holidays, closed
+    weekdays, per-weekday hours); None means always open."""
     ctx = MemberContext(enrollments, auths, absences, availabilities,
                         one_offs)
-    failure = compute_month_failure(year, month, ctx)
+    failure = compute_month_failure(year, month, ctx, calendar=calendar)
     return {
         "center_id": member["center_id"],
         "name": f"{member['last_name']}, {member['first_name']}",
@@ -180,6 +186,9 @@ def main(argv=None):
         absence_idx = get_all_absences(args.db)
         avail_idx = get_all_availability(args.db)
         one_off_idx = get_all_one_offs(args.db)
+        calendar = CenterCalendar(
+            get_holidays(args.db), get_operating_days(args.db)
+        )
     except (FileNotFoundError, RuntimeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
@@ -191,7 +200,7 @@ def main(argv=None):
             absence_idx.get(member["center_id"], []),
             avail_idx.get(member["center_id"], []),
             one_off_idx.get(member["center_id"], []),
-            args.year, args.month,
+            args.year, args.month, calendar=calendar,
         )
         for member in members
     ]

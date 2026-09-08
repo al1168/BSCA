@@ -57,6 +57,15 @@ def _stub_db_and_caches(monkeypatch, tmp_path):
         "get_all_one_offs",
     ):
         monkeypatch.setattr(f"gui.worker.{name}", lambda db: {})
+    monkeypatch.setattr("gui.worker.get_holidays", lambda db: [])
+    monkeypatch.setattr(
+        "gui.worker.get_operating_days",
+        lambda db: [
+            {"id": d, "day_name": "", "day_of_week": d,
+             "opening_time": "08:00", "closing_time": "16:00"}
+            for d in range(1, 8)
+        ],
+    )
     monkeypatch.setattr("gui.worker.load_cache", lambda path: {})
     monkeypatch.setattr("gui.worker.save_cache", lambda path, cache: None)
     monkeypatch.setattr("gui.worker.load_time_cache", lambda path: {})
@@ -236,6 +245,30 @@ def test_worker_all_mode_writes_billing_workbook(monkeypatch, tmp_path):
     found = [c.value for row in ws.iter_rows(min_col=2, max_col=2)
              for c in row]
     assert 1 in found
+
+
+def test_worker_passes_calendar_to_process_member(monkeypatch, tmp_path):
+    """The worker builds the center calendar once per run and hands it
+    to process_member, so holidays/closed days reach the generator."""
+    _stub_db_and_caches(monkeypatch, tmp_path)
+    member = {"center_id": 24010, "last_name": "B", "first_name": "A",
+              "health_plan": "HF", "address": "x", "long_lat": "0,0"}
+    monkeypatch.setattr("gui.worker.get_member", lambda cid, db: member)
+    seen = {}
+
+    def fake_process_member(member, ctx, year, month, out_dir,
+                            api_key, cache, **kwargs):
+        seen["calendar"] = kwargs.get("calendar")
+        return (True, None, None, None, None)
+
+    monkeypatch.setattr("gui.worker.process_member", fake_process_member)
+
+    worker = _make_worker(tmp_path)
+    success, payload = _run_to_completion(worker)
+
+    assert success is True
+    from monthly_schedule.center_calendar import CenterCalendar
+    assert isinstance(seen["calendar"], CenterCalendar)
 
 
 _ACTIVITIES = {
