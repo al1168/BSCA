@@ -107,8 +107,8 @@ def test_fresh_install_has_default_schedule_rules(settings_file):
     from gui import app_settings
     s = app_settings.load()
     rules = s["schedule_rules"]
-    assert rules["earliest_time_in"] == "08:00"
-    assert rules["latest_time_out"] == "16:00"
+    assert "earliest_time_in" not in rules
+    assert "latest_time_out" not in rules
     assert rules["session_length_min"] == [210, 240]
     assert rules["travel_buffer_min"] == [1, 5]
     assert rules["time_in_drift_min"] == [2, 2]
@@ -119,12 +119,12 @@ def test_partial_schedule_rules_fills_in_defaults(settings_file):
     """A settings file with only some rule keys still gets the rest
     from defaults, so adding a new knob in code is forward-compatible."""
     settings_file.write_text(json.dumps({
-        "schedule_rules": {"earliest_time_in": "07:00"},
+        "schedule_rules": {"morning_percent": 70},
     }))
     from gui import app_settings
     s = app_settings.load()
     rules = s["schedule_rules"]
-    assert rules["earliest_time_in"] == "07:00"
+    assert rules["morning_percent"] == 70
     assert rules["session_length_min"] == [210, 240]  # default
     assert rules["travel_buffer_min"] == [1, 5]       # default
 
@@ -136,7 +136,7 @@ def test_legacy_rule_keys_are_dropped(settings_file):
         "schedule_rules": {
             "arrival_window": ["08:00", "11:00"],
             "session_span_min": [210, 245],
-            "earliest_time_in": "09:00",
+            "morning_percent": 70,
         },
     }))
     from gui import app_settings
@@ -144,7 +144,7 @@ def test_legacy_rule_keys_are_dropped(settings_file):
     rules = s["schedule_rules"]
     assert "arrival_window" not in rules
     assert "session_span_min" not in rules
-    assert rules["earliest_time_in"] == "09:00"
+    assert rules["morning_percent"] == 70
 
 
 def test_defaults_not_mutated_after_load(settings_file):
@@ -152,9 +152,24 @@ def test_defaults_not_mutated_after_load(settings_file):
     into the global DEFAULTS table."""
     from gui import app_settings
     s = app_settings.load()
-    s["schedule_rules"]["earliest_time_in"] = "99:99"
+    s["schedule_rules"]["morning_percent"] = 1
     fresh = app_settings.load()
-    assert fresh["schedule_rules"]["earliest_time_in"] == "08:00"
+    assert fresh["schedule_rules"]["morning_percent"] == 80
+
+
+def test_day_bound_keys_are_retired_on_load(settings_file):
+    """Hours now live in the database's OperatingDays table; a settings
+    file from before that change must not keep the old keys alive."""
+    settings_file.write_text(json.dumps({
+        "schedule_rules": {"earliest_time_in": "09:00",
+                           "latest_time_out": "15:00",
+                           "morning_percent": 70},
+    }))
+    from gui import app_settings
+    rules = app_settings.load()["schedule_rules"]
+    assert "earliest_time_in" not in rules
+    assert "latest_time_out" not in rules
+    assert rules["morning_percent"] == 70
 
 
 def test_load_existing_key_wins_over_legacy_path(settings_file, tmp_path):
@@ -182,12 +197,12 @@ def test_dropoff_by_avail_end_missing_key_filled_on(settings_file):
     # A settings file saved before this feature has no key — the loader
     # must fill it from DEFAULTS (i.e., turn it on).
     settings_file.write_text(json.dumps({
-        "schedule_rules": {"earliest_time_in": "09:00"}
+        "schedule_rules": {"morning_percent": 70}
     }))
     from gui import app_settings
     s = app_settings.load()
     assert s["schedule_rules"]["dropoff_by_avail_end"] is True
-    assert s["schedule_rules"]["earliest_time_in"] == "09:00"
+    assert s["schedule_rules"]["morning_percent"] == 70
 
 
 def test_dropoff_by_avail_end_saved_false_respected(settings_file):
@@ -209,12 +224,12 @@ def test_pickup_by_avail_start_missing_key_filled_on(settings_file):
     # A settings file saved before this feature has no key — the loader
     # must fill it from DEFAULTS (i.e., turn it on).
     settings_file.write_text(json.dumps({
-        "schedule_rules": {"earliest_time_in": "09:00"}
+        "schedule_rules": {"morning_percent": 70}
     }))
     from gui import app_settings
     s = app_settings.load()
     assert s["schedule_rules"]["pickup_by_avail_start"] is True
-    assert s["schedule_rules"]["earliest_time_in"] == "09:00"
+    assert s["schedule_rules"]["morning_percent"] == 70
 
 
 def test_pickup_by_avail_start_saved_false_respected(settings_file):
@@ -240,12 +255,12 @@ def test_band_keys_missing_filled_off(settings_file):
     # A settings file saved before this feature has no band keys -- the
     # loader fills them from DEFAULTS with the feature OFF.
     settings_file.write_text(json.dumps({
-        "schedule_rules": {"earliest_time_in": "09:00"}
+        "schedule_rules": {"morning_percent": 70}
     }))
     from gui import app_settings
     rules = app_settings.load()["schedule_rules"]
     assert rules["band_enabled"] is False
-    assert rules["earliest_time_in"] == "09:00"
+    assert rules["morning_percent"] == 70
 
 
 def test_band_settings_round_trip(settings_file):

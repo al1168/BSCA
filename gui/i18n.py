@@ -133,8 +133,6 @@ STRINGS: dict[str, dict[str, str]] = {
             "characters:  \\ / : * ? \" < > |"
         ),
         "settings.rules.title": "Scheduling Rules",
-        "settings.rules.earliest_in": "Earliest Time-In:",
-        "settings.rules.latest_out": "Latest Time-Out:",
         "settings.rules.session": "Visit length min – max (HH:MM):",
         "settings.rules.travel_buffer": (
             "Travel buffer min – max (extra minutes on top of Google):"
@@ -156,7 +154,7 @@ STRINGS: dict[str, dict[str, str]] = {
         ),
         "settings.rules.morning_percent": "Morning members (%):",
         "settings.rules.morning_window": (
-            "Morning window length (HH:MM after earliest Time-In):"
+            "Morning window length (HH:MM after opening time):"
         ),
         "settings.rules.morning_members": (
             "Always-morning member IDs (comma-separated):"
@@ -462,8 +460,6 @@ STRINGS: dict[str, dict[str, str]] = {
             "账单文件名不能包含以下字符：  \\ / : * ? \" < > |"
         ),
         "settings.rules.title": "排班规则",
-        "settings.rules.earliest_in": "最早签到时间：",
-        "settings.rules.latest_out": "最晚签退时间：",
         "settings.rules.session": "访问时长 最短 – 最长（时:分）：",
         "settings.rules.travel_buffer": (
             "出行缓冲 最少 – 最多（在 Google 行程时间上加的额外分钟）："
@@ -483,7 +479,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "settings.rules.band_enabled": "上午/下午分布：",
         "settings.rules.morning_percent": "上午成员比例（%）：",
         "settings.rules.morning_window": (
-            "上午时段长度（最早签到后的 时:分）："
+            "上午时段长度（开门后的 时:分）："
         ),
         "settings.rules.morning_members": (
             "固定上午的成员 ID（逗号分隔）："

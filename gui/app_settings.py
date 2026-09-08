@@ -56,10 +56,10 @@ DEFAULTS = {
     "program_name": "",
     # Default-for-everyone scheduling rules. Tuples are stored as lists
     # so they round-trip cleanly through JSON; rules.get_rules_for_plan
-    # converts the ranges back to tuples at use site.
+    # converts the ranges back to tuples at use site. Day bounds
+    # (opening/closing) are not here — they come from the database's
+    # OperatingDays table.
     "schedule_rules": {
-        "earliest_time_in": "08:00",
-        "latest_time_out": "16:00",
         "session_length_min": [210, 240],
         "travel_buffer_min": [1, 5],
         "time_in_drift_min": [2, 2],

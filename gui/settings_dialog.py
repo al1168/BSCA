@@ -126,15 +126,6 @@ class _ApiKeyRow(QHBoxLayout):
         self.edit.setText(v)
 
 
-def _time_from_hhmm(text: str) -> QTime:
-    """'HH:MM' -> QTime, falling back to midnight on malformed input."""
-    try:
-        h, m = text.split(":")
-        return QTime(int(h), int(m))
-    except (ValueError, AttributeError):
-        return QTime(0, 0)
-
-
 def _hhmm(t: QTime) -> str:
     return f"{t.hour():02d}:{t.minute():02d}"
 
@@ -297,24 +288,6 @@ class SettingsDialog(QDialog):
         rules_form = QFormLayout(self._rules_group)
         rules_form.setVerticalSpacing(8)
 
-        self._earliest_in_edit = QTimeEdit()
-        self._earliest_in_edit.setDisplayFormat("HH:mm")
-        self._earliest_in_edit.setTime(
-            _time_from_hhmm(rules.get("earliest_time_in", "08:00"))
-        )
-        self._earliest_in_edit.setFixedWidth(82)
-        self._earliest_in_label = QLabel()
-        rules_form.addRow(self._earliest_in_label, self._earliest_in_edit)
-
-        self._latest_out_edit = QTimeEdit()
-        self._latest_out_edit.setDisplayFormat("HH:mm")
-        self._latest_out_edit.setTime(
-            _time_from_hhmm(rules.get("latest_time_out", "16:00"))
-        )
-        self._latest_out_edit.setFixedWidth(82)
-        self._latest_out_label = QLabel()
-        rules_form.addRow(self._latest_out_label, self._latest_out_edit)
-
         sess_lo, sess_hi = rules.get("session_length_min", [210, 240])
         self._session_row = _RangeTimes(
             _minutes_to_qtime(int(sess_lo)),
@@ -444,8 +417,6 @@ class SettingsDialog(QDialog):
         if self._test_btn is not None:
             self._test_btn.setText(tr("settings.test_connection"))
         self._rules_group.setTitle(tr("settings.rules.title"))
-        self._earliest_in_label.setText(tr("settings.rules.earliest_in"))
-        self._latest_out_label.setText(tr("settings.rules.latest_out"))
         self._session_label.setText(tr("settings.rules.session"))
         self._travel_label.setText(tr("settings.rules.travel_buffer"))
         self._time_in_label.setText(tr("settings.rules.time_in"))
@@ -526,22 +497,15 @@ class SettingsDialog(QDialog):
                 tr(f"settings.billing_name_{name_problem}.body"),
             )
             return
-        earliest_in = _hhmm(self._earliest_in_edit.time())
-        latest_out = _hhmm(self._latest_out_edit.time())
         session = self._session_row.minutes_value()
         travel = self._travel_row.value()
         time_in = self._time_in_row.value()
         time_out = self._time_out_row.value()
-        # Guardrail: each min must be <= its max, and the day bounds must
-        # be ordered (earliest Time-In before latest Time-Out). On any
-        # violation we warn and ask the user to fix it rather than
-        # silently swapping (which would change their intent).
+        # Guardrail: each min must be <= its max. On any violation we
+        # warn and ask the user to fix it rather than silently swapping
+        # (which would change their intent).
         ranges = [session, travel, time_in, time_out]
         bad = any(lo > hi for lo, hi in ranges)
-        bad = bad or (
-            _qtime_to_minutes(self._earliest_in_edit.time())
-            >= _qtime_to_minutes(self._latest_out_edit.time())
-        )
         if bad:
             QMessageBox.warning(
                 self,
@@ -584,8 +548,6 @@ class SettingsDialog(QDialog):
             "billing_name": self._billing_name_edit.text().strip(),
             "program_name": self._program_name_edit.text().strip(),
             "schedule_rules": {
-                "earliest_time_in": earliest_in,
-                "latest_time_out": latest_out,
                 "session_length_min": list(session),
                 "travel_buffer_min": list(travel),
                 "time_in_drift_min": list(time_in),

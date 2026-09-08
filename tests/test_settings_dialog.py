@@ -1,3 +1,7 @@
+import os
+
+_APP = None
+
 from gui.settings_dialog import (
     billing_name_error,
     parse_member_ids,
@@ -38,3 +42,21 @@ def test_billing_name_error_rejects_forbidden_filename_chars():
 def test_billing_name_error_accepts_valid_name():
     assert billing_name_error("Jane Doe") is None
     assert billing_name_error("  Jane  ") is None
+
+
+def test_dialog_has_no_day_bound_fields():
+    """Opening/closing hours come from the database's OperatingDays
+    table, so Settings must not offer day-bound time pickers."""
+    global _APP
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PyQt6.QtWidgets import QApplication
+    # Held in a module global: an unreferenced QApplication is garbage
+    # collected and the next widget built on it crashes the process.
+    _APP = QApplication.instance() or QApplication([])
+    from gui.settings_dialog import SettingsDialog
+    from gui import app_settings
+    settings = dict(app_settings.DEFAULTS)        # not the user's live file
+    settings["schedule_rules"] = dict(app_settings.DEFAULTS["schedule_rules"])
+    dlg = SettingsDialog(settings)                # (settings, parent=None, first_run=False)
+    assert not hasattr(dlg, "_earliest_in_edit")
+    assert not hasattr(dlg, "_latest_out_edit")

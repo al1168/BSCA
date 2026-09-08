@@ -8,8 +8,8 @@ import hashlib
 
 SCHEDULE_RULES = {
     "Default": {
-        # Hard day bounds: the attendance block must not start (Time-In)
-        # before this, nor end (Time-Out) after it.
+        # Fallback day bounds. In a real run each weekday's bounds come
+        # from the OperatingDays table via CenterCalendar.rules_for.
         "earliest_time_in": "08:00",
         "latest_time_out": "16:00",
         # Visit length measured Time-In -> Time-Out (minutes). A random
