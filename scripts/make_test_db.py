@@ -22,8 +22,12 @@ DEFAULT_SOURCE = r"\\BOWERY3\Users\Shared\Access Member 5.5.26_copy.accdb"
 
 # Deletion order: children first, parents last. Access FK constraints
 # may or may not enforce; deleting in this order is safe regardless.
-SUPPORTING_TABLES = ("OneOffAvailability", "Availability", "Absences",
-                     "Authorization", "Enrollment")
+# Holidays leads the list so each scenario starts with no holidays and
+# only seeds the ones it wants. OperatingDays is deliberately absent:
+# its 7-day default (seeded by _ensure_calendar_tables) must survive
+# every reset, or the scheduler would read the center as closed.
+SUPPORTING_TABLES = ("Holidays", "OneOffAvailability", "Availability",
+                     "Absences", "Authorization", "Enrollment")
 DATA_TABLES = SUPPORTING_TABLES + ("Contacts",)
 
 # Scenarios that should preserve the real Contacts table and only
@@ -92,6 +96,26 @@ def _ensure_plan_type_column(conn) -> None:
         conn.commit()
 
 
+def _ensure_calendar_tables(conn) -> None:
+    """Reference DBs predate the Holidays / OperatingDays tables. Create
+    them when absent and seed the 7-day default hours, so every scenario
+    runs against the schema the scheduler now requires."""
+    from scripts.create_supporting_tables import (
+        _CREATE_HOLIDAYS, _CREATE_OPERATING_DAYS,
+    )
+    from scripts.seed_operating_days import seed_if_empty
+
+    cur = conn.cursor()
+    for ddl in (_CREATE_HOLIDAYS, _CREATE_OPERATING_DAYS):
+        try:
+            cur.execute(ddl)
+        except Exception as exc:
+            if "42S01" not in str(exc):      # anything but "already exists"
+                raise
+    seed_if_empty(cur)
+    conn.commit()
+
+
 def _truncate(conn, tables) -> None:
     """`DELETE FROM` each table in `tables`. Caller supplies the order
     (children first, parents last)."""
@@ -154,7 +178,8 @@ def _seed_one_off(conn, center_id: int, when: date,
 # tables are empty.
 
 def seed_happy_path(conn, today: date) -> None:
-    """Center 99001 'Test, Happy' — full happy-path setup."""
+    """Center 99001 'Test, Happy' — full happy-path setup plus one
+    company holiday on the first Wednesday."""
     m1, m15, mlast, mnext_last = _month_bounds(today)
     enrolled_since = date(today.year - 1, today.month, 1)
     cur = conn.cursor()
@@ -181,6 +206,16 @@ def seed_happy_path(conn, today: date) -> None:
             "99001", _dt(enrolled_since), day_of_week,
             _hhmm(8, 0), _hhmm(16, 0),
         )
+
+    # One company holiday on the first Wednesday of the month, so the
+    # generated timesheet visibly skips a weekday it would otherwise fill.
+    first_wed = m1
+    while first_wed.isoweekday() != 3:
+        first_wed = first_wed + timedelta(days=1)
+    cur.execute(
+        "INSERT INTO [Holidays] ([holiday_name], [date]) VALUES (?, ?)",
+        "Test Holiday", _dt(first_wed),
+    )
     conn.commit()
 
 
@@ -575,6 +610,7 @@ def main(argv=None) -> int:
 
     try:
         _ensure_plan_type_column(conn)
+        _ensure_calendar_tables(conn)
         truncate_tables = (
             SUPPORTING_TABLES
             if args.scenario in SCENARIOS_KEEP_CONTACTS
