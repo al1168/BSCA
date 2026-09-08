@@ -1,5 +1,6 @@
 from datetime import date
 
+from monthly_schedule.center_calendar import CenterCalendar
 from monthly_schedule.eligibility_context import MemberContext
 from monthly_schedule.per_day import (
     DayEligibility,
@@ -731,3 +732,62 @@ def test_legacy_too_narrow_also_reports_window():
     )
     assert result.eligible is False
     assert result.placement_window == (720, 810)
+
+
+def _open_days(*days, opening="08:00", closing="16:00"):
+    return [
+        {"id": d, "day_name": "", "day_of_week": d,
+         "opening_time": opening, "closing_time": closing}
+        for d in days
+    ]
+
+
+ALL_WEEK = _open_days(1, 2, 3, 4, 5, 6, 7)
+
+
+def test_holiday_rejected_with_center_closed():
+    from monthly_schedule.per_day import REASON_DAY_CENTER_CLOSED
+    cal = CenterCalendar(
+        [{"id": 1, "name": "Labor Day", "date": date(2026, 5, 4)}], ALL_WEEK)
+    result = compute_day_eligibility(
+        date(2026, 5, 4), _ctx(), PLAN_RULES, calendar=cal)
+    assert result.eligible is False
+    assert result.reason == REASON_DAY_CENTER_CLOSED
+
+
+def test_closed_weekday_rejected_even_when_authorized():
+    from monthly_schedule.per_day import REASON_DAY_CENTER_CLOSED
+    cal = CenterCalendar([], _open_days(2, 4))       # Tue/Thu only
+    # 2026-05-04 is a Monday, authorized by "1,3,5" but the center is closed.
+    result = compute_day_eligibility(
+        date(2026, 5, 4), _ctx(), PLAN_RULES, calendar=cal)
+    assert result.eligible is False
+    assert result.reason == REASON_DAY_CENTER_CLOSED
+
+
+def test_closed_check_runs_after_enrollment_and_auth():
+    from monthly_schedule.per_day import REASON_DAY_NOT_ENROLLED
+    cal = CenterCalendar([], _open_days(2, 4))
+    result = compute_day_eligibility(
+        date(2026, 5, 4), _ctx(enrolled=False), PLAN_RULES, calendar=cal)
+    assert result.reason == REASON_DAY_NOT_ENROLLED
+
+
+def test_open_day_with_calendar_is_eligible():
+    cal = CenterCalendar([], ALL_WEEK)
+    result = compute_day_eligibility(
+        date(2026, 5, 4), _ctx(), PLAN_RULES, calendar=cal)
+    assert result.eligible is True
+
+
+def test_month_failure_when_authorized_weekdays_all_closed():
+    from monthly_schedule.per_day import REASON_NO_ELIGIBLE_DAYS
+    cal = CenterCalendar([], _open_days(2, 4))
+    failure = compute_month_failure(
+        2026, 5, _ctx(authorized="1,3,5"), calendar=cal)
+    assert failure == REASON_NO_ELIGIBLE_DAYS
+
+
+def test_month_failure_none_when_calendar_open():
+    cal = CenterCalendar([], ALL_WEEK)
+    assert compute_month_failure(2026, 5, _ctx(), calendar=cal) is None

@@ -23,6 +23,7 @@ REASON_DAY_NOT_ENROLLED = "not enrolled on this day"
 REASON_DAY_NO_AUTH = "no active authorization on this day"
 REASON_DAY_WRONG_WEEKDAY = "weekday not in authorized days"
 REASON_DAY_ABSENT = "absent on this day"
+REASON_DAY_CENTER_CLOSED = "center closed on this day"
 REASON_DAY_WINDOW_TOO_NARROW = (
     "availability window too narrow for a valid session"
 )
@@ -161,14 +162,22 @@ class DayEligibility:
     pickup_reserve: int = 0
 
 
-def compute_day_eligibility(day: date, ctx, plan_rules) -> DayEligibility:
-    """Run the ordered eligibility checks for one calendar day."""
+def compute_day_eligibility(day: date, ctx, plan_rules, calendar=None) -> DayEligibility:
+    """Run the ordered eligibility checks for one calendar day.
+
+    `calendar` (a CenterCalendar) rejects company holidays and closed
+    weekdays right after the authorization check; None skips that
+    check. The day bounds are read from `plan_rules` as given — callers
+    that want per-weekday hours pass `calendar.rules_for(day, rules)`."""
     if not ctx.is_enrolled(day):
         return DayEligibility(eligible=False, reason=REASON_DAY_NOT_ENROLLED)
 
     auth = ctx.active_authorization(day)
     if auth is None:
         return DayEligibility(eligible=False, reason=REASON_DAY_NO_AUTH)
+
+    if calendar is not None and calendar.is_closed(day):
+        return DayEligibility(eligible=False, reason=REASON_DAY_CENTER_CLOSED)
 
     authorized = get_authorized_weekdays(auth["auth_days"])
     if day.isoweekday() not in authorized:
@@ -248,10 +257,11 @@ def compute_day_eligibility(day: date, ctx, plan_rules) -> DayEligibility:
 
 
 def compute_month_failure(year: int, month: int, ctx,
-                           start_day=None, end_day=None):
+                           start_day=None, end_day=None, calendar=None):
     """Return a whole-member failure reason string for the requested
     range (defaults to the full month), or None if the member has at
-    least one eligible day in that range."""
+    least one eligible day in that range. Days the center is closed
+    (per `calendar`) count as unschedulable, like wrong weekdays."""
     days = list(get_month_dates(year, month, start_day, end_day))
 
     if not any(ctx.is_enrolled(d) for d in days):
@@ -271,6 +281,8 @@ def compute_month_failure(year: int, month: int, ctx,
             continue
         auth = ctx.active_authorization(d)
         if auth is None:
+            continue
+        if calendar is not None and calendar.is_closed(d):
             continue
         if d.isoweekday() not in get_authorized_weekdays(auth["auth_days"]):
             continue
