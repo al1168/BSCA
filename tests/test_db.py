@@ -1,3 +1,7 @@
+import sys
+import types
+from datetime import date, datetime
+
 import pytest
 
 from monthly_schedule.db import (
@@ -500,3 +504,69 @@ def test_get_activities_missing_db_raises(tmp_path):
     from monthly_schedule.db import get_activities
     with pytest.raises(FileNotFoundError):
         get_activities(str(tmp_path / "nope.accdb"))
+
+
+def test_map_holiday_row():
+    from monthly_schedule.db import map_holiday_row
+    row = (3, " Labor Day ", datetime(2026, 9, 7, 0, 0))
+    assert map_holiday_row(row) == {
+        "id": 3, "name": "Labor Day", "date": date(2026, 9, 7),
+    }
+
+
+def test_map_holiday_row_blank_name():
+    from monthly_schedule.db import map_holiday_row
+    assert map_holiday_row((4, None, datetime(2026, 1, 1)))["name"] == ""
+
+
+def test_map_operating_day_row():
+    from monthly_schedule.db import map_operating_day_row
+    row = (1, "Monday", 1, datetime(1899, 12, 30, 8, 0),
+           datetime(1899, 12, 30, 16, 0))
+    assert map_operating_day_row(row) == {
+        "id": 1, "day_name": "Monday", "day_of_week": 1,
+        "opening_time": "08:00", "closing_time": "16:00",
+    }
+
+
+def test_get_holidays_missing_db_raises(tmp_path):
+    from monthly_schedule.db import get_holidays
+    with pytest.raises(FileNotFoundError):
+        get_holidays(str(tmp_path / "nope.accdb"))
+
+
+def test_get_operating_days_missing_db_raises(tmp_path):
+    from monthly_schedule.db import get_operating_days
+    with pytest.raises(FileNotFoundError):
+        get_operating_days(str(tmp_path / "nope.accdb"))
+
+
+def test_fetch_all_unfiltered_require_col(monkeypatch, tmp_path):
+    """require_col picks which column must be non-NULL for a row to be
+    kept (default 1 = Center ID; the calendar tables use 2)."""
+    from monthly_schedule.db import _fetch_all_unfiltered
+    db = tmp_path / "x.accdb"
+    db.write_bytes(b"")
+    rows = [(1, None, 5), (2, "x", None)]
+
+    class FakeCursor:
+        def execute(self, q):
+            pass
+
+        def fetchall(self):
+            return rows
+
+    class FakeConn:
+        def cursor(self):
+            return FakeCursor()
+
+        def close(self):
+            pass
+
+    fake_pyodbc = types.SimpleNamespace(
+        connect=lambda cs: FakeConn(), Error=Exception,
+    )
+    monkeypatch.setitem(sys.modules, "pyodbc", fake_pyodbc)
+    assert _fetch_all_unfiltered("q", str(db), lambda r: r) == [(2, "x", None)]
+    assert _fetch_all_unfiltered("q", str(db), lambda r: r,
+                                 require_col=2) == [(1, None, 5)]

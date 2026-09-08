@@ -431,6 +431,53 @@ def get_all_one_offs(db_path: str) -> dict:
     return _index_by_center_id(rows)
 
 
+HOLIDAYS_QUERY = "SELECT [ID], [holiday_name], [date] FROM [Holidays]"
+
+
+def map_holiday_row(row):
+    """Map a raw Holidays row. `date` is a DATETIME truncated to a
+    date; a NULL name becomes ''."""
+    return {
+        "id": int(row[0]),
+        "name": str(row[1] or "").strip(),
+        "date": _to_date(row[2]),
+    }
+
+
+def get_holidays(db_path: str) -> list:
+    """Every Holidays row (center-wide, so no center_id index). Rows
+    with a NULL date are dropped."""
+    return _fetch_all_unfiltered(
+        HOLIDAYS_QUERY, db_path, map_holiday_row, require_col=2,
+    )
+
+
+OPERATING_DAYS_QUERY = (
+    "SELECT [ID], [day_name], [Day Of Week], [opening_time], "
+    "[closing_time] FROM [OperatingDays]"
+)
+
+
+def map_operating_day_row(row):
+    """Map a raw OperatingDays row. Times are the 1899-12-30
+    placeholder DATETIMEs, extracted as 'HH:MM' like Availability."""
+    return {
+        "id": int(row[0]),
+        "day_name": str(row[1] or ""),
+        "day_of_week": int(row[2]),
+        "opening_time": _datetime_to_hhmm(row[3]),
+        "closing_time": _datetime_to_hhmm(row[4]),
+    }
+
+
+def get_operating_days(db_path: str) -> list:
+    """Every OperatingDays row. Rows with a NULL [Day Of Week] are
+    dropped. A weekday with no row is closed (see CenterCalendar)."""
+    return _fetch_all_unfiltered(
+        OPERATING_DAYS_QUERY, db_path, map_operating_day_row, require_col=2,
+    )
+
+
 ALL_BILLING_FIELDS_QUERY = (
     "SELECT [Center ID], [Gender], [DOB], [Admission Date], [Medicaid] "
     "FROM [Contacts] WHERE [Center ID] IS NOT NULL"
@@ -584,10 +631,12 @@ def _index_by_center_id(rows):
     return out
 
 
-def _fetch_all_unfiltered(query: str, db_path: str, mapper):
+def _fetch_all_unfiltered(query: str, db_path: str, mapper, require_col=1):
     """Open one connection, run an unfiltered SELECT, map each row.
-    Used by the five `get_all_<table>` batch fetchers so a whole-table
-    load is one ODBC round-trip instead of N."""
+    Used by the `get_all_<table>` batch fetchers so a whole-table load
+    is one ODBC round-trip instead of N. Rows whose column at index
+    `require_col` is NULL are dropped (default 1 = [Center ID]; the
+    center-wide calendar tables pass the index of their key column)."""
     if not os.path.exists(db_path):
         raise FileNotFoundError(f"Database not found: {db_path}")
 
@@ -605,7 +654,8 @@ def _fetch_all_unfiltered(query: str, db_path: str, mapper):
     try:
         cursor = conn.cursor()
         cursor.execute(query)
-        return [mapper(row) for row in cursor.fetchall() if row[1] is not None]
+        return [mapper(row) for row in cursor.fetchall()
+                if row[require_col] is not None]
     finally:
         conn.close()
 
