@@ -59,14 +59,15 @@ def _stub_all_scripts(monkeypatch, return_code=0):
     return mocks
 
 
-def test_setup_steps_constant_lists_fifteen_scripts():
+def test_setup_steps_constant_lists_sixteen_scripts():
     """The SETUP_STEPS constant is the canonical list of (display_name,
-    module_path) tuples for the 15 setup scripts in execution order."""
-    assert len(SETUP_STEPS) == 15
+    module_path) tuples for the 16 setup scripts in execution order."""
+    assert len(SETUP_STEPS) == 16
     names = [name for name, _path in SETUP_STEPS]
     assert names == [
         "normalize_contacts_columns",
         "create_supporting_tables",
+        "seed_operating_days",
         "add_long_lat_to_contacts",
         "add_group_to_contacts",
         "add_document_to_authorization",

@@ -1,6 +1,6 @@
 """Background worker that prepares a fresh BSCA database by chaining
 the setup scripts in order: backup → normalize_contacts_columns →
-create_supporting_tables → add_long_lat_to_contacts →
+create_supporting_tables → seed_operating_days → add_long_lat_to_contacts →
 add_document_to_authorization →
 backfill_enrollment_from_contacts → backfill_authorization_from_contacts
 → backfill_availability_from_hha → backfill_emergency_contacts_from_contacts.
@@ -32,6 +32,8 @@ SETUP_STEPS: list[tuple[str, str]] = [
      "scripts.normalize_contacts_columns"),
     ("create_supporting_tables",
      "scripts.create_supporting_tables"),
+    ("seed_operating_days",
+     "scripts.seed_operating_days"),
     ("add_long_lat_to_contacts",
      "scripts.add_long_lat_to_contacts"),
     ("add_group_to_contacts",
