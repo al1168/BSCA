@@ -115,13 +115,16 @@ def _fmt_duration(minutes):
 
 
 def _reason_detail(reason, availability, reserve, in_lo, out_hi,
-                    plan_rules, avail_row, pickup_reserve=0):
+                    day_rules, avail_row, pickup_reserve=0):
     """Free-text arithmetic behind a window decision ('' when the
-    numbers add nothing: open days, non-window rejections)."""
+    numbers add nothing: open days, non-window rejections).
+
+    `day_rules` is the day's rules (the plan's, narrowed to that
+    weekday's operating hours by CenterCalendar.rules_for)."""
     if reason == REASON_DAY_WINDOW_TOO_NARROW:
         usable = (f"usable {format_minutes(in_lo)}-{format_minutes(out_hi)} "
                   f"({_fmt_duration(out_hi - in_lo)})")
-        min_len = plan_rules["session_length_min"][0]
+        min_len = day_rules["session_length_min"][0]
         subtracted = []
         if pickup_reserve:
             subtracted.append(f"{pickup_reserve}m pick-up reserve")

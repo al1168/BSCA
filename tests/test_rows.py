@@ -926,6 +926,41 @@ def test_build_rows_cache_regenerates_when_hours_change():
             assert _to_min(r["time_in"]) >= _to_min("12:00")
 
 
+def test_build_rows_cache_regenerates_with_availability_row():
+    """Same guard, but through the placement_window branch: a member with
+    a recurring availability rule still gets regenerated times when the
+    weekday's opening moves from 08:00 to 12:00."""
+    avail = [
+        {"id": d, "center_id": 1,
+         "effective_start_date": date(2026, 1, 1),
+         "effective_end_date": None,
+         "day_of_week": d, "avail_start": "07:00", "avail_end": "17:00"}
+        for d in (1, 3, 5)
+    ]
+    ctx = MemberContext(
+        enrollments=[{"id": 1, "center_id": 1,
+                      "start_date": date(2026, 1, 1), "end_date": None}],
+        authorizations=[{"id": 1, "center_id": 1,
+                         "auth_start": date(2026, 1, 1),
+                         "auth_end": date(2026, 12, 31),
+                         "effective_start": date(2026, 1, 1),
+                         "effective_end": date(2026, 12, 31),
+                         "auth_days": "1,3,5"}],
+        absences=[], availabilities=avail, one_offs=[],
+    )
+    cache = {}
+    build_rows(2026, 5, ctx, PLAN_RULES, random.Random(0),
+               time_cache=cache, center_id=1, plan="HF", travel_minutes=10,
+               calendar=_calendar(opening="08:00"))
+    rows = build_rows(2026, 5, ctx, PLAN_RULES, random.Random(0),
+                      time_cache=cache, center_id=1, plan="HF",
+                      travel_minutes=10, calendar=_calendar(opening="12:00"))
+    attended = [r for r in rows if r["status"] == "attended"]
+    assert attended
+    for r in attended:
+        assert _to_min(r["time_in"]) >= _to_min("12:00")
+
+
 def test_debug_rows_holiday_sentence():
     cal = _calendar(holidays=[("Test Holiday", date(2026, 5, 4))])
     rows = build_debug_rows(2026, 5, _ctx_full_month("1,3,5"), PLAN_RULES,
