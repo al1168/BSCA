@@ -186,7 +186,7 @@ def main(argv=None):
         absence_idx = get_all_absences(args.db)
         avail_idx = get_all_availability(args.db)
         one_off_idx = get_all_one_offs(args.db)
-        calendar = CenterCalendar(
+        center_calendar = CenterCalendar(
             get_holidays(args.db), get_operating_days(args.db)
         )
     except (FileNotFoundError, RuntimeError) as exc:
@@ -200,7 +200,7 @@ def main(argv=None):
             absence_idx.get(member["center_id"], []),
             avail_idx.get(member["center_id"], []),
             one_off_idx.get(member["center_id"], []),
-            args.year, args.month, calendar=calendar,
+            args.year, args.month, calendar=center_calendar,
         )
         for member in members
     ]

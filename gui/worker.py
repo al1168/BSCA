@@ -296,7 +296,7 @@ class ScheduleWorker(QThread):
         # Center-wide calendar: holidays and weekly hours. Missing
         # tables fail the run like any other supporting table (re-run
         # Setup to create them).
-        calendar = CenterCalendar(
+        center_calendar = CenterCalendar(
             get_holidays(self.db_path), get_operating_days(self.db_path),
         )
 
@@ -375,7 +375,7 @@ class ScheduleWorker(QThread):
                         self.start_day, self.end_day,
                         schedule_rules_overrides=self.schedule_rules,
                         api_key=api_key, cache=cache,
-                        calendar=calendar,
+                        calendar=center_calendar,
                     )
                     debug_dir = os.path.join(
                         self.out_dir,
@@ -424,7 +424,7 @@ class ScheduleWorker(QThread):
                     time_cache=time_cache,
                     schedule_rules_overrides=self.schedule_rules,
                     on_rows=on_rows,
-                    calendar=calendar,
+                    calendar=center_calendar,
                 )
             except OneOffConflict as exc:
                 # process_member catches OneOffConflict internally and

@@ -457,7 +457,7 @@ def main(argv=None):
         return 1
 
     try:
-        calendar = CenterCalendar(
+        center_calendar = CenterCalendar(
             get_holidays(args.db_path), get_operating_days(args.db_path),
         )
     except (FileNotFoundError, RuntimeError) as exc:
@@ -494,7 +494,7 @@ def main(argv=None):
             member_debug_rows = collect_debug_rows(
                 member, ctx, args.year, args.month,
                 args.start_day, args.end_day,
-                api_key=api_key, cache=cache, calendar=calendar,
+                api_key=api_key, cache=cache, calendar=center_calendar,
             )
             debug_dir = os.path.join(
                 out_dir, debug_subdir(args.year, args.month)
@@ -514,7 +514,7 @@ def main(argv=None):
             member, ctx, args.year, args.month, out_dir,
             api_key, cache,
             start_day=args.start_day, end_day=args.end_day,
-            time_cache=time_cache, calendar=calendar,
+            time_cache=time_cache, calendar=center_calendar,
         )
         if ok:
             success += 1
