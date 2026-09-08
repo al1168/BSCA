@@ -76,3 +76,10 @@ def test_duplicate_weekday_rows_largest_id_wins():
     rows = _open(1, opening="08:00") + _open(1, opening="10:00", first_id=9)
     cal = CenterCalendar([], rows)
     assert cal.rules_for(MON, PLAN_RULES)["earliest_time_in"] == "10:00"
+
+
+def test_duplicate_holiday_dates_first_row_wins():
+    cal = CenterCalendar(
+        [{"id": 1, "name": "A", "date": MON}, {"id": 2, "name": "B", "date": MON}],
+        ALL_WEEK)
+    assert cal.closed_reason(MON) == ("holiday", "A")

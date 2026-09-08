@@ -49,10 +49,11 @@ class CenterCalendar:
         return cls((), None)
 
     def closed_reason(self, day):
-        """("holiday", name) when `day` is a company holiday,
-        ("weekday", None) when its weekday has no OperatingDays row,
-        else None. Holidays are checked first so the debug report names
-        the holiday even on an otherwise-closed weekday."""
+        """`day` is a datetime.date. ("holiday", name) when `day` is a
+        company holiday, ("weekday", None) when its weekday has no
+        OperatingDays row, else None. Holidays are checked first so
+        the debug report names the holiday even on an otherwise-closed
+        weekday."""
         if day in self._holidays:
             return ("holiday", self._holidays[day])
         if self._days is not None and day.isoweekday() not in self._days:
@@ -63,9 +64,10 @@ class CenterCalendar:
         return self.closed_reason(day) is not None
 
     def rules_for(self, day, plan_rules):
-        """`plan_rules` with earliest_time_in / latest_time_out replaced
-        by the weekday's opening / closing time. Returns `plan_rules`
-        itself (not a copy) when there is nothing to substitute."""
+        """`day` is a datetime.date. `plan_rules` with earliest_time_in
+        / latest_time_out replaced by the weekday's opening / closing
+        time. Returns `plan_rules` itself (not a copy) when there is
+        nothing to substitute."""
         if self._days is None:
             return plan_rules
         row = self._days.get(day.isoweekday())
