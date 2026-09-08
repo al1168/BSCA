@@ -235,14 +235,26 @@ def test_month_failure_absent_on_all_enrolled_authorized_days():
 
 def test_one_off_conflict_exception_carries_fields():
     from datetime import date
-    from monthly_schedule.per_day import OneOffConflict
-    exc = OneOffConflict(123, date(2026, 6, 5), "duplicate one-off rows for 2026-06-05")
+    from monthly_schedule.per_day import OneOffConflict, OneOffConflictDetail
+    exc = OneOffConflict(
+        123, date(2026, 6, 5),
+        OneOffConflictDetail(
+            kind="duplicate", day=date(2026, 6, 5),
+            one_offs=(
+                {"id": 1, "avail_start": "09:00", "avail_end": "12:00"},
+                {"id": 2, "avail_start": "10:00", "avail_end": "13:00"},
+            ),
+        ),
+    )
     assert exc.center_id == 123
     assert exc.day == date(2026, 6, 5)
-    assert exc.reason == "duplicate one-off rows for 2026-06-05"
+    assert exc.reason == (
+        "2 one-off rows for 2026-06-05: 09:00-12:00 (row 1) "
+        "and 10:00-13:00 (row 2)"
+    )
     assert "123" in str(exc)
     assert "2026-06-05" in str(exc)
-    assert "duplicate" in str(exc)
+    assert "one-off rows" in str(exc)
 
 
 def test_one_off_wins_over_recurring_availability():
@@ -300,7 +312,10 @@ def test_duplicate_one_off_rows_raise_conflict():
         )
     assert info.value.center_id == 1
     assert info.value.day == date(2026, 5, 4)
-    assert info.value.reason == "duplicate one-off rows for 2026-05-04"
+    assert info.value.reason == (
+        "2 one-off rows for 2026-05-04: 09:00-12:00 (row 1) "
+        "and 10:00-13:00 (row 2)"
+    )
 
 
 def test_one_off_with_absence_raises_conflict():
@@ -315,7 +330,122 @@ def test_one_off_with_absence_raises_conflict():
             _ctx(absent=True, one_offs=[one_off]),
             PLAN_RULES,
         )
-    assert info.value.reason == "one-off on 2026-05-04 conflicts with absence"
+    # Names both sides of the contradiction, with the Access row IDs, so
+    # staff can open the two rows without hunting for them.
+    assert info.value.reason == (
+        "one-off availability 09:00-12:00 on 2026-05-04 "
+        "(OneOffAvailability row 99) conflicts with a Vacation absence "
+        "covering 2026-05-01 to 2026-05-31 (Absences row 1)"
+    )
+
+
+def test_one_off_absence_conflict_without_leave_type():
+    """A blank Leave Type must not produce a double space or a dangling
+    article — the sentence drops the type instead."""
+    from monthly_schedule.per_day import OneOffConflict
+    one_off = {"id": 99, "center_id": 1, "date": date(2026, 5, 4),
+               "avail_start": "09:00", "avail_end": "12:00"}
+    ctx = _ctx(absent=True, one_offs=[one_off])
+    ctx._absences[0]["leave_type"] = ""
+    import pytest
+    with pytest.raises(OneOffConflict) as info:
+        compute_day_eligibility(date(2026, 5, 4), ctx, PLAN_RULES)
+    assert info.value.reason == (
+        "one-off availability 09:00-12:00 on 2026-05-04 "
+        "(OneOffAvailability row 99) conflicts with an absence "
+        "covering 2026-05-01 to 2026-05-31 (Absences row 1)"
+    )
+
+
+def test_one_off_absence_conflict_carries_structured_detail():
+    """The GUI needs the parts, not the English sentence, so it can build
+    the same message in Chinese."""
+    from monthly_schedule.per_day import OneOffConflict
+    one_off = {"id": 99, "center_id": 1, "date": date(2026, 5, 4),
+               "avail_start": "09:00", "avail_end": "12:00"}
+    import pytest
+    with pytest.raises(OneOffConflict) as info:
+        compute_day_eligibility(
+            date(2026, 5, 4),
+            _ctx(absent=True, one_offs=[one_off]),
+            PLAN_RULES,
+        )
+    detail = info.value.detail
+    assert detail.kind == "absence"
+    assert detail.day == date(2026, 5, 4)
+    assert detail.one_offs == (
+        {"id": 99, "avail_start": "09:00", "avail_end": "12:00"},
+    )
+    assert detail.absence == {
+        "id": 1, "leave_type": "Vacation",
+        "start_date": date(2026, 5, 1), "end_date": date(2026, 5, 31),
+    }
+
+
+def test_one_off_conflict_detail_serialises_to_primitives():
+    """as_dict() crosses the Qt signal boundary into the GUI thread, so
+    every value has to survive as a plain JSON-ish type."""
+    from monthly_schedule.per_day import OneOffConflict
+    one_off = {"id": 99, "center_id": 1, "date": date(2026, 5, 4),
+               "avail_start": "09:00", "avail_end": "12:00"}
+    import pytest
+    with pytest.raises(OneOffConflict) as info:
+        compute_day_eligibility(
+            date(2026, 5, 4),
+            _ctx(absent=True, one_offs=[one_off]),
+            PLAN_RULES,
+        )
+    assert info.value.detail.as_dict() == {
+        "kind": "absence",
+        "day": "2026-05-04",
+        "one_offs": [
+            {"id": 99, "avail_start": "09:00", "avail_end": "12:00"},
+        ],
+        "absence": {
+            "id": 1, "leave_type": "Vacation",
+            "start_date": "2026-05-01", "end_date": "2026-05-31",
+        },
+    }
+
+
+def test_duplicate_one_off_detail_lists_every_row():
+    from monthly_schedule.per_day import OneOffConflict
+    one_offs = [
+        {"id": 1, "center_id": 1, "date": date(2026, 5, 4),
+         "avail_start": "09:00", "avail_end": "12:00"},
+        {"id": 2, "center_id": 1, "date": date(2026, 5, 4),
+         "avail_start": "10:00", "avail_end": "13:00"},
+    ]
+    import pytest
+    with pytest.raises(OneOffConflict) as info:
+        compute_day_eligibility(
+            date(2026, 5, 4), _ctx(one_offs=one_offs), PLAN_RULES
+        )
+    detail = info.value.detail
+    assert detail.kind == "duplicate"
+    assert detail.absence is None
+    assert [r["id"] for r in detail.one_offs] == [1, 2]
+
+
+def test_three_duplicate_one_offs_join_with_a_single_and():
+    from monthly_schedule.per_day import OneOffConflict
+    one_offs = [
+        {"id": 1, "center_id": 1, "date": date(2026, 5, 4),
+         "avail_start": "09:00", "avail_end": "12:00"},
+        {"id": 2, "center_id": 1, "date": date(2026, 5, 4),
+         "avail_start": "10:00", "avail_end": "13:00"},
+        {"id": 3, "center_id": 1, "date": date(2026, 5, 4),
+         "avail_start": "11:00", "avail_end": "14:00"},
+    ]
+    import pytest
+    with pytest.raises(OneOffConflict) as info:
+        compute_day_eligibility(
+            date(2026, 5, 4), _ctx(one_offs=one_offs), PLAN_RULES
+        )
+    assert info.value.reason == (
+        "3 one-off rows for 2026-05-04: 09:00-12:00 (row 1), "
+        "10:00-13:00 (row 2) and 11:00-14:00 (row 3)"
+    )
 
 
 def test_duplicate_one_off_beats_absence_conflict():
@@ -334,7 +464,7 @@ def test_duplicate_one_off_beats_absence_conflict():
             _ctx(absent=True, one_offs=one_offs),
             PLAN_RULES,
         )
-    assert info.value.reason == "duplicate one-off rows for 2026-05-04"
+    assert info.value.detail.kind == "duplicate"
 
 
 def test_one_off_on_unenrolled_day_silently_skipped():

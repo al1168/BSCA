@@ -44,6 +44,16 @@ DEFAULTS = {
     "geo_cache": "geo_cache.json",
     "output_path": ".",
     "language": "en",
+    # Trailing name in the billing workbook's filename
+    # ("8. August 2026 billing <name>.xlsx"). Required — the Settings
+    # dialog refuses to save a blank, and an All-Members run is blocked
+    # until one is set.
+    "billing_name": "",
+    # Free-text program name. When it contains "bowery" or "cathay"
+    # (any casing) each generated timesheet is accompanied by an
+    # Activity Log workbook built from that program's template.
+    # Blank = feature off.
+    "program_name": "",
     # Default-for-everyone scheduling rules. Tuples are stored as lists
     # so they round-trip cleanly through JSON; rules.get_rules_for_plan
     # converts the ranges back to tuples at use site.
@@ -71,7 +81,10 @@ def exists() -> bool:
 
 def load() -> dict:
     try:
-        with open(_settings_path(), encoding="utf-8") as f:
+        # utf-8-sig: tolerate a BOM from hand-edited files (Notepad) —
+        # with plain utf-8 the BOM made json.load fail and silently
+        # reset every setting to defaults.
+        with open(_settings_path(), encoding="utf-8-sig") as f:
             data = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         # dict() copies top-level keys; schedule_rules needs its own

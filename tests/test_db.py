@@ -93,7 +93,8 @@ def test_enrollments_query_columns_and_filter():
 
 def test_authorizations_query_columns_and_filter():
     for col in ("[Center ID]", "[auth_start]", "[auth_end]",
-                "[effective_start]", "[effective_end]", "[auth_days]"):
+                "[effective_start]", "[effective_end]", "[auth_days]",
+                "[Member ID]", "[Plan Type]"):
         assert col in AUTHORIZATIONS_QUERY
     assert "FROM [Authorization]" in AUTHORIZATIONS_QUERY
     assert "WHERE [Center ID] = ?" in AUTHORIZATIONS_QUERY
@@ -129,7 +130,8 @@ def test_map_enrollment_row():
 def test_map_authorization_row():
     from datetime import date
     row = (5, 24010.0, date(2026, 1, 1), date(2026, 12, 31),
-           date(2026, 1, 1), date(2026, 6, 30), "1,3,5")
+           date(2026, 1, 1), date(2026, 6, 30), "1,3,5", "134972571",
+           "MAP")
     assert map_authorization_row(row) == {
         "id": 5,
         "center_id": 24010,
@@ -138,6 +140,8 @@ def test_map_authorization_row():
         "effective_start": date(2026, 1, 1),
         "effective_end": date(2026, 6, 30),
         "auth_days": "1,3,5",
+        "member_id": "134972571",
+        "plan_type": "MAP",
     }
 
 
@@ -183,10 +187,12 @@ def test_map_authorization_row_nullable_effective_dates():
     from monthly_schedule.db import map_authorization_row
     # effective_start / effective_end NULL → fall back to auth_start / auth_end
     row = (5, 24010.0, date(2026, 1, 1), date(2026, 12, 31),
-           None, None, "1,3,5")
+           None, None, "1,3,5", None, None)
     result = map_authorization_row(row)
     assert result["effective_start"] == date(2026, 1, 1)
     assert result["effective_end"] == date(2026, 12, 31)
+    assert result["member_id"] is None
+    assert result["plan_type"] is None
 
 
 def test_get_enrollments_missing_db_raises(tmp_path):
@@ -242,7 +248,8 @@ def test_all_enrollments_query_columns_and_no_filter():
 def test_all_authorizations_query_columns_and_no_filter():
     from monthly_schedule.db import ALL_AUTHORIZATIONS_QUERY
     for col in ("[ID]", "[Center ID]", "[auth_start]", "[auth_end]",
-                "[effective_start]", "[effective_end]", "[auth_days]"):
+                "[effective_start]", "[effective_end]", "[auth_days]",
+                "[Member ID]", "[Plan Type]"):
         assert col in ALL_AUTHORIZATIONS_QUERY
     assert "FROM [Authorization]" in ALL_AUTHORIZATIONS_QUERY
     assert "WHERE" not in ALL_AUTHORIZATIONS_QUERY
@@ -463,3 +470,33 @@ def test_get_billing_codes_missing_table_raises_runtime(monkeypatch,
     monkeypatch.setitem(sys.modules, "pyodbc", fake_pyodbc)
     with pytest.raises(RuntimeError, match="Codes table"):
         get_billing_codes(str(db_file))
+
+
+def test_activities_query_columns():
+    from monthly_schedule.db import ACTIVITIES_QUERY
+    assert "[A_ID]" in ACTIVITIES_QUERY
+    assert "[Activity_Name]" in ACTIVITIES_QUERY
+    assert "[Frequency]" in ACTIVITIES_QUERY
+    assert "[C_name]" in ACTIVITIES_QUERY
+    assert "FROM [Activities]" in ACTIVITIES_QUERY
+
+
+def test_map_activity_row():
+    from monthly_schedule.db import map_activity_row
+    key, info = map_activity_row((" a1 ", "News On TV", "1.2.3.4.5", "电视"))
+    assert key == "A1"
+    assert info == {"name": "News On TV", "frequency": "1.2.3.4.5",
+                    "c_name": "电视"}
+
+
+def test_map_activity_row_blank_fields():
+    from monthly_schedule.db import map_activity_row
+    key, info = map_activity_row(("A14", None, None, None))
+    assert key == "A14"
+    assert info == {"name": "", "frequency": "", "c_name": ""}
+
+
+def test_get_activities_missing_db_raises(tmp_path):
+    from monthly_schedule.db import get_activities
+    with pytest.raises(FileNotFoundError):
+        get_activities(str(tmp_path / "nope.accdb"))

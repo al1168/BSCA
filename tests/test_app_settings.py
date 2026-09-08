@@ -74,6 +74,35 @@ def test_load_drops_google_config_when_file_empty(settings_file, tmp_path):
     assert on_disk["google_api_key"] == ""
 
 
+def test_load_tolerates_utf8_bom(settings_file):
+    """Hand-edited settings (e.g. Notepad) may carry a UTF-8 BOM; the
+    loader must still read them instead of silently resetting the user
+    to defaults."""
+    settings_file.write_bytes(
+        b"\xef\xbb\xbf" + json.dumps(
+            {"db_path": "X:/real.accdb", "program_name": "Cathay"}
+        ).encode("utf-8")
+    )
+    from gui import app_settings
+    s = app_settings.load()
+    assert s["db_path"] == "X:/real.accdb"
+    assert s["program_name"] == "Cathay"
+
+
+def test_fresh_install_has_blank_program_name(settings_file):
+    from gui import app_settings
+    s = app_settings.load()
+    assert s["program_name"] == ""
+
+
+def test_program_name_round_trip(settings_file):
+    from gui import app_settings
+    s = app_settings.load()
+    s["program_name"] = "Bowery SADC"
+    app_settings.save(s)
+    assert app_settings.load()["program_name"] == "Bowery SADC"
+
+
 def test_fresh_install_has_default_schedule_rules(settings_file):
     from gui import app_settings
     s = app_settings.load()

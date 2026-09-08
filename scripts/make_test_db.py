@@ -66,6 +66,20 @@ def _build_connection_string(path: str) -> str:
     return f"DRIVER={{Microsoft Access Driver (*.mdb, *.accdb)}};DBQ={path};"
 
 
+def _ensure_plan_type_column(conn) -> None:
+    """Old reference DBs predate the [Plan Type] migration
+    (scripts/add_plan_type_to_authorization.py); the scheduler's
+    Authorization queries need the column, so add it when absent."""
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT TOP 0 [Plan Type] FROM [Authorization]")
+    except Exception:
+        cur.execute(
+            "ALTER TABLE [Authorization] ADD COLUMN [Plan Type] TEXT(255)"
+        )
+        conn.commit()
+
+
 def _truncate(conn, tables) -> None:
     """`DELETE FROM` each table in `tables`. Caller supplies the order
     (children first, parents last)."""
@@ -327,10 +341,11 @@ def seed_populate_real_members(conn, today: date) -> None:
     def _authorize(cid: int) -> None:
         cur.execute(
             "INSERT INTO [Authorization] ([Center ID], [auth_start], "
-            "[auth_end], [effective_start], [effective_end], [auth_days]) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "[auth_end], [effective_start], [effective_end], [auth_days], "
+            "[Plan Type]) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             str(cid), _dt(m1), _dt(mnext_last),
-            _dt(m1), _dt(mnext_last), "1,2,3,4,5",
+            _dt(m1), _dt(mnext_last), "1,2,3,4,5", "MAP",
         )
 
     def _make_available(cid: int) -> None:
@@ -412,7 +427,9 @@ def _seed_one_off_conflict(conn, today: date) -> None:
         Fri 09:00-15:00.
       - Absence: a single day = first Monday of this month.
       - OneOffAvailability: the SAME first Monday, 12:00-16:00 ->
-        conflict reason: 'one-off on YYYY-MM-DD conflicts with absence'.
+        conflict reason names both rows: 'one-off availability
+        12:00-16:00 on YYYY-MM-DD (OneOffAvailability row N) conflicts
+        with a Sick absence covering ... (Absences row N)'.
     """
     m1, _, mlast, mnext_last = _month_bounds(today)
     cid = 100100
@@ -431,10 +448,11 @@ def _seed_one_off_conflict(conn, today: date) -> None:
     )
     cur.execute(
         "INSERT INTO [Authorization] ([Center ID], [auth_start], [auth_end], "
-        "[effective_start], [effective_end], [auth_days], [Health Plan]) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "[effective_start], [effective_end], [auth_days], [Health Plan], "
+        "[Plan Type]) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         cid, _dt(m1), _dt(mnext_last), _dt(m1), _dt(mnext_last),
-        "1,3,5", "HOF",
+        "1,3,5", "HOF", "MLTC",
     )
     for dow in (1, 3, 5):
         cur.execute(
@@ -544,6 +562,7 @@ def main(argv=None) -> int:
         return 1
 
     try:
+        _ensure_plan_type_column(conn)
         truncate_tables = (
             SUPPORTING_TABLES
             if args.scenario in SCENARIOS_KEEP_CONTACTS

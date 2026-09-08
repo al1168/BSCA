@@ -57,19 +57,24 @@ def _parse_admission_date(text):
     """Return a `datetime.date` parsed from `text`, or None when text
     is missing or unparseable.
 
-    Accepted format: `M/D/YYYY`, `MM/D/YYYY`, `M/DD/YYYY`,
+    Access columns typed Date/Time come back from pyodbc as datetime
+    objects (pass through); columns typed Short Text come back as str
+    and are parsed as `M/D/YYYY`, `MM/D/YYYY`, `M/DD/YYYY`,
     `MM/DD/YYYY` — i.e. anything `datetime.strptime("%m/%d/%Y")`
-    handles. The year is sanity-checked against
+    handles. Either way the year is sanity-checked against
     [_MIN_ADMISSION_YEAR, _MAX_ADMISSION_YEAR]."""
     if text is None:
         return None
-    s = str(text).strip()
-    if not s:
-        return None
-    try:
-        parsed = datetime.datetime.strptime(s, "%m/%d/%Y").date()
-    except ValueError:
-        return None
+    if hasattr(text, "year"):  # datetime or date from a Date/Time column
+        parsed = text.date() if hasattr(text, "date") else text
+    else:
+        s = str(text).strip()
+        if not s:
+            return None
+        try:
+            parsed = datetime.datetime.strptime(s, "%m/%d/%Y").date()
+        except ValueError:
+            return None
     if not (_MIN_ADMISSION_YEAR <= parsed.year <= _MAX_ADMISSION_YEAR):
         return None
     return parsed

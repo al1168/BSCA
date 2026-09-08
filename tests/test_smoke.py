@@ -105,4 +105,8 @@ def test_one_off_conflict_writes_skipped_csv(tmp_path):
     )
     body = csv_files[0].read_text(encoding="utf-8")
     assert "100100" in body
-    assert "conflicts with absence" in body
+    # Both offending records are named, with their Access row IDs.
+    assert "one-off availability" in body
+    assert "OneOffAvailability row" in body
+    assert "conflicts with a Sick absence" in body
+    assert "Absences row" in body

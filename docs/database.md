@@ -21,11 +21,26 @@ The master member record. One row per member, keyed by `Center ID`.
 | Last Name | Short Text | |
 | First Name | Short Text | |
 | Chinese Name | Short Text | |
-| DOB | Date/Time | |
+| DOB | Short Text | Date of birth. Short Text in the live database (with occasional typos); normalized by `parse_flex_date` in [monthly_schedule/billing_workbook.py](../monthly_schedule/billing_workbook.py), which also tolerates a future migration to a real Date/Time column ([scripts/change_dob_to_date_in_contacts.py](../scripts/change_dob_to_date_in_contacts.py)). |
+| Gender | Short Text | Read by the billing workbook. |
+| Admission Date | Short Text | No longer read by the billing workbook — the ENROLLMENT DATE column now shows the member's earliest `Enrollment.start_date` (newer members leave this field blank). Still read by [scripts/backfill_enrollment_from_contacts.py](../scripts/backfill_enrollment_from_contacts.py). |
+| Medicaid | Short Text | Member's Medicaid number, read by the billing workbook. |
+| Member ID | Short Text | External Medicaid-style ID. Copied onto Authorization/TransportAuthorization rows by the backfill. |
 | Health Plan | Short Text | Drives the per-plan timing rules in [monthly_schedule/rules.py](../monthly_schedule/rules.py). |
 | Address | Short Text | Member's home address, used for travel-time calculation. |
 | Long Lat | Short Text | Optional pre-computed `lng,lat` pair. When present, the scheduler skips the Google Geocoding call. |
 | ... | | Other administrative fields exist on Contacts but are not consumed by the scheduler. |
+
+**Column-name normalization.** Databases exported from DBM.accdb name
+these columns with underscores (`Center_ID`, `Admission`, `AuthBGN`,
+…). The setup chain runs
+[scripts/normalize_contacts_columns.py](../scripts/normalize_contacts_columns.py)
+first, which renames the legacy columns in place (via DAO) and then
+verifies every Contacts column BSCA reads actually exists: `Center ID`,
+`Last Name`, `First Name`, `Health Plan`, `Admission Date`, `SADC`,
+`HHA`, `Emergency`, `Auth BGN`, `Auth EXP`, `Member ID`, `SADC Auth`,
+`TRANS Auth`, `Gender`, `DOB`, `Medicaid`, `Address`. A missing column
+stops the chain with a readable error.
 
 **Historical note — legacy authorization columns.** Contacts retains
 several pre-redesign columns that the scheduler no longer reads:
@@ -75,6 +90,7 @@ during each period.
 | auth_days | Short Text | Authorized weekdays as digits 1–7 separated by any non-digit. `1=Mon` … `7=Sun`. Example: `"1,3,5"` for Mon/Wed/Fri. Parser: [monthly_schedule/auth_days.py](../monthly_schedule/auth_days.py). |
 | notes | Long Text, nullable | Free-text context. |
 | Health Plan | Short Text | The member's MLTC plan, copied from Contacts.[Health Plan] by the backfill. |
+| Plan Type | Short Text, nullable | Kind of plan behind the authorization (e.g. `MAP`, `MLTC`), filled in by hand in Access. Shown in the billing workbook's PLAN TYPE column (from the month's latest active authorization). Added by [scripts/add_plan_type_to_authorization.py](../scripts/add_plan_type_to_authorization.py) on existing databases. |
 | Member ID | Short Text, nullable | External Medicaid-style ID, copied from Contacts.[Member ID]. |
 | auth_number | Short Text, nullable | Authorization number, copied from Contacts.[SADC Auth] by the backfill. |
 | created_at | Date/Time | Timestamp set when the backfill inserts the row. |
@@ -206,19 +222,104 @@ represent a wall-clock time, and it lights up Access's built-in time
 picker in the UI. The Python layer always reads/writes the time
 portion; the placeholder date (1899-12-30) is ignored.
 
+### OneOffAvailability
+
+A single-date availability override (spec
+[2026-06-04-one-off-availability-design.md](superpowers/specs/2026-06-04-one-off-availability-design.md)).
+Where `Availability` describes a recurring weekly pattern, a one-off
+row pins the member's window for exactly one calendar date. Created by
+[scripts/add_one_off_availability_table.py](../scripts/add_one_off_availability_table.py)
+on existing databases.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| ID | AutoNumber | Primary key. |
+| Center ID | Number | FK → Contacts. |
+| date | Date/Time | The single calendar date this override applies to. |
+| avail_start | Date/Time | Time-only DATETIME (1899-12-30 placeholder date), rendered as `"HH:MM"` by [`map_one_off_row`](../monthly_schedule/db.py). |
+| avail_end | Date/Time | Time-only DATETIME, same convention. |
+| Notes | Long Text, nullable | |
+
+**Semantics.** On a date with a one-off row, the row **replaces** the
+recurring Availability lookup entirely, and the one-off window is
+exempt from the drop-off/pick-up transport reserves that recurring
+rows get (user decision, spec 2026-07-20). Two data situations are
+hard errors that abort the member's schedule with a readable message
+(`OneOffConflict` in [monthly_schedule/per_day.py](../monthly_schedule/per_day.py))
+rather than being silently resolved:
+- two or more one-off rows for the same member and date, or
+- a one-off row on a date also covered by an Absence row.
+
+### EmergencyContact
+
+Emergency-contact people for each member, seeded from the free-text
+`Contacts.[Emergency]` column by
+[scripts/backfill_emergency_contacts_from_contacts.py](../scripts/backfill_emergency_contacts_from_contacts.py).
+The scheduler does not read this table — it exists for other tooling
+— but `create_supporting_tables.py` creates it as part of the
+standard schema.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| ID | AutoNumber | Primary key. |
+| Center ID | Number | FK → Contacts. |
+| Full Name | Short Text | |
+| Phone Number | Short Text (50) | |
+| Relationship | Short Text (100) | |
+
+### Codes
+
+Lookup table mapping each health plan to its billing codes. Read by
+the billing workbook ([monthly_schedule/billing_workbook.py](../monthly_schedule/billing_workbook.py))
+via [`get_billing_codes`](../monthly_schedule/db.py). Not created by
+`create_supporting_tables.py` — maintained by hand in Access.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| Health Plan | Short Text | Plan code, matched case-insensitively after trimming (` hf ` → `HF`). |
+| SADC Code | Short Text | Billing code for the day-care service. |
+| Trans Code | Short Text | Billing code for transportation. |
+
+If the table is missing or unreadable, the billing sheet degrades to
+`????` placeholder codes instead of failing the run.
+
+### Activities
+
+Lookup table naming the activity columns of the activity-log
+workbooks ([monthly_schedule/activity_log_workbook.py](../monthly_schedule/activity_log_workbook.py),
+[monthly_schedule/cathay_activity_log.py](../monthly_schedule/cathay_activity_log.py)).
+Read via [`get_activities`](../monthly_schedule/db.py). Not created by
+`create_supporting_tables.py` — maintained by hand in Access.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| A_ID | Short Text | Activity key matching the template's activity columns (normalized to upper-case, e.g. `A1`). |
+| Activity_Name | Short Text | English activity name. |
+| Frequency | Short Text | Weekdays the activity is offered, digits separated by dots (e.g. `1.2.3.4.5`). |
+| C_name | Short Text | Chinese activity name. |
+
+If the table is missing or unreadable, activity logs are skipped with
+a warning instead of failing the run.
+
 ## Relationships
 
 ```
 Contacts (Center ID, PK)
-   ↑       ↑       ↑       ↑
-   │       │       │       │
-Enrollment  Authorization  Absences  Availability
-(Center ID FK)  (Center ID FK)  (Center ID FK)  (Center ID FK)
+   ↑         ↑                ↑         ↑            ↑                  ↑
+   │         │                │         │            │                  │
+Enrollment  Authorization  Absences  Availability  OneOffAvailability  EmergencyContact
+             │
+             │ AuthEdge (authorization_id / transport_authorization_id)
+             ↓
+        TransportAuthorization (also Center ID FK → Contacts)
 ```
 
-All four supporting tables are many-to-one against Contacts via
-`Center ID`. There are no relationships between the supporting tables
-themselves — each is queried independently by the scheduler.
+All supporting tables are many-to-one against Contacts via
+`Center ID`. The only relationship between supporting tables is
+`AuthEdge`, which pairs each Authorization row with its
+TransportAuthorization row; everything else is queried independently
+by the scheduler. `Codes` and `Activities` are standalone lookup
+tables with no foreign keys.
 
 ## How the Scheduler Uses the Data
 
@@ -230,24 +331,23 @@ workbook).
 1. **Enrollment.** Find an Enrollment row covering `D`. None → ineligible.
 2. **Authorization period.** Find an Authorization row where `effective_start <= D <= effective_end`. None → ineligible.
 3. **Authorized weekday.** That row's `auth_days` must contain `D.isoweekday()`. Otherwise → ineligible.
-4. **Absence.** If any Absence row covers `D` → ineligible.
-5. **Availability.** If an Availability row matches (`Center ID`, `Day Of Week`, `effective_start_date <= D <= effective_end_date (or NULL)`), narrow the arrival window:
-   - `effective lo = max(plan.arrival_window_lo, avail_start)`
-   - `effective hi = min(plan.arrival_window_hi, avail_end − plan.session_span_min_lower)`
-   - If `effective lo > effective hi`, day → ineligible.
-6. Otherwise → eligible. Generate times.
+4. **One-off override.** If a OneOffAvailability row exists for `D`, its window replaces steps 5–6's absence and availability lookups (a duplicate one-off or a one-off overlapping an Absence is a hard error — see the OneOffAvailability section). Otherwise:
+5. **Absence.** If any Absence row covers `D` → ineligible.
+6. **Availability.** Look up the Availability row matching (`Center ID`, `Day Of Week`, `effective_start_date <= D <= effective_end_date (or NULL)`). No row → eligible with the plan's full day bounds.
+7. **Placement window.** Clip the availability window (recurring or one-off) to the plan's hard day bounds, and for recurring rows reserve the transport lead/tail when the plan's `pickup_by_avail_start` / `dropoff_by_avail_end` rules apply (one-off rows are exempt). If the resulting window can't fit the plan's minimum session length, day → ineligible.
+8. Otherwise → eligible. Generate times.
 
 If a member is ineligible for *every* day in the month for a
-structural reason (no enrollment row overlaps the month, no
-authorization row overlaps the month, or absences cover every
-authorized day), the member is reported in the run-summary failures
-block:
+structural reason, the member is skipped and reported in the
+run-summary failures block (`compute_month_failure` in
+[monthly_schedule/per_day.py](../monthly_schedule/per_day.py)):
 
 | Condition | Failure reason |
 | --- | --- |
-| Zero Enrollment rows overlap the month | `not enrolled during {YYYY-MM}` |
-| Zero Authorization rows overlap the month | `no active authorization for {YYYY-MM}` |
-| Every authorized day blocked by Absences | `absent for entire {YYYY-MM}` |
+| Zero Enrollment rows overlap the month | `not enrolled during this month` |
+| Zero Authorization rows overlap the month | `no active authorization for this month` |
+| No day is simultaneously enrolled, covered by an authorization, and on an authorized weekday | `no day is both enrolled and authorized this month` |
+| Every schedulable day blocked by Absences | `absent for the entire month` |
 
 Partial coverage (e.g., authorization covers May 1–15 but not the
 rest of May) is **not** a whole-member failure — the output workbook
@@ -280,19 +380,26 @@ Contacts and used a constellation of Contacts columns (`SADC Auth`,
 `SADC_Latest`, `Auth BGN`, `Auth EXP`, `TRANS Auth`) to track
 authorization metadata. Migrating to this design requires:
 
-1. Create the four new tables (Enrollment, Authorization, Absences,
-   Availability) by running
+1. Normalize the Contacts column names by running
+   [`scripts/normalize_contacts_columns.py`](../scripts/normalize_contacts_columns.py)
+   (needed for databases exported from DBM.accdb).
+2. Create the eight supporting tables (Enrollment, Authorization,
+   TransportAuthorization, Absences, Availability, OneOffAvailability,
+   EmergencyContact, AuthEdge) by running
    [`scripts/create_supporting_tables.py`](../scripts/create_supporting_tables.py)
    against the .accdb.
-2. For each active member, create:
+3. For each active member, create:
    - One Enrollment row with `start_date` = their original enrollment
      date and `end_date` = NULL.
    - One Authorization row carrying the old `SADC` value as
      `auth_days`, with `auth_start`/`auth_end` and
      `effective_start`/`effective_end` set to the current
      authorization period.
-3. Leave the legacy authorization columns on Contacts in place. They
+4. Leave the legacy authorization columns on Contacts in place. They
    are not dropped — the scheduler simply stops reading them.
+5. Create and fill the `Codes` and `Activities` lookup tables by hand
+   in Access if billing codes and activity logs are wanted (both
+   degrade gracefully when absent).
 
 Per-member backfill of the new tables is now scripted in
 [`scripts/backfill_authorization_from_contacts.py`](../scripts/backfill_authorization_from_contacts.py)

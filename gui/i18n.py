@@ -119,6 +119,19 @@ STRINGS: dict[str, dict[str, str]] = {
         "settings.output_label": "Output Folder",
         "settings.api_key_label": "Google Maps API Key",
         "settings.cache_label": "Travel Cache File",
+        "settings.billing_name_label": "Billing File Name",
+        "settings.program_name_label": "Program Name",
+        "settings.billing_name_missing.title": "Billing File Name Missing",
+        "settings.billing_name_missing.body": (
+            "Enter a billing file name. It becomes part of the billing "
+            "workbook's filename, e.g. \"8. August 2026 billing "
+            "<name>.xlsx\"."
+        ),
+        "settings.billing_name_invalid.title": "Billing File Name Invalid",
+        "settings.billing_name_invalid.body": (
+            "The billing file name cannot contain any of these "
+            "characters:  \\ / : * ? \" < > |"
+        ),
         "settings.rules.title": "Scheduling Rules",
         "settings.rules.earliest_in": "Earliest Time-In:",
         "settings.rules.latest_out": "Latest Time-Out:",
@@ -208,6 +221,12 @@ STRINGS: dict[str, dict[str, str]] = {
         "msg.api_key_missing.body": (
             "Open Settings and enter your Google Maps API key before generating."
         ),
+        "msg.billing_name_missing.title": "Billing File Name Missing",
+        "msg.billing_name_missing.body": (
+            "Open Settings and enter a billing file name before running "
+            "All Members. It becomes part of the billing workbook's "
+            "filename."
+        ),
         "msg.completed_errors.title": "Completed with errors",
         "msg.invalid_range.title": "Invalid Day Range",
         "msg.invalid_range.body": (
@@ -249,6 +268,19 @@ STRINGS: dict[str, dict[str, str]] = {
             "({error}) — the billing workbook will show '????' for the "
             "SADC/transportation codes."
         ),
+        "worker.wrote_activity_log": "Wrote activity log: {filename}",
+        "worker.activity_log_failed": (
+            "ID {center_id}: could not write the activity log "
+            "({error}). The timesheet was still generated."
+        ),
+        "worker.activity_log_fallback": (
+            "Warning: {primary} is locked (open in Excel?) — saved the "
+            "activity log as {filename} instead."
+        ),
+        "worker.activities_failed": (
+            "Warning: could not read the Activities table from the "
+            "database ({error}) — activity logs will be skipped."
+        ),
         "worker.no_members": "No members found in the database.",
         "worker.no_members_for_plan": "No members found for plan {plan}.",
         "worker.cannot_create_folder": "Cannot create output folder: {error}",
@@ -279,6 +311,28 @@ STRINGS: dict[str, dict[str, str]] = {
         "summary.reason.no_eligible_days": (
             "no day is both enrolled and authorized this month"
         ),
+        # One-off conflicts. Built from the structured detail on the
+        # failure rather than a fixed string, so the message can name
+        # both offending records. Keep in step with
+        # monthly_schedule.per_day.format_one_off_conflict().
+        "summary.reason.one_off_absence": (
+            "one-off availability {window} on {day} "
+            "(OneOffAvailability row {one_off_id}) conflicts with "
+            "a {leave_type} absence covering {start} to {end} "
+            "(Absences row {absence_id})"
+        ),
+        "summary.reason.one_off_absence_untyped": (
+            "one-off availability {window} on {day} "
+            "(OneOffAvailability row {one_off_id}) conflicts with "
+            "an absence covering {start} to {end} "
+            "(Absences row {absence_id})"
+        ),
+        "summary.reason.one_off_duplicate": (
+            "{count} one-off rows for {day}: {rows}"
+        ),
+        "summary.reason.one_off_row": "{window} (row {row_id})",
+        "summary.reason.one_off_join": ", ",
+        "summary.reason.one_off_join_last": " and ",
         # scope (used by GUI summary builder)
         "scope.plan": "plan {code} {period}",
         "scope.all": "all members {period}",
@@ -396,6 +450,17 @@ STRINGS: dict[str, dict[str, str]] = {
         "settings.output_label": "输出文件夹",
         "settings.api_key_label": "Google 地图 API 密钥",
         "settings.cache_label": "出行缓存文件",
+        "settings.billing_name_label": "账单文件名",
+        "settings.program_name_label": "项目名称",
+        "settings.billing_name_missing.title": "缺少账单文件名",
+        "settings.billing_name_missing.body": (
+            "请输入账单文件名。它将成为账单工作簿文件名的一部分，"
+            "例如 \"8. August 2026 billing <名字>.xlsx\"。"
+        ),
+        "settings.billing_name_invalid.title": "账单文件名无效",
+        "settings.billing_name_invalid.body": (
+            "账单文件名不能包含以下字符：  \\ / : * ? \" < > |"
+        ),
         "settings.rules.title": "排班规则",
         "settings.rules.earliest_in": "最早签到时间：",
         "settings.rules.latest_out": "最晚签退时间：",
@@ -480,6 +545,11 @@ STRINGS: dict[str, dict[str, str]] = {
         "msg.api_key_missing.body": (
             "请打开设置并输入您的 Google 地图 API 密钥，然后再生成。"
         ),
+        "msg.billing_name_missing.title": "缺少账单文件名",
+        "msg.billing_name_missing.body": (
+            "请先打开设置并输入账单文件名，再运行“所有成员”。"
+            "它将成为账单工作簿文件名的一部分。"
+        ),
         "msg.completed_errors.title": "完成但有错误",
         "msg.invalid_range.title": "日期范围无效",
         "msg.invalid_range.body": "“起始日”必须不晚于“截止日”。",
@@ -515,6 +585,19 @@ STRINGS: dict[str, dict[str, str]] = {
             "警告：无法从数据库读取 Codes 代码表（{error}）——"
             "计费出勤工作簿的 SADC/交通代码将显示为“????”。"
         ),
+        "worker.wrote_activity_log": "已写入活动日志：{filename}",
+        "worker.activity_log_failed": (
+            "编号 {center_id}：无法写入活动日志（{error}）。"
+            "时间表仍已生成。"
+        ),
+        "worker.activity_log_fallback": (
+            "警告：{primary} 已被锁定（是否在 Excel 中打开？）——"
+            "活动日志已另存为 {filename}。"
+        ),
+        "worker.activities_failed": (
+            "警告：无法从数据库读取 Activities 活动表（{error}）——"
+            "将跳过活动日志。"
+        ),
         "worker.no_members": "数据库中找不到成员。",
         "worker.no_members_for_plan": "计划 {plan} 中找不到成员。",
         "worker.cannot_create_folder": "无法创建输出文件夹：{error}",
@@ -541,6 +624,26 @@ STRINGS: dict[str, dict[str, str]] = {
         "summary.reason.no_auth": "本月无有效授权",
         "summary.reason.absent_month": "整月缺席",
         "summary.reason.no_eligible_days": "本月没有同时在册且有授权的日子",
+        # 一次性可用时段冲突。leave_type 是数据库中的自由文本
+        # （例如 Vacation），照原样显示。
+        "summary.reason.one_off_absence": (
+            "{day} 的一次性可用时段 {window}"
+            "（OneOffAvailability 第 {one_off_id} 行）"
+            "与 {leave_type} 缺席记录 {start} 至 {end}"
+            "（Absences 第 {absence_id} 行）冲突"
+        ),
+        "summary.reason.one_off_absence_untyped": (
+            "{day} 的一次性可用时段 {window}"
+            "（OneOffAvailability 第 {one_off_id} 行）"
+            "与缺席记录 {start} 至 {end}"
+            "（Absences 第 {absence_id} 行）冲突"
+        ),
+        "summary.reason.one_off_duplicate": (
+            "{day} 有 {count} 条一次性记录：{rows}"
+        ),
+        "summary.reason.one_off_row": "{window}（第 {row_id} 行）",
+        "summary.reason.one_off_join": "、",
+        "summary.reason.one_off_join_last": "、",
         # scope
         "scope.plan": "计划 {code} {period}",
         "scope.all": "所有成员 {period}",

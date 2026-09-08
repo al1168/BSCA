@@ -242,7 +242,8 @@ def get_enrollments(center_id, db_path):
 
 AUTHORIZATIONS_QUERY = (
     "SELECT [ID], [Center ID], [auth_start], [auth_end], "
-    "[effective_start], [effective_end], [auth_days] "
+    "[effective_start], [effective_end], [auth_days], [Member ID], "
+    "[Plan Type] "
     "FROM [Authorization] "
     "WHERE [Center ID] = ?"
 )
@@ -264,6 +265,8 @@ def map_authorization_row(row):
         "effective_start": effective_start if effective_start is not None else auth_start,
         "effective_end": effective_end if effective_end is not None else auth_end,
         "auth_days": row[6],
+        "member_id": row[7],
+        "plan_type": row[8],
     }
 
 
@@ -350,7 +353,8 @@ def get_all_enrollments(db_path: str) -> dict:
 
 ALL_AUTHORIZATIONS_QUERY = (
     "SELECT [ID], [Center ID], [auth_start], [auth_end], "
-    "[effective_start], [effective_end], [auth_days] "
+    "[effective_start], [effective_end], [auth_days], [Member ID], "
+    "[Plan Type] "
     "FROM [Authorization]"
 )
 
@@ -510,6 +514,64 @@ def get_billing_codes(db_path: str) -> dict:
             for row in cursor.fetchall()
             if _normalize_plan(row[0])
         }
+    finally:
+        conn.close()
+
+
+ACTIVITIES_QUERY = (
+    "SELECT [A_ID], [Activity_Name], [Frequency], [C_name] "
+    "FROM [Activities]"
+)
+
+
+def map_activity_row(row):
+    """(' a1 ', 'News On TV', '1.2.3.4.5', '电视') ->
+    ('A1', {name, frequency, c_name}) — the key is the normalized A_ID
+    matching the template's activity columns."""
+    return (
+        str(row[0] or "").strip().upper(),
+        {
+            "name": str(row[1] or "").strip(),
+            "frequency": str(row[2] or "").strip(),
+            "c_name": str(row[3] or "").strip(),
+        },
+    )
+
+
+def get_activities(db_path: str) -> dict:
+    """Return {A_ID: {name, frequency, c_name}} from the Activities
+    lookup table (the Bowery activity log's column headers). Raises
+    FileNotFoundError when the DB is absent, RuntimeError when it can't
+    be opened or has no Activities table — the caller degrades by
+    skipping activity logs with a warning."""
+    if not os.path.exists(db_path):
+        raise FileNotFoundError(f"Database not found: {db_path}")
+
+    import pyodbc
+
+    try:
+        conn = pyodbc.connect(build_connection_string(db_path))
+    except pyodbc.Error as exc:
+        raise RuntimeError(
+            "Could not open the Access database. Verify the Microsoft "
+            "Access ODBC driver is installed and its bitness matches "
+            "this Python interpreter (spec section 8). "
+            f"Original error: {exc}"
+        )
+    try:
+        cursor = conn.cursor()
+        try:
+            cursor.execute(ACTIVITIES_QUERY)
+        except pyodbc.Error as exc:
+            raise RuntimeError(
+                f"Could not read the Activities table: {exc}"
+            )
+        out = {}
+        for raw in cursor.fetchall():
+            key, info = map_activity_row(raw)
+            if key:
+                out[key] = info
+        return out
     finally:
         conn.close()
 

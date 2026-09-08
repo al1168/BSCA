@@ -112,24 +112,28 @@ def test_side_by_side_workbook_structure(tmp_path):
     assert ws.cell(row=11, column=1).value == "Signature:"
     assert ws.cell(row=11, column=4).value == "Date:"
     assert ws.cell(row=11, column=6).value == "Signature:"
-    assert ws.cell(row=11, column=9).value == "Date:"
-    # the label cell AND its rule cells all carry the bottom rule
-    for c in (1, 2, 3, 4, 6, 7, 8, 9, 10, 11):
+    assert ws.cell(row=11, column=10).value == "Date:"
+    # the label cell AND its rule cells all carry the bottom rule;
+    # transport I sits in the gap between the two lines (no rule)
+    for c in (1, 2, 3, 4, 6, 7, 8, 10, 11):
         assert ws.cell(row=11, column=c).border.bottom.style == "thin"
-    # label + line is one merged cell per field, in both footers; the
-    # left Signature takes A:C (like the transport F:H) so its line is
-    # the long one, leaving the Date label + line on column D alone
-    for rng in ("A11:C11", "F11:H11", "I11:K11"):
+    assert ws.cell(row=11, column=9).border.bottom.style is None
+    # label + line is one merged cell per field, in both footers; each
+    # Signature spans 3 columns (A:C / F:H); the attendance Date sits
+    # on its table's last column alone (D) while the transport Date
+    # spans J:K so its write-on line is longer and starts further left
+    for rng in ("A11:C11", "F11:H11", "J11:K11"):
         assert rng in merged
     assert "A11:B11" not in merged
     assert "C11:D11" not in merged
+    assert "I11:K11" not in merged
 
     # --- horizontal print centering on ---
     assert ws.print_options.horizontalCentered is True
 
     # --- footer text did NOT bloat a data column ---
     # (autosize is bounded to the data region; col F is the right
-    # Date col ~13.5 and is not a rule column)
+    # Date col, floored at 16 to match col A)
     assert ws.column_dimensions["F"].width < 20
 
     # --- Attendance (left) column proportions: Date readable, Day
@@ -150,6 +154,12 @@ def test_side_by_side_workbook_structure(tmp_path):
             + ws.column_dimensions["H"].width) >= 22 - 1e-6
     assert (ws.column_dimensions["J"].width
             + ws.column_dimensions["K"].width) >= 14 - 1e-6
+
+    # --- the whole transport table fits one printed page wide: total
+    #     F:K width stays under ~92 units (Letter portrait, 0.3"
+    #     margins) so Drop-Off Time never spills onto an extra sheet ---
+    transport_total = sum(ws.column_dimensions[c].width for c in "FGHIJK")
+    assert transport_total <= 92
 
     # --- both Day columns are narrow (left now matches right) ---
     assert ws.column_dimensions["G"].width < 16

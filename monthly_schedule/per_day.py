@@ -28,16 +28,106 @@ REASON_DAY_WINDOW_TOO_NARROW = (
 )
 
 
+@dataclass(frozen=True)
+class OneOffConflictDetail:
+    """The parts of a one-off conflict, kept separate from the English
+    sentence so the GUI can render the same facts in another language.
+
+    `kind` is "absence" (a one-off row on a day the member is also marked
+    absent) or "duplicate" (two or more one-off rows for the same day).
+    `one_offs` holds one entry per offending OneOffAvailability row —
+    a single row for "absence", every colliding row for "duplicate".
+    `absence` is the conflicting Absences row, or None for "duplicate".
+    """
+    kind: str
+    day: date
+    one_offs: tuple
+    absence: Optional[dict] = None
+
+    def as_dict(self) -> dict:
+        """Same content using only primitives, for handing across the
+        worker's Qt signal into the GUI thread."""
+        return {
+            "kind": self.kind,
+            "day": self.day.isoformat(),
+            "one_offs": [dict(r) for r in self.one_offs],
+            "absence": None if self.absence is None else {
+                "id": self.absence["id"],
+                "leave_type": self.absence["leave_type"],
+                "start_date": self.absence["start_date"].isoformat(),
+                "end_date": self.absence["end_date"].isoformat(),
+            },
+        }
+
+
+def _one_off_fields(row) -> dict:
+    """Trim a OneOffAvailability row to just what a message needs."""
+    return {
+        "id": row["id"],
+        "avail_start": row["avail_start"],
+        "avail_end": row["avail_end"],
+    }
+
+
+def _absence_fields(row) -> dict:
+    """Trim an Absences row to just what a message needs."""
+    return {
+        "id": row["id"],
+        "leave_type": row["leave_type"],
+        "start_date": row["start_date"],
+        "end_date": row["end_date"],
+    }
+
+
+def _join_series(parts) -> str:
+    """'a', 'a and b', 'a, b and c' — no serial comma, matching the rest
+    of the user-facing copy."""
+    if len(parts) == 1:
+        return parts[0]
+    return f"{', '.join(parts[:-1])} and {parts[-1]}"
+
+
+def format_one_off_conflict(detail: OneOffConflictDetail) -> str:
+    """Render `detail` as the English sentence used by the run summary
+    and both CSV reports. Names each offending record and its Access row
+    ID so staff can open the exact rows that disagree."""
+    if detail.kind == "duplicate":
+        rows = _join_series([
+            f"{r['avail_start']}-{r['avail_end']} (row {r['id']})"
+            for r in detail.one_offs
+        ])
+        return (
+            f"{len(detail.one_offs)} one-off rows for "
+            f"{detail.day.isoformat()}: {rows}"
+        )
+    one_off = detail.one_offs[0]
+    absence = detail.absence
+    leave_type = str(absence["leave_type"] or "").strip()
+    # A blank Leave Type would otherwise read "a  absence".
+    kind_phrase = f"a {leave_type} absence" if leave_type else "an absence"
+    return (
+        f"one-off availability {one_off['avail_start']}-"
+        f"{one_off['avail_end']} on {detail.day.isoformat()} "
+        f"(OneOffAvailability row {one_off['id']}) conflicts with "
+        f"{kind_phrase} covering {absence['start_date'].isoformat()} to "
+        f"{absence['end_date'].isoformat()} (Absences row {absence['id']})"
+    )
+
+
 class OneOffConflict(Exception):
     """Raised by compute_day_eligibility when a one-off availability row
     exists for a day but conflicts with an absence or a duplicate one-off
-    row. The per-member runner catches this to write the conflict CSV."""
+    row. The per-member runner catches this to write the conflict CSV.
 
-    def __init__(self, center_id, day, reason):
+    `reason` is the English sentence; `detail` is the same information
+    structured, for callers that render it in another language."""
+
+    def __init__(self, center_id, day, detail: OneOffConflictDetail):
         self.center_id = center_id
         self.day = day
-        self.reason = reason
-        super().__init__(f"{center_id} {day}: {reason}")
+        self.detail = detail
+        self.reason = format_one_off_conflict(detail)
+        super().__init__(f"{center_id} {day}: {self.reason}")
 
 
 @dataclass(frozen=True)
@@ -90,12 +180,20 @@ def compute_day_eligibility(day: date, ctx, plan_rules) -> DayEligibility:
         if len(one_offs) > 1:
             raise OneOffConflict(
                 center_id, day,
-                f"duplicate one-off rows for {day.isoformat()}",
+                OneOffConflictDetail(
+                    kind="duplicate", day=day,
+                    one_offs=tuple(_one_off_fields(r) for r in one_offs),
+                ),
             )
-        if ctx.is_absent(day):
+        absence = ctx.absence_for(day)
+        if absence is not None:
             raise OneOffConflict(
                 center_id, day,
-                f"one-off on {day.isoformat()} conflicts with absence",
+                OneOffConflictDetail(
+                    kind="absence", day=day,
+                    one_offs=(_one_off_fields(one_offs[0]),),
+                    absence=_absence_fields(absence),
+                ),
             )
         avail = one_offs[0]
     else:

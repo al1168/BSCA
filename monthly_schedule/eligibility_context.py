@@ -28,6 +28,13 @@ class MemberContext:
                 return True
         return False
 
+    def earliest_enrollment_start(self):
+        """Earliest Enrollment start_date, or None if no enrollment rows.
+        Feeds the billing sheet's ENROLLMENT DATE column."""
+        starts = [r["start_date"] for r in self._enrollments
+                  if r["start_date"] is not None]
+        return min(starts) if starts else None
+
     def active_authorization(self, day: date):
         candidates = [
             row for row in self._authorizations
@@ -47,6 +54,16 @@ class MemberContext:
             if row["start_date"] <= day <= row["end_date"]:
                 return row
         return None
+
+    def absences_overlapping(self, start: date, end: date):
+        """Return absence rows intersecting [start, end] (inclusive),
+        sorted by start_date. Used for the billing sheet's Remark
+        column."""
+        return sorted(
+            (row for row in self._absences
+             if row["start_date"] <= end and row["end_date"] >= start),
+            key=lambda r: r["start_date"],
+        )
 
     def availability_for(self, day: date):
         """Return the most relevant Availability row for `day`'s weekday

@@ -7,8 +7,11 @@ column span so long text shows fully without widening a data column.
 Each table has a bold caption and a ruled Signature/Date line below
 it, and is horizontally centered on its printed page. The Attendance
 (left) columns have a generous minimum width so that table fills the
-page; the Signature/Date rule lines are guaranteed a minimum length
-in both footers.
+page; the Transportation columns autosize narrow so all six fit one
+printed page. The Signature/Date rule lines are guaranteed a minimum
+length in both footers (Signature over the first three columns; the
+Attendance Date sits on its last column alone while the Transport
+Date spans the last two columns for a longer write-on line).
 """
 
 from openpyxl import Workbook
@@ -57,6 +60,13 @@ _WIDTH_MAX = 40
 # default floor so it autosizes narrow (like the transport Day column);
 # Time-In/Time-Out are widened to fill the space it gives up.
 _LEFT_COL_FLOORS = {1: 16, 2: _WIDTH_MIN, 3: 24, 4: 24}
+# Transport (right) floors: only Date (F) matches attendance Date (A).
+# The four time columns autosize from their headers — with six columns
+# the transport table must stay narrow enough to print on one page
+# (wide floors here previously pushed Drop-Off onto an extra sheet).
+# The footer lines rely on the _ensure_line_min minimums instead of
+# matching the attendance lines' exact widths.
+_RIGHT_COL_FLOORS = {6: 16}
 _SIG_LINE_MIN = 22                      # min total Signature rule width
 _DATE_LINE_MIN = 14                     # min total Date rule width
 
@@ -215,8 +225,9 @@ def _autosize_columns(ws, table_header_row, last_row):
             if value is None:
                 continue
             longest = max(longest, len(str(value)))
-        floor = (_LEFT_COL_FLOORS.get(col, _WIDTH_MIN)
-                 if col < SPACER_COL else _WIDTH_MIN)
+        floors = (_LEFT_COL_FLOORS if col < SPACER_COL
+                  else _RIGHT_COL_FLOORS)
+        floor = floors.get(col, _WIDTH_MIN)
         width = longest * _WIDTH_FACTOR + _WIDTH_PAD
         width = min(_WIDTH_MAX, max(floor, width))
         ws.column_dimensions[get_column_letter(col)].width = width
@@ -278,7 +289,7 @@ def build_workbook(member, rows, output_path, auth_weekdays=None):
         ws, last_data_row, RIGHT_FIRST_COL, right_last_col,
         RIGHT_CAPTION,
         sig_label_col=6, sig_rule_cols=(7, 8),
-        date_label_col=9, date_rule_cols=(10, 11),
+        date_label_col=10, date_rule_cols=(11,),
     )
     footer_last_row = last_data_row + 5
 
@@ -306,7 +317,7 @@ def build_workbook(member, rows, output_path, auth_weekdays=None):
     _ensure_line_min(ws, (1, 2, 3), _SIG_LINE_MIN)  # left signature (A:C)
     _ensure_line_min(ws, (4,), _DATE_LINE_MIN)      # left date (D)
     _ensure_line_min(ws, (7, 8), _SIG_LINE_MIN)    # right signature
-    _ensure_line_min(ws, (10, 11), _DATE_LINE_MIN)  # right date (J,K)
+    _ensure_line_min(ws, (10, 11), _DATE_LINE_MIN)  # right date (J:K)
 
     # Taller rows across the whole printed area for legibility.
     for r in range(1, footer_last_row + 1):

@@ -99,11 +99,11 @@ _LEFT = Alignment(horizontal="left", vertical="center")
 
 _DATE_NUMFMT = "mm-dd-yy"
 
-# Grid geometry: day d (1..n_days) lives at column 12+d, then one
+# Grid geometry: day d (1..n_days) lives at column 15+d, then one
 # always-purple divider column, then Total, then Remark. For a 30-day
-# month that lands the divider on AQ and Total on AR — exactly the
-# hand-made June layout; 31-day months shift Total/Remark right one.
-DAY_FIRST_COL = 13          # M
+# month that lands the divider on AT and Total on AU; 31-day months
+# shift Total/Remark right one.
+DAY_FIRST_COL = 16          # P
 _Layout = namedtuple(
     "_Layout", "n_days sundays div_col total_col remark_col"
 )
@@ -123,33 +123,43 @@ _COLUMN_WIDTHS = {
     1: 5.625,        # A Number
     2: 7.625,        # B ID #
     3: 18.5,         # C NAME
-    4: 7.0,          # D GENDER
-    5: 11.625,       # E DOB
-    6: 12.125,       # F REGISTERED
-    7: 11.625,       # G MEDICAID
-    8: 8.625,        # H SADC CODE
-    9: 8.625,        # I TRANSPTATION CODE
-    10: 6.625,       # J No. Days
-    11: 11.625,      # K AUTHORIZATION
-    12: 13.75,       # L AUTH. DAYS
+    4: 8.0,          # D MLTC HEALTH PLAN
+    5: 8.0,          # E PLAN TYPE
+    6: 11.625,       # F DOB
+    7: 7.0,          # G GENDER
+    8: 12.125,       # H ENROLLMENT DATE
+    9: 13.75,        # I PLAN ID
+    10: 11.625,      # J MEDICAID
+    11: 8.625,       # K SADC CODE
+    12: 8.625,       # L TRANSPTATION CODE
+    13: 6.625,       # M No. Days
+    14: 11.625,      # N AUTH EXPIRATION DATE
+    15: 13.75,       # O AUTH. DAYS
 }
 _DAY_COL_WIDTH = 4.625      # day cells + purple divider
 _TOTAL_COL_WIDTH = 6.625
 _REMARK_COL_WIDTH = 61.25
 _ROW_HEIGHT = 24.8
 
-# Header labels exactly as the reference (including the TRANSPTATION
-# typo and double spaces — the sheet must look identical).
+# Header labels keep the reference sheet's quirks where unchanged
+# (the TRANSPTATION typo and double spaces). ENROLLMENT DATE is the
+# member's earliest Enrollment start_date (not Contacts.[Admission
+# Date], which newer members leave blank); AUTH EXPIRATION DATE was
+# AUTHORIZATION — rename only, same data; MLTC HEALTH PLAN is the
+# member's section code; PLAN TYPE and PLAN ID are the Plan Type and
+# Member ID of the latest authorization active in the month.
 _HEADER_LABELS = [
-    "Number", "ID #", "NAME", "GENDER", "DOB", "REGISTERED", "MEDICAID",
-    "SADC CODE", "TRANSPTATION  CODE", "No. Days", "AUTHORIZATION",
+    "Number", "ID #", "NAME", "MLTC HEALTH PLAN", "PLAN TYPE", "DOB",
+    "GENDER", "ENROLLMENT DATE", "PLAN ID", "MEDICAID", "SADC CODE",
+    "TRANSPTATION  CODE", "No. Days", "AUTH EXPIRATION DATE",
     "AUTH.  DAYS",
 ]
 
 # Exact month-name formula string from the reference title rows (typo
-# "January'" included) — it displays the month name from the M1 date.
+# "January'" included) — it displays the month name from the O1 date
+# (the first day column of the top strip).
 _MONTH_FORMULA = (
-    '= CHOOSE((MONTH(M$1)), "January\'", "February", "March", "April", '
+    '= CHOOSE((MONTH(P$1)), "January\'", "February", "March", "April", '
     '"May", "June", "July", "August", "September", "October", '
     '"November", "December")'
 )
@@ -164,14 +174,17 @@ class BillingRow:
     name: str                # "Last, First"
     gender: str              # "M" / "F" / ""
     dob: object              # date | str (unparseable raw) | None
-    registered: object       # date | str | None (Admission Date)
+    registered: object       # date | None (earliest Enrollment start)
     medicaid: str
-    plan: str                # normalized section code
-    num_days: int            # J: authorized days per week
-    auth_end: object         # date | None (K)
-    auth_days_text: str      # L: "1.3.5"
+    plan: str                # normalized section code (also column D)
+    num_days: int            # M: authorized days per week
+    auth_end: object         # date | None (N)
+    auth_days_text: str      # O: "1.3.5"
     green_days: frozenset    # day-of-month ints: authorized
     one_days: frozenset      # day-of-month ints: scheduled
+    remarks: str = ""        # Remark: this month's absences
+    plan_id: str = ""        # I: Member ID of the month's latest auth
+    plan_type: str = ""      # E: Plan Type of the month's latest auth
 
 
 # ------------------------------------------------------------ pure helpers
@@ -203,6 +216,20 @@ def format_auth_days_dots(weekdays):
     return ".".join(str(d) for d in sorted(weekdays) if 1 <= d <= 7)
 
 
+def format_absence_remarks(absences):
+    """Absence rows -> 'Vacation 03-15-2026 - 04-15-2026, Doctor visit
+    04-15-2026'. Full start-end range (single date when one day); a
+    blank Leave Type leaves just the dates. Order preserved."""
+    parts = []
+    for row in absences:
+        start = row["start_date"].strftime("%m-%d-%Y")
+        end = row["end_date"].strftime("%m-%d-%Y")
+        dates = start if start == end else f"{start} - {end}"
+        leave_type = str(row["leave_type"] or "").strip()
+        parts.append(f"{leave_type} {dates}".strip())
+    return ", ".join(parts)
+
+
 def parse_flex_date(value):
     """Best-effort date for the Short Text DOB / Admission Date columns.
 
@@ -229,13 +256,10 @@ def parse_flex_date(value):
     return text
 
 
-def billing_filename(year, month):
-    """'6. June 2026 Member Attendance-Bowery.xlsx' (the completed
-    reference on \\\\BOWERY3 drops the older 'billing days' suffix)."""
-    return (
-        f"{month}. {calendar.month_name[month]} {year} "
-        "Member Attendance-Bowery.xlsx"
-    )
+def billing_filename(year, month, name):
+    """'6. June 2026 billing Jane Doe.xlsx' — `name` is the required
+    "Billing file name" from the GUI Settings dialog."""
+    return f"{month}. {calendar.month_name[month]} {year} billing {name}.xlsx"
 
 
 def collect_billing_row(member, ctx, extra, timesheet_rows,
@@ -256,6 +280,8 @@ def collect_billing_row(member, ctx, extra, timesheet_rows,
 
     green_days = set()
     auth_end = None
+    plan_id = ""
+    plan_type = ""
     for day in get_month_dates(year, month):
         if not ctx.is_enrolled(day):
             continue
@@ -265,17 +291,24 @@ def collect_billing_row(member, ctx, extra, timesheet_rows,
         if day.isoweekday() in get_authorized_weekdays(auth["auth_days"]):
             green_days.add(day.day)
             auth_end = auth["auth_end"]   # last authorized day wins
+            plan_id = str(auth.get("member_id") or "").strip()
+            plan_type = str(auth.get("plan_type") or "").strip()
 
     one_days = {
         row["date"].day for row in timesheet_rows if row.get("time_in")
     }
+
+    month_days = get_month_dates(year, month)
+    remarks = format_absence_remarks(
+        ctx.absences_overlapping(month_days[0], month_days[-1])
+    )
 
     return BillingRow(
         center_id=member["center_id"],
         name=f"{member['last_name']}, {member['first_name']}",
         gender=normalize_gender(extra.get("gender")),
         dob=parse_flex_date(extra.get("dob")),
-        registered=parse_flex_date(extra.get("admission_date")),
+        registered=parse_flex_date(ctx.earliest_enrollment_start()),
         medicaid=str(extra.get("medicaid") or "").strip(),
         plan=plan,
         num_days=len(auth_weekdays or ()),
@@ -283,6 +316,9 @@ def collect_billing_row(member, ctx, extra, timesheet_rows,
         auth_days_text=format_auth_days_dots(auth_weekdays or ()),
         green_days=frozenset(green_days),
         one_days=frozenset(one_days),
+        remarks=remarks,
+        plan_id=plan_id,
+        plan_type=plan_type,
     )
 
 
@@ -318,26 +354,26 @@ def _write_day_headers(ws, row_dates, row_ddd, year, month, lay):
 
 
 def _write_title_row(ws, row, title):
-    """N:P merged green title box + the month-name formula in Q."""
-    ws.merge_cells(start_row=row, start_column=14,
-                   end_row=row, end_column=16)
-    for col in (14, 15, 16):
+    """P:R merged green title box + the month-name formula in S."""
+    ws.merge_cells(start_row=row, start_column=17,
+                   end_row=row, end_column=19)
+    for col in (17, 18, 19):
         cell = ws.cell(row=row, column=col)
         cell.fill = _TITLE_FILL
         cell.font = _BOLD
         cell.alignment = _CENTER
         cell.border = _TOP_BOTTOM
-    ws.cell(row=row, column=14, value=title)
-    q = ws.cell(row=row, column=17, value=_MONTH_FORMULA)
+    ws.cell(row=row, column=17, value=title)
+    q = ws.cell(row=row, column=20, value=_MONTH_FORMULA)
     q.font = _BOLD
     q.alignment = _LEFT
 
 
 def _write_section_header(ws, row, year, month, lay):
-    """Two header rows starting at `row`: merged A-L / Total / Remark
+    """Two header rows starting at `row`: merged A-O / Total / Remark
     labels and the day date/ddd pair."""
     h1, h2 = row, row + 1
-    labels = list(zip(range(1, 13), _HEADER_LABELS)) + [
+    labels = list(zip(range(1, 16), _HEADER_LABELS)) + [
         (lay.total_col, "Total"), (lay.remark_col, "Remark"),
     ]
     for col, label in labels:
@@ -346,7 +382,7 @@ def _write_section_header(ws, row, year, month, lay):
         for r in (h1, h2):
             cell = ws.cell(row=r, column=col)
             cell.font = _BOLD
-            cell.alignment = _CENTER_WRAP if col <= 12 else _CENTER
+            cell.alignment = _CENTER_WRAP if col <= 15 else _CENTER
             cell.border = _BOX
             cell.fill = _HEADER_FILL
         ws.cell(row=h1, column=col, value=label)
@@ -383,21 +419,23 @@ def _write_day_cells(ws, row, lay, green_days=(), one_days=()):
 
 
 def _sum_formula(row, lay):
-    """Day range + divider, mirroring the reference's =SUM(M6:AQ6)."""
+    """Day range + divider, mirroring the reference's =SUM(O6:AS6)."""
     return (
         f"=SUM({get_column_letter(DAY_FIRST_COL)}{row}"
         f":{get_column_letter(lay.div_col)}{row})"
     )
 
 
-def _write_total_and_remark(ws, row, lay):
+def _write_total_and_remark(ws, row, lay, remark_text=""):
     total = ws.cell(row=row, column=lay.total_col,
                     value=_sum_formula(row, lay))
     total.font = _BOLD
     total.alignment = _CENTER
     total.border = _BOX
     total.fill = _HEADER_FILL
-    remark = ws.cell(row=row, column=lay.remark_col)   # left blank
+    remark = ws.cell(row=row, column=lay.remark_col)
+    if remark_text:
+        remark.value = remark_text
     remark.font = _REGULAR
     remark.alignment = _LEFT
     remark.border = _BOX
@@ -410,26 +448,29 @@ def _write_member_row(ws, row, first_row, item, lay, codes):
     _write_left_cell(ws, row, 3, item.name, font=_BOLD,
                      align=Alignment(horizontal="left",
                                      vertical="center", wrap_text=True))
-    _write_left_cell(ws, row, 4, item.gender)
-    _write_left_cell(ws, row, 5, item.dob, numfmt=_DATE_NUMFMT)
-    _write_left_cell(ws, row, 6, item.registered, numfmt=_DATE_NUMFMT)
-    _write_left_cell(ws, row, 7, item.medicaid)
+    _write_left_cell(ws, row, 4, item.plan)
+    _write_left_cell(ws, row, 5, item.plan_type)
+    _write_left_cell(ws, row, 6, item.dob, numfmt=_DATE_NUMFMT)
+    _write_left_cell(ws, row, 7, item.gender)
+    _write_left_cell(ws, row, 8, item.registered, numfmt=_DATE_NUMFMT)
+    _write_left_cell(ws, row, 9, item.plan_id)
+    _write_left_cell(ws, row, 10, item.medicaid)
     sadc, trans = codes.get(item.plan, (UNKNOWN_CODE, UNKNOWN_CODE))
-    _write_left_cell(ws, row, 8, sadc)
-    _write_left_cell(ws, row, 9, trans)
-    _write_left_cell(ws, row, 10, item.num_days or None)
-    _write_left_cell(ws, row, 11, item.auth_end, numfmt=_DATE_NUMFMT)
-    ell = _write_left_cell(ws, row, 12, item.auth_days_text)
+    _write_left_cell(ws, row, 11, sadc)
+    _write_left_cell(ws, row, 12, trans)
+    _write_left_cell(ws, row, 13, item.num_days or None)
+    _write_left_cell(ws, row, 14, item.auth_end, numfmt=_DATE_NUMFMT)
+    ell = _write_left_cell(ws, row, 15, item.auth_days_text)
     ell.number_format = "@"
     _write_day_cells(ws, row, lay,
                      green_days=item.green_days, one_days=item.one_days)
-    _write_total_and_remark(ws, row, lay)
+    _write_total_and_remark(ws, row, lay, remark_text=item.remarks)
 
 
 def _write_blank_member_row(ws, row, lay):
     """The single placeholder row of an empty section (A=1 literal)."""
     _write_left_cell(ws, row, 1, 1)
-    for col in range(2, 13):
+    for col in range(2, 16):
         _write_left_cell(ws, row, col, None)
     _write_day_cells(ws, row, lay)
     _write_total_and_remark(ws, row, lay)
@@ -460,20 +501,20 @@ def _write_count_row(ws, row, code, first, last, lay):
     b.alignment = _CENTER_WRAP
     b.border = _BOX
     b.fill = _WHITE_FILL
-    for col in (3, 4):
+    for col in (3, 4, 5):
         cell = ws.cell(row=row, column=col)
         cell.border = _BOX
-    ws.merge_cells(start_row=row, start_column=5,
-                   end_row=row, end_column=7)
-    for col in range(5, 8):
+    ws.merge_cells(start_row=row, start_column=6,
+                   end_row=row, end_column=8)
+    for col in range(6, 9):
         cell = ws.cell(row=row, column=col)
         cell.font = _BOLD
         cell.alignment = _CENTER_WRAP
         cell.border = _BOX
         cell.fill = _COUNT_FILL
-    ws.cell(row=row, column=5, value="Member with authorization")
-    for col in range(8, 13):
-        # H..L stay unfilled in the reference (only borders)
+    ws.cell(row=row, column=6, value="Member with authorization")
+    for col in range(9, 16):
+        # I..O stay unfilled in the reference (only borders)
         cell = ws.cell(row=row, column=col)
         cell.border = _BOX
     for col in range(DAY_FIRST_COL, lay.div_col + 1):   # days + divider
@@ -602,12 +643,13 @@ def build_billing_workbook(year, month, rows, codes=None):
     return wb
 
 
-def save_billing_workbook(wb, out_dir, year, month, on_fallback=None):
+def save_billing_workbook(wb, out_dir, year, month, billing_name,
+                          on_fallback=None):
     """Save into `out_dir`; when the primary name is locked (open in
     Excel), retry `_1`..`_9` suffixes; `on_fallback(primary, actual)` is
     called once when a fallback is used. Raises PermissionError only
     when every candidate is locked. Returns the path written."""
-    stem, ext = os.path.splitext(billing_filename(year, month))
+    stem, ext = os.path.splitext(billing_filename(year, month, billing_name))
     primary = os.path.join(out_dir, f"{stem}{ext}")
     candidates = [primary] + [
         os.path.join(out_dir, f"{stem}_{n}{ext}") for n in range(1, 10)

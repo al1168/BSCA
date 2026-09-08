@@ -56,6 +56,39 @@ def test_is_enrolled_returning_member_multiple_rows():
     assert ctx.is_enrolled(date(2026, 5, 15)) is True
 
 
+def test_earliest_enrollment_start_min_across_rows():
+    ctx = MemberContext(
+        enrollments=[
+            {"id": 2, "center_id": 1,
+             "start_date": date(2026, 1, 1), "end_date": None},
+            {"id": 1, "center_id": 1,
+             "start_date": date(2025, 1, 1), "end_date": date(2025, 6, 30)},
+        ],
+        authorizations=[], absences=[], availabilities=[], one_offs=[],
+    )
+    assert ctx.earliest_enrollment_start() == date(2025, 1, 1)
+
+
+def test_earliest_enrollment_start_none_without_rows():
+    ctx = MemberContext(
+        enrollments=[],
+        authorizations=[], absences=[], availabilities=[], one_offs=[],
+    )
+    assert ctx.earliest_enrollment_start() is None
+
+
+def test_earliest_enrollment_start_skips_null_starts():
+    ctx = MemberContext(
+        enrollments=[
+            {"id": 1, "center_id": 1, "start_date": None, "end_date": None},
+            {"id": 2, "center_id": 1,
+             "start_date": date(2026, 7, 22), "end_date": None},
+        ],
+        authorizations=[], absences=[], availabilities=[], one_offs=[],
+    )
+    assert ctx.earliest_enrollment_start() == date(2026, 7, 22)
+
+
 def test_active_authorization_picks_overlapping_row():
     auth_a = {"id": 1, "center_id": 1,
               "auth_start": date(2025, 1, 1), "auth_end": date(2025, 12, 31),
@@ -114,6 +147,42 @@ def test_is_absent_inclusive_range():
     assert ctx.is_absent(date(2026, 5, 10)) is True
     assert ctx.is_absent(date(2026, 5, 16)) is True
     assert ctx.is_absent(date(2026, 5, 17)) is False
+
+
+def _absence(id, leave_type, start, end):
+    return {"id": id, "center_id": 1, "leave_type": leave_type,
+            "start_date": start, "end_date": end}
+
+
+def test_absences_overlapping_edges_and_containment():
+    inside = _absence(1, "Doctor visit",
+                      date(2026, 6, 15), date(2026, 6, 15))
+    spans_start = _absence(2, "Vacation",
+                           date(2026, 5, 20), date(2026, 6, 10))
+    spans_end = _absence(3, "Hospital",
+                         date(2026, 6, 28), date(2026, 7, 5))
+    covers_all = _absence(4, "Vacation",
+                          date(2026, 5, 1), date(2026, 8, 1))
+    before = _absence(5, "Sick", date(2026, 5, 1), date(2026, 5, 31))
+    after = _absence(6, "Sick", date(2026, 7, 1), date(2026, 7, 31))
+    ctx = MemberContext(
+        enrollments=[], authorizations=[],
+        absences=[after, inside, spans_end, covers_all, spans_start,
+                  before],
+        availabilities=[], one_offs=[],
+    )
+    out = ctx.absences_overlapping(date(2026, 6, 1), date(2026, 6, 30))
+    # only overlapping rows, sorted by start_date
+    assert [r["id"] for r in out] == [4, 2, 1, 3]
+
+
+def test_absences_overlapping_empty():
+    ctx = MemberContext(
+        enrollments=[], authorizations=[], absences=[],
+        availabilities=[], one_offs=[],
+    )
+    assert ctx.absences_overlapping(
+        date(2026, 6, 1), date(2026, 6, 30)) == []
 
 
 def test_availability_for_matches_weekday_and_period():

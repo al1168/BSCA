@@ -69,6 +69,40 @@ def _stub_db_and_caches(monkeypatch, tmp_path):
     )
 
 
+def test_worker_payload_carries_one_off_conflict_detail(monkeypatch, tmp_path):
+    """The GUI summary translates the conflict from structured detail,
+    so the payload must ship it alongside the English reason."""
+    _stub_db_and_caches(monkeypatch, tmp_path)
+    member = {"center_id": 24010, "last_name": "B", "first_name": "A",
+              "health_plan": "HF", "address": "x", "long_lat": "0,0"}
+    monkeypatch.setattr("gui.worker.get_member", lambda cid, db: member)
+
+    detail = {
+        "kind": "absence",
+        "day": "2026-05-04",
+        "one_offs": [{"id": 4, "avail_start": "09:00", "avail_end": "12:00"}],
+        "absence": {"id": 14, "leave_type": "Vacation",
+                    "start_date": "2026-05-04", "end_date": "2026-05-05"},
+    }
+
+    def fake_process_member(member, ctx, year, month, out_dir,
+                            api_key, cache, on_rows=None, **kwargs):
+        return (False, "one_off_conflict", "english sentence",
+                date(2026, 5, 4), detail)
+
+    monkeypatch.setattr("gui.worker.process_member", fake_process_member)
+
+    worker = _make_worker(tmp_path)
+    success, payload = _run_to_completion(worker)
+
+    assert success is False
+    assert len(payload["failures"]) == 1
+    failure = payload["failures"][0]
+    assert failure["stage"] == "one_off_conflict"
+    assert failure["reason"] == "english sentence"
+    assert failure["detail"] == detail
+
+
 def _make_worker(tmp_path):
     return ScheduleWorker(
         mode="single",
@@ -172,12 +206,13 @@ def test_worker_all_mode_writes_billing_workbook(monkeypatch, tmp_path):
         if on_rows is not None:
             on_rows([{"date": _d(year, month, 1), "time_in": "09:00"}],
                     {1, 3, 5})
-        return (True, None, None, None)
+        return (True, None, None, None, None)
 
     monkeypatch.setattr("gui.worker.process_member", fake_process_member)
 
     worker = _make_worker(tmp_path)
     worker.mode = "all"
+    worker.billing_name = "Jane Doe"
     log_events = []
     worker.log_line.connect(lambda key, args: log_events.append(key))
 
@@ -189,6 +224,10 @@ def test_worker_all_mode_writes_billing_workbook(monkeypatch, tmp_path):
     import os as _os
     assert _os.path.exists(payload["billing_path"])
     assert _os.path.dirname(payload["billing_path"]) == str(tmp_path)
+    # the configured billing name from Settings drives the filename
+    assert _os.path.basename(payload["billing_path"]) == (
+        "5. May 2026 billing Jane Doe.xlsx"
+    )
     assert "worker.wrote_billing" in log_events
 
     from openpyxl import load_workbook
@@ -197,6 +236,226 @@ def test_worker_all_mode_writes_billing_workbook(monkeypatch, tmp_path):
     found = [c.value for row in ws.iter_rows(min_col=2, max_col=2)
              for c in row]
     assert 1 in found
+
+
+_ACTIVITIES = {
+    f"A{i}": {"name": f"Act {i}", "c_name": f"活动{i}",
+              "frequency": "1.2.3.4.5.6.7"}
+    for i in range(1, 15)
+}
+
+
+def _fake_process_member_with_rows(year, month):
+    from datetime import date as _d
+
+    def fake_process_member(member, ctx, y, m, out_dir,
+                            api_key, cache, on_rows=None, **kwargs):
+        if on_rows is not None:
+            on_rows([{"date": _d(y, m, 1), "time_in": "09:00",
+                      "status": "attended"}], {1, 3, 5})
+        return (True, None, None, None, None)
+    return fake_process_member
+
+
+def _stub_member_and_activities(monkeypatch, tmp_path, member):
+    _stub_db_and_caches(monkeypatch, tmp_path)
+    monkeypatch.setattr("gui.worker.get_member", lambda cid, db: member)
+    monkeypatch.setattr("gui.worker.get_all_members", lambda db: [member])
+    monkeypatch.setattr("gui.worker.get_all_billing_fields",
+                        lambda db: {member["center_id"]: {
+                            "gender": "F", "dob": "2/1/1953",
+                            "admission_date": "1/1/2024",
+                            "medicaid": "AB123"}})
+    monkeypatch.setattr("gui.worker.get_activities",
+                        lambda db: dict(_ACTIVITIES))
+    monkeypatch.setattr("gui.worker.process_member",
+                        _fake_process_member_with_rows(2026, 5))
+
+
+def test_worker_bowery_single_mode_writes_activity_log(
+        monkeypatch, tmp_path):
+    """With a Bowery program name, a single-member run drops the
+    activity log next to the timesheet — and keeps it out of the
+    Print pipeline (generated_paths)."""
+    member = {"center_id": 24010, "last_name": "B", "first_name": "A",
+              "health_plan": "HF", "address": "x", "long_lat": "0,0"}
+    _stub_member_and_activities(monkeypatch, tmp_path, member)
+
+    worker = _make_worker(tmp_path)
+    worker.program_name = "Bowery SADC"
+    log_events = []
+    worker.log_line.connect(lambda key, args: log_events.append(key))
+
+    success, payload = _run_to_completion(worker)
+
+    assert success is True
+    log_path = tmp_path / "(24010) May 2026 Activity log.xlsx"
+    assert log_path.exists()
+    assert "worker.wrote_activity_log" in log_events
+    assert str(log_path) not in payload["generated_paths"]
+    assert all("Activity log" not in p for p in payload["generated_paths"])
+
+
+def test_worker_without_bowery_program_no_activity_log(
+        monkeypatch, tmp_path):
+    member = {"center_id": 24010, "last_name": "B", "first_name": "A",
+              "health_plan": "HF", "address": "x", "long_lat": "0,0"}
+    _stub_member_and_activities(monkeypatch, tmp_path, member)
+    calls = []
+    monkeypatch.setattr("gui.worker.get_activities",
+                        lambda db: calls.append(db) or dict(_ACTIVITIES))
+
+    for program in ("", "Chinatown"):
+        worker = _make_worker(tmp_path)
+        worker.program_name = program
+        success, payload = _run_to_completion(worker)
+        assert success is True
+        assert not (tmp_path / "(24010) May 2026 Activity log.xlsx").exists()
+    assert calls == []
+
+
+def test_worker_all_mode_activity_logs_grouped_by_plan(
+        monkeypatch, tmp_path):
+    """All-members runs group logs into Activity Logs YYYY-MM/<PLAN>
+    even when the MLTC-folders checkbox is off."""
+    member = {"center_id": 24010, "last_name": "B", "first_name": "A",
+              "health_plan": "HF", "address": "x", "long_lat": "0,0"}
+    _stub_member_and_activities(monkeypatch, tmp_path, member)
+
+    worker = _make_worker(tmp_path)
+    worker.mode = "all"
+    worker.billing_name = "Jane Doe"
+    worker.program_name = "bowery"
+    assert worker.separate_by_plan is False
+
+    success, payload = _run_to_completion(worker)
+
+    assert success is True
+    log_path = (tmp_path / "Activity Logs 2026-05" / "HF"
+                / "(24010) May 2026 Activity log.xlsx")
+    assert log_path.exists()
+
+
+@pytest.mark.parametrize("program", ["Bowery", "Cathay"])
+def test_worker_activities_table_failure_degrades(
+        monkeypatch, tmp_path, program):
+    """A missing Activities table warns and skips the logs; the
+    timesheets still generate."""
+    member = {"center_id": 24010, "last_name": "B", "first_name": "A",
+              "health_plan": "HF", "address": "x", "long_lat": "0,0"}
+    _stub_member_and_activities(monkeypatch, tmp_path, member)
+
+    def boom(db):
+        raise RuntimeError("Could not read the Activities table: nope")
+    monkeypatch.setattr("gui.worker.get_activities", boom)
+
+    worker = _make_worker(tmp_path)
+    worker.program_name = program
+    log_events = []
+    worker.log_line.connect(lambda key, args: log_events.append(key))
+
+    success, payload = _run_to_completion(worker)
+
+    assert success is True
+    assert "worker.activities_failed" in log_events
+    assert not (tmp_path / "(24010) May 2026 Activity log.xlsx").exists()
+
+
+@pytest.mark.parametrize("program,build_name", [
+    ("Bowery", "build_activity_log"),
+    ("Cathay", "build_cathay_activity_log"),
+])
+def test_worker_activity_log_failure_keeps_timesheet(
+        monkeypatch, tmp_path, program, build_name):
+    """A per-member activity log failure is logged and never fails the
+    already-written timesheet."""
+    member = {"center_id": 24010, "last_name": "B", "first_name": "A",
+              "health_plan": "HF", "address": "x", "long_lat": "0,0"}
+    _stub_member_and_activities(monkeypatch, tmp_path, member)
+
+    def boom(*args, **kwargs):
+        raise ValueError("template exploded")
+    monkeypatch.setattr(f"gui.worker.{build_name}", boom)
+
+    worker = _make_worker(tmp_path)
+    worker.program_name = program
+    log_events = []
+    worker.log_line.connect(lambda key, args: log_events.append((key, args)))
+
+    success, payload = _run_to_completion(worker)
+
+    assert success is True
+    assert any(key == "worker.activity_log_failed"
+               for key, _args in log_events)
+
+
+def test_worker_cathay_single_mode_writes_activity_log(
+        monkeypatch, tmp_path):
+    """A Cathay program name uses the Cathay template: the log lands
+    next to the timesheet, carries the auth days in B6, and stays out
+    of the Print pipeline."""
+    member = {"center_id": 24010, "last_name": "B", "first_name": "A",
+              "health_plan": "HF", "address": "x", "long_lat": "0,0"}
+    _stub_member_and_activities(monkeypatch, tmp_path, member)
+
+    worker = _make_worker(tmp_path)
+    worker.program_name = "Cathay ADC"
+    log_events = []
+    worker.log_line.connect(lambda key, args: log_events.append(key))
+
+    success, payload = _run_to_completion(worker)
+
+    assert success is True
+    log_path = tmp_path / "(24010) May 2026 Activity log.xlsx"
+    assert log_path.exists()
+    assert "worker.wrote_activity_log" in log_events
+    assert all("Activity log" not in p for p in payload["generated_paths"])
+
+    from openpyxl import load_workbook
+    ws = load_workbook(str(log_path))["AttndActivityLog"]
+    assert "B, A" in ws["B6"].value
+    assert "(1.3.5)" in ws["B6"].value  # auth_weekdays reached the builder
+
+
+def test_worker_cathay_all_mode_groups_by_plan(monkeypatch, tmp_path):
+    member = {"center_id": 24010, "last_name": "B", "first_name": "A",
+              "health_plan": "HF", "address": "x", "long_lat": "0,0"}
+    _stub_member_and_activities(monkeypatch, tmp_path, member)
+
+    worker = _make_worker(tmp_path)
+    worker.mode = "all"
+    worker.billing_name = "Jane Doe"
+    worker.program_name = "cathay"
+
+    success, payload = _run_to_completion(worker)
+
+    assert success is True
+    assert (tmp_path / "Activity Logs 2026-05" / "HF"
+            / "(24010) May 2026 Activity log.xlsx").exists()
+
+
+def test_worker_cathay_single_mode_skips_billing_fields(
+        monkeypatch, tmp_path):
+    """Only the Bowery log needs DOB; a Cathay single-member run must
+    not pay for the roster-wide billing-fields query."""
+    member = {"center_id": 24010, "last_name": "B", "first_name": "A",
+              "health_plan": "HF", "address": "x", "long_lat": "0,0"}
+    _stub_member_and_activities(monkeypatch, tmp_path, member)
+    calls = []
+    monkeypatch.setattr("gui.worker.get_all_billing_fields",
+                        lambda db: calls.append(db) or {})
+
+    worker = _make_worker(tmp_path)
+    worker.program_name = "Cathay"
+    success, _payload = _run_to_completion(worker)
+    assert success is True
+    assert calls == []
+
+    worker = _make_worker(tmp_path)  # fresh worker, bowery run
+    worker.program_name = "Bowery"
+    success, _payload = _run_to_completion(worker)
+    assert success is True
+    assert len(calls) == 1
 
 
 def test_worker_all_mode_uses_codes_table(monkeypatch, tmp_path):
@@ -219,7 +478,7 @@ def test_worker_all_mode_uses_codes_table(monkeypatch, tmp_path):
         if on_rows is not None:
             on_rows([{"date": _d(year, month, 1), "time_in": "09:00"}],
                     {1, 2, 3})
-        return (True, None, None, None)
+        return (True, None, None, None, None)
 
     monkeypatch.setattr("gui.worker.process_member", fake_process_member)
 
@@ -231,5 +490,5 @@ def test_worker_all_mode_uses_codes_table(monkeypatch, tmp_path):
     ws = load_workbook(payload["billing_path"])["Sheet1"]
     hf_row = next(r[0].row for r in ws.iter_rows(min_col=2, max_col=2)
                   if r[0].value == 2)
-    assert ws.cell(row=hf_row, column=8).value == "S5105"
-    assert ws.cell(row=hf_row, column=9).value == "T2003"
+    assert ws.cell(row=hf_row, column=11).value == "S5105"
+    assert ws.cell(row=hf_row, column=12).value == "T2003"

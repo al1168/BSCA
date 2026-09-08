@@ -16,10 +16,13 @@ a = Analysis(
         # (ODBC can't create ATTACHMENT fields).
         'win32com.client',
         'pywintypes',
+        'pythoncom',
+        'win32timezone',
         # Setup-script modules — loaded via importlib.import_module()
         # in setup_gui/setup_worker.py, so PyInstaller's static analysis
         # doesn't see them. Bundle them explicitly.
         'scripts',
+        'scripts.normalize_contacts_columns',
         'scripts.create_supporting_tables',
         'scripts.add_long_lat_to_contacts',
         'scripts.add_document_to_authorization',
@@ -27,6 +30,7 @@ a = Analysis(
         'scripts.add_created_at_to_authorization',
         'scripts.add_member_id_to_authorization',
         'scripts.add_auth_number_to_authorization',
+        'scripts.add_plan_type_to_authorization',
         'scripts.change_dob_to_date_in_contacts',
         'scripts.backfill_enrollment_from_contacts',
         'scripts.backfill_authorization_from_contacts',

@@ -149,6 +149,23 @@ def _qtime_to_minutes(t: QTime) -> int:
     return t.hour() * 60 + t.minute()
 
 
+# Characters Windows forbids in filenames; the billing name is pasted
+# straight into the billing workbook's filename.
+_FORBIDDEN_FILENAME_CHARS = set('\\/:*?"<>|')
+
+
+def billing_name_error(text: str) -> str | None:
+    """Validate the billing file name. Returns "missing" when blank,
+    "invalid" when it contains a character Windows forbids in
+    filenames, None when usable."""
+    stripped = text.strip()
+    if not stripped:
+        return "missing"
+    if _FORBIDDEN_FILENAME_CHARS & set(stripped):
+        return "invalid"
+    return None
+
+
 def _format_member_ids(ids) -> str:
     return ", ".join(str(i) for i in ids)
 
@@ -252,16 +269,26 @@ class SettingsDialog(QDialog):
         self._cache_row = _PathRow(
             settings.get("geo_cache", ""), "JSON files (*.json)"
         )
+        self._billing_name_edit = QLineEdit(
+            settings.get("billing_name", "")
+        )
+        self._program_name_edit = QLineEdit(
+            settings.get("program_name", "")
+        )
 
         self._db_label = QLabel()
         self._out_label = QLabel()
         self._api_key_label = QLabel()
         self._cache_label = QLabel()
+        self._billing_name_label = QLabel()
+        self._program_name_label = QLabel()
 
         form.addRow(self._db_label, self._db_row)
         form.addRow(self._out_label, self._out_row)
         form.addRow(self._api_key_label, self._key_row)
         form.addRow(self._cache_label, self._cache_row)
+        form.addRow(self._billing_name_label, self._billing_name_edit)
+        form.addRow(self._program_name_label, self._program_name_edit)
         layout.addLayout(form)
 
         # ── Scheduling Rules ─────────────────────────────────────
@@ -408,6 +435,8 @@ class SettingsDialog(QDialog):
         self._out_label.setText(tr("settings.output_label"))
         self._api_key_label.setText(tr("settings.api_key_label"))
         self._cache_label.setText(tr("settings.cache_label"))
+        self._billing_name_label.setText(tr("settings.billing_name_label"))
+        self._program_name_label.setText(tr("settings.program_name_label"))
         self._db_row.retranslate()
         self._out_row.retranslate()
         self._key_row.retranslate()
@@ -489,6 +518,14 @@ class SettingsDialog(QDialog):
         )
 
     def _save(self):
+        name_problem = billing_name_error(self._billing_name_edit.text())
+        if name_problem is not None:
+            QMessageBox.warning(
+                self,
+                tr(f"settings.billing_name_{name_problem}.title"),
+                tr(f"settings.billing_name_{name_problem}.body"),
+            )
+            return
         earliest_in = _hhmm(self._earliest_in_edit.time())
         latest_out = _hhmm(self._latest_out_edit.time())
         session = self._session_row.minutes_value()
@@ -544,6 +581,8 @@ class SettingsDialog(QDialog):
             "output_path": self._out_row.value(),
             "google_api_key": self._key_row.value(),
             "geo_cache": self._cache_row.value(),
+            "billing_name": self._billing_name_edit.text().strip(),
+            "program_name": self._program_name_edit.text().strip(),
             "schedule_rules": {
                 "earliest_time_in": earliest_in,
                 "latest_time_out": latest_out,

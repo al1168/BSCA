@@ -48,7 +48,53 @@ from monthly_schedule.per_day import (
 )
 
 
-def _translate_reason(reason: str) -> str:
+def _translate_one_off_reason(detail: dict) -> str:
+    """Build the one-off conflict sentence in the current language from
+    the structured detail carried on the failure. Mirrors
+    monthly_schedule.per_day.format_one_off_conflict(), which produces
+    the English text written to the CSV reports."""
+    if detail["kind"] == "duplicate":
+        parts = [
+            tr("summary.reason.one_off_row",
+               window=f"{r['avail_start']}-{r['avail_end']}",
+               row_id=r["id"])
+            for r in detail["one_offs"]
+        ]
+        if len(parts) == 1:
+            rows = parts[0]
+        else:
+            rows = (
+                tr("summary.reason.one_off_join").join(parts[:-1])
+                + tr("summary.reason.one_off_join_last")
+                + parts[-1]
+            )
+        return tr(
+            "summary.reason.one_off_duplicate",
+            count=len(parts), day=detail["day"], rows=rows,
+        )
+
+    one_off = detail["one_offs"][0]
+    absence = detail["absence"]
+    leave_type = str(absence["leave_type"] or "").strip()
+    key = (
+        "summary.reason.one_off_absence" if leave_type
+        else "summary.reason.one_off_absence_untyped"
+    )
+    return tr(
+        key,
+        window=f"{one_off['avail_start']}-{one_off['avail_end']}",
+        day=detail["day"],
+        one_off_id=one_off["id"],
+        leave_type=leave_type,
+        start=absence["start_date"],
+        end=absence["end_date"],
+        absence_id=absence["id"],
+    )
+
+
+def _translate_reason(reason: str, detail: dict = None) -> str:
+    if detail:
+        return _translate_one_off_reason(detail)
     if reason == REASON_NOT_FOUND:
         return tr("summary.reason.not_found")
     if reason == REASON_NOT_ENROLLED:
@@ -735,7 +781,16 @@ class MainWindow(QWidget):
             pass  # Plan — combo always has a value
 
         elif mode == 3:
-            pass  # All Members — no input to validate
+            # All Members writes the billing workbook, whose filename
+            # needs the billing name. Settings saved by an older version
+            # may not have one yet.
+            if not self._settings.get("billing_name", "").strip():
+                QMessageBox.warning(
+                    self,
+                    tr("msg.billing_name_missing.title"),
+                    tr("msg.billing_name_missing.body"),
+                )
+                return False
 
         db_path = self._settings.get("db_path", "")
         if not os.path.isfile(db_path):
@@ -825,6 +880,8 @@ class MainWindow(QWidget):
             end_day=end_day,
             schedule_rules=self._settings.get("schedule_rules"),
             separate_by_plan=separate_by_plan,
+            billing_name=self._settings.get("billing_name", "").strip(),
+            program_name=self._settings.get("program_name", "").strip(),
         )
         self._worker.progress.connect(self._on_progress)
         self._worker.log_line.connect(self._on_log_line)
@@ -900,7 +957,7 @@ class MainWindow(QWidget):
         lines = [head, tr("summary.failures_header")]
         for f in data["failures"]:
             stage = tr(f"summary.stage.{f['stage']}")
-            reason = _translate_reason(f["reason"])
+            reason = _translate_reason(f["reason"], f.get("detail"))
             row_key = (
                 "summary.failure_row_named" if f["name"] else "summary.failure_row_unnamed"
             )

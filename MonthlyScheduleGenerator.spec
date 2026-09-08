@@ -6,7 +6,13 @@ a = Analysis(
     ['gui.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    # Dest folder must match activity_log_workbook.default_template_path
+    # and cathay_activity_log.cathay_template_path, which resolve
+    # assets/templates under sys._MEIPASS when frozen.
+    datas=[('assets/templates/Bowery activity log template.xlsx',
+            'assets/templates'),
+           ('assets/templates/Cathay activity log template.xlsm',
+            'assets/templates')],
     hiddenimports=[
         'pyodbc', 'openpyxl', 'requests',
         # Printing generated schedules via Excel COM (gui/printing.py):

@@ -45,6 +45,7 @@ _CREATE_AUTHORIZATION = (
     "[auth_days] TEXT(255), "
     "[notes] MEMO, "
     "[Health Plan] TEXT(255), "
+    "[Plan Type] TEXT(255), "
     "[Member ID] TEXT(255), "
     "[auth_number] TEXT(255), "
     "[created_at] DATETIME"

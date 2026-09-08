@@ -212,8 +212,12 @@ carried in the CSV.
 
 | # | Check | Reason string |
 | --- | --- | --- |
-| 1 | `len(one_offs) > 1` | `"duplicate one-off rows for {date}"` |
-| 2 | `ctx.is_absent(date)` is True. | `"one-off on {date} conflicts with absence"` |
+| 1 | `len(one_offs) > 1` | `"{n} one-off rows for {date}: {window} (row {id}), …"` |
+| 2 | `ctx.absence_for(date)` is not None. | `"one-off availability {window} on {date} (OneOffAvailability row {id}) conflicts with a {leave_type} absence covering {start} to {end} (Absences row {id})"` |
+
+Both messages name every record involved, with its Access row ID, so
+staff can open the exact rows that disagree instead of searching the
+table for the date. A blank `Leave Type` degrades to "an absence".
 
 Order rationale: the structural problem (duplicate row) is reported
 before the absence conflict, because the absence conflict is only
@@ -243,12 +247,22 @@ In [monthly_schedule/per_day.py](../../../monthly_schedule/per_day.py):
 
 ```python
 class OneOffConflict(Exception):
-    def __init__(self, center_id, day, reason):
+    def __init__(self, center_id, day, detail: OneOffConflictDetail):
         self.center_id = center_id
         self.day = day
-        self.reason = reason
-        super().__init__(f"{center_id} {day}: {reason}")
+        self.detail = detail
+        self.reason = format_one_off_conflict(detail)
+        super().__init__(f"{center_id} {day}: {self.reason}")
 ```
+
+`detail` is a frozen `OneOffConflictDetail` holding the offending
+records (`kind`, `day`, `one_offs`, `absence`); `reason` is the English
+sentence rendered from it by `format_one_off_conflict()`. The CSV
+reports write `reason`; the GUI re-renders `detail.as_dict()` through
+the i18n table so the failure list follows the selected language.
+Keeping the two in one module is deliberate — the English wording has
+exactly one source, and `tests/test_i18n.py` asserts the GUI's English
+output still equals `format_one_off_conflict()`.
 
 ## CSV output
 
@@ -264,7 +278,7 @@ workbook, matching the convention of
 | `center_id` | `12345` |
 | `name` | `"Smith, Jane"` |
 | `date` | `2026-06-05` |
-| `reason` | `one-off on 2026-06-05 conflicts with absence` |
+| `reason` | `one-off availability 09:00-12:00 on 2026-06-05 (OneOffAvailability row 4) conflicts with a Vacation absence covering 2026-06-05 to 2026-06-06 (Absences row 14)` |
 
 Behavior:
 

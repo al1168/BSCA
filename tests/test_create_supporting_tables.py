@@ -136,3 +136,10 @@ def test_authorization_ddl_has_auth_number_column():
     authorization number copied from Contacts.[SADC Auth]."""
     q = build._CREATE_AUTHORIZATION
     assert "[auth_number] TEXT(255)" in q
+
+
+def test_authorization_ddl_has_plan_type_column():
+    """The Authorization DDL includes [Plan Type] TEXT(255) — left
+    empty; nothing populates it yet."""
+    q = build._CREATE_AUTHORIZATION
+    assert "[Plan Type] TEXT(255)" in q

@@ -1,6 +1,7 @@
 """Background worker that prepares a fresh BSCA database by chaining
-the 7 setup scripts in order: backup → create_supporting_tables →
-add_long_lat_to_contacts → add_document_to_authorization →
+the setup scripts in order: backup → normalize_contacts_columns →
+create_supporting_tables → add_long_lat_to_contacts →
+add_document_to_authorization →
 backfill_enrollment_from_contacts → backfill_authorization_from_contacts
 → backfill_availability_from_hha → backfill_emergency_contacts_from_contacts.
 
@@ -27,6 +28,8 @@ from setup_gui.log_buffer import LineBuffer
 # `<module>.main(["--db", path])` and treats a non-zero return code as
 # a stop-the-chain failure.
 SETUP_STEPS: list[tuple[str, str]] = [
+    ("normalize_contacts_columns",
+     "scripts.normalize_contacts_columns"),
     ("create_supporting_tables",
      "scripts.create_supporting_tables"),
     ("add_long_lat_to_contacts",
@@ -41,6 +44,8 @@ SETUP_STEPS: list[tuple[str, str]] = [
      "scripts.add_member_id_to_authorization"),
     ("add_auth_number_to_authorization",
      "scripts.add_auth_number_to_authorization"),
+    ("add_plan_type_to_authorization",
+     "scripts.add_plan_type_to_authorization"),
     ("change_dob_to_date_in_contacts",
      "scripts.change_dob_to_date_in_contacts"),
     ("backfill_enrollment_from_contacts",
