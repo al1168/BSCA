@@ -66,14 +66,26 @@ def _build_connection_string(path: str) -> str:
     return f"DRIVER={{Microsoft Access Driver (*.mdb, *.accdb)}};DBQ={path};"
 
 
+def _column_exists(cursor, table: str, column: str) -> bool:
+    """Return True if `column` exists on `table`. Matches names
+    case-insensitively because Access is case-insensitive.
+
+    Uses the ODBC catalog rather than a probe SELECT: the Access driver
+    rejects `SELECT TOP 0 ...` outright ("reserved word or ...
+    punctuation is incorrect"), so a probe can't distinguish a missing
+    column from a syntax the driver refuses. Mirrors
+    scripts/add_group_to_contacts.py::_column_exists."""
+    rows = cursor.columns(table=table).fetchall()
+    target = column.lower()
+    return any(r.column_name.lower() == target for r in rows)
+
+
 def _ensure_plan_type_column(conn) -> None:
     """Old reference DBs predate the [Plan Type] migration
     (scripts/add_plan_type_to_authorization.py); the scheduler's
     Authorization queries need the column, so add it when absent."""
     cur = conn.cursor()
-    try:
-        cur.execute("SELECT TOP 0 [Plan Type] FROM [Authorization]")
-    except Exception:
+    if not _column_exists(cur, "Authorization", "Plan Type"):
         cur.execute(
             "ALTER TABLE [Authorization] ADD COLUMN [Plan Type] TEXT(255)"
         )
