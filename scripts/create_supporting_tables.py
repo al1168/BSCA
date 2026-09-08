@@ -1,12 +1,12 @@
-"""Create the eight supporting tables in an Access .accdb that already
+"""Create the ten supporting tables in an Access .accdb that already
 contains a Contacts table.
 
 Given a fresh .accdb whose only table is `Contacts`, this script
-issues eight CREATE TABLE statements to bring up the `Enrollment`,
+issues ten CREATE TABLE statements to bring up the `Enrollment`,
 `Authorization`, `TransportAuthorization`, `Absences`, `Availability`,
-`OneOffAvailability`, `EmergencyContact`, and `AuthEdge` tables — every
-column the scheduler and the backfill scripts read, including the
-`[Health Plan]` column on `Authorization`.
+`OneOffAvailability`, `EmergencyContact`, `AuthEdge`, `Holidays`, and
+`OperatingDays` tables — every column the scheduler and the backfill
+scripts read, including the `[Health Plan]` column on `Authorization`.
 
 The script is a one-shot DDL bootstrap. No data is touched. If a
 supporting table already exists it is skipped and the script
@@ -135,6 +135,33 @@ _CREATE_EMERGENCY_CONTACT = (
     ")"
 )
 
+# Company holidays: one row per closed date. The scheduler generates
+# no times on these days (they look like non-authorized weekdays, not
+# absences). Entered through the Members app's Company Calendar dialog.
+_CREATE_HOLIDAYS = (
+    "CREATE TABLE [Holidays] ("
+    "[ID] AUTOINCREMENT PRIMARY KEY, "
+    "[holiday_name] TEXT(255), "
+    "[date] DATETIME"
+    ")"
+)
+
+# Weekly operating hours, one row per OPEN weekday. A weekday with no
+# row is closed. [Day Of Week] follows Availability's convention
+# (1 = Monday … 7 = Sunday); the scheduler matches on it, never on
+# [day_name]. Times are time-only DATETIMEs (1899-12-30 HH:MM), the
+# same encoding as Availability.avail_start. Seeded Mon–Sun
+# 08:00–16:00 by scripts/seed_operating_days.py.
+_CREATE_OPERATING_DAYS = (
+    "CREATE TABLE [OperatingDays] ("
+    "[ID] AUTOINCREMENT PRIMARY KEY, "
+    "[day_name] TEXT(20), "
+    "[Day Of Week] LONG, "
+    "[opening_time] DATETIME, "
+    "[closing_time] DATETIME"
+    ")"
+)
+
 _DDLS = [
     ("Enrollment", _CREATE_ENROLLMENT),
     ("Authorization", _CREATE_AUTHORIZATION),
@@ -144,6 +171,8 @@ _DDLS = [
     ("OneOffAvailability", _CREATE_ONE_OFF_AVAILABILITY),
     ("EmergencyContact", _CREATE_EMERGENCY_CONTACT),
     ("AuthEdge", _CREATE_AUTH_EDGE),
+    ("Holidays", _CREATE_HOLIDAYS),
+    ("OperatingDays", _CREATE_OPERATING_DAYS),
 ]
 
 
@@ -157,10 +186,10 @@ def _build_connection_string(db_path):
 def _parse_args(argv):
     p = argparse.ArgumentParser(
         description=(
-            "Create the six supporting tables (Enrollment, "
-            "Authorization, Absences, Availability, OneOffAvailability, "
-            "EmergencyContact) in an Access .accdb that already "
-            "contains Contacts."
+            "Create the supporting tables (Enrollment, Authorization, "
+            "Absences, Availability, OneOffAvailability, "
+            "EmergencyContact, AuthEdge, Holidays, OperatingDays) in "
+            "an Access .accdb that already contains Contacts."
         )
     )
     p.add_argument("--db", required=True,

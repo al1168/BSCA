@@ -105,6 +105,8 @@ def test_ddls_in_declared_order():
         ("OneOffAvailability", build._CREATE_ONE_OFF_AVAILABILITY),
         ("EmergencyContact", build._CREATE_EMERGENCY_CONTACT),
         ("AuthEdge", build._CREATE_AUTH_EDGE),
+        ("Holidays", build._CREATE_HOLIDAYS),
+        ("OperatingDays", build._CREATE_OPERATING_DAYS),
     ]
 
 
@@ -143,3 +145,26 @@ def test_authorization_ddl_has_plan_type_column():
     empty; nothing populates it yet."""
     q = build._CREATE_AUTHORIZATION
     assert "[Plan Type] TEXT(255)" in q
+
+
+def test_create_holidays_ddl():
+    q = build._CREATE_HOLIDAYS
+    assert "CREATE TABLE [Holidays]" in q
+    assert "[ID] AUTOINCREMENT PRIMARY KEY" in q
+    assert "[holiday_name] TEXT(255)" in q
+    assert "[date] DATETIME" in q
+
+
+def test_create_operating_days_ddl():
+    q = build._CREATE_OPERATING_DAYS
+    assert "CREATE TABLE [OperatingDays]" in q
+    assert "[ID] AUTOINCREMENT PRIMARY KEY" in q
+    assert "[day_name] TEXT(20)" in q
+    assert "[Day Of Week] LONG" in q
+    assert "[opening_time] DATETIME" in q
+    assert "[closing_time] DATETIME" in q
+
+
+def test_ddls_end_with_calendar_tables():
+    names = [name for name, _ddl in build._DDLS]
+    assert names[-2:] == ["Holidays", "OperatingDays"]
