@@ -287,18 +287,26 @@ class ScheduleWorker(QThread):
         # win at N≥2. The simpler code path is worth the trivial memory
         # bump (~few MB at current table sizes). Revisit if Enrollment/
         # Authorization/Absences/Availability ever grow beyond ~100k rows.
-        enroll_idx = get_all_enrollments(self.db_path)
-        auth_idx = get_all_authorizations(self.db_path)
-        absence_idx = get_all_absences(self.db_path)
-        avail_idx = get_all_availability(self.db_path)
-        one_off_idx = get_all_one_offs(self.db_path)
+        try:
+            enroll_idx = get_all_enrollments(self.db_path)
+            auth_idx = get_all_authorizations(self.db_path)
+            absence_idx = get_all_absences(self.db_path)
+            avail_idx = get_all_availability(self.db_path)
+            one_off_idx = get_all_one_offs(self.db_path)
 
-        # Center-wide calendar: holidays and weekly hours. Missing
-        # tables fail the run like any other supporting table (re-run
-        # Setup to create them).
-        center_calendar = CenterCalendar(
-            get_holidays(self.db_path), get_operating_days(self.db_path),
-        )
+            # Center-wide calendar: holidays and weekly hours. Missing
+            # tables fail the run like any other supporting table and
+            # are reported through the normal database-error message
+            # (which tells the user to re-run Setup).
+            center_calendar = CenterCalendar(
+                get_holidays(self.db_path), get_operating_days(self.db_path),
+            )
+        except FileNotFoundError as exc:
+            self._emit_error(str(exc))
+            return
+        except RuntimeError as exc:
+            self._emit_error(friendly_db_error(str(exc)))
+            return
 
         # The All-Members billing workbook needs demographics (gender,
         # DOB, admission date, Medicaid #) the scheduler never reads.

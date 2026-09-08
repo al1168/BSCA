@@ -623,6 +623,19 @@ def get_activities(db_path: str) -> dict:
         conn.close()
 
 
+def _read_error(exc):
+    """RuntimeError for a query that failed after the connection opened.
+    The most common cause is a table the database doesn't have yet (a
+    DB not re-run through the Setup program), so the message names that
+    fix and keeps the original pyodbc text — gui.errors.friendly_db_error
+    passes it through, and the CLI prints it as a one-liner."""
+    return RuntimeError(
+        "Could not read the Access database. If the error names a "
+        "missing table, run the BSCA Setup program on this database. "
+        f"Original error: {exc}"
+    )
+
+
 def _index_by_center_id(rows):
     """Group a flat list of row-dicts into {center_id: [rows]}."""
     out: dict[int, list] = {}
@@ -653,8 +666,12 @@ def _fetch_all_unfiltered(query: str, db_path: str, mapper, require_col=1):
         )
     try:
         cursor = conn.cursor()
-        cursor.execute(query)
-        return [mapper(row) for row in cursor.fetchall()
+        try:
+            cursor.execute(query)
+            rows = cursor.fetchall()
+        except pyodbc.Error as exc:
+            raise _read_error(exc) from exc
+        return [mapper(row) for row in rows
                 if row[require_col] is not None]
     finally:
         conn.close()
@@ -679,7 +696,11 @@ def _fetch_all(query, center_id, db_path, mapper):
         )
     try:
         cursor = conn.cursor()
-        cursor.execute(query, center_id)
-        return [mapper(row) for row in cursor.fetchall()]
+        try:
+            cursor.execute(query, center_id)
+            rows = cursor.fetchall()
+        except pyodbc.Error as exc:
+            raise _read_error(exc) from exc
+        return [mapper(row) for row in rows]
     finally:
         conn.close()

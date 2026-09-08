@@ -525,3 +525,29 @@ def test_worker_all_mode_uses_codes_table(monkeypatch, tmp_path):
                   if r[0].value == 2)
     assert ws.cell(row=hf_row, column=11).value == "S5105"
     assert ws.cell(row=hf_row, column=12).value == "T2003"
+
+
+def test_worker_missing_calendar_table_reports_db_error(monkeypatch, tmp_path):
+    """A database missing the new calendar tables (not yet re-run
+    through Setup) must surface as the normal database-error message,
+    not as an 'Unhandled error in worker' traceback."""
+    _stub_db_and_caches(monkeypatch, tmp_path)
+    member = {"center_id": 24010, "last_name": "B", "first_name": "A",
+              "health_plan": "HF", "address": "x", "long_lat": "0,0"}
+    monkeypatch.setattr("gui.worker.get_member", lambda cid, db: member)
+
+    def boom(db):
+        raise RuntimeError(
+            "Could not read the Access database. Original error: "
+            "cannot find the input table or query 'OperatingDays'"
+        )
+
+    monkeypatch.setattr("gui.worker.get_operating_days", boom)
+
+    worker = _make_worker(tmp_path)
+    success, payload = _run_to_completion(worker)
+
+    assert success is False
+    error_text = payload["error_text"]
+    assert "Unhandled error in worker" not in error_text
+    assert "OperatingDays" in error_text

@@ -570,3 +570,64 @@ def test_fetch_all_unfiltered_require_col(monkeypatch, tmp_path):
     assert _fetch_all_unfiltered("q", str(db), lambda r: r) == [(2, "x", None)]
     assert _fetch_all_unfiltered("q", str(db), lambda r: r,
                                  require_col=2) == [(1, None, 5)]
+
+
+class FakeOdbcError(Exception):
+    """Stand-in for pyodbc.Error / pyodbc.ProgrammingError."""
+
+
+def _fake_pyodbc_raising_on_execute(message):
+    """A fake pyodbc module whose cursor.execute raises an ODBC error —
+    the shape of a missing-table failure ('cannot find the input
+    table')."""
+    class FakeCursor:
+        def execute(self, query, *params):
+            raise FakeOdbcError(message)
+
+    class FakeConn:
+        def cursor(self):
+            return FakeCursor()
+
+        def close(self):
+            pass
+
+    return types.SimpleNamespace(
+        Error=FakeOdbcError, connect=lambda _cs: FakeConn()
+    )
+
+
+def test_fetch_all_unfiltered_missing_table_raises_runtime(monkeypatch,
+                                                           tmp_path):
+    """A missing table surfaces as RuntimeError carrying the original
+    pyodbc text, so the CLI/GUI can show the normal database error
+    instead of a raw traceback."""
+    from monthly_schedule.db import _fetch_all_unfiltered
+    db = tmp_path / "x.accdb"
+    db.write_bytes(b"")
+    monkeypatch.setitem(
+        sys.modules, "pyodbc",
+        _fake_pyodbc_raising_on_execute(
+            "cannot find the input table or query 'Holidays'"
+        ),
+    )
+    with pytest.raises(RuntimeError) as excinfo:
+        _fetch_all_unfiltered("q", str(db), lambda r: r)
+    assert "Holidays" in str(excinfo.value)
+    assert "cannot find the input table" in str(excinfo.value)
+
+
+def test_fetch_all_missing_table_raises_runtime(monkeypatch, tmp_path):
+    """Same for the parameterized (per-center) fetch helper."""
+    from monthly_schedule.db import _fetch_all
+    db = tmp_path / "x.accdb"
+    db.write_bytes(b"")
+    monkeypatch.setitem(
+        sys.modules, "pyodbc",
+        _fake_pyodbc_raising_on_execute(
+            "cannot find the input table or query 'Holidays'"
+        ),
+    )
+    with pytest.raises(RuntimeError) as excinfo:
+        _fetch_all("q", 24010, str(db), lambda r: r)
+    assert "Holidays" in str(excinfo.value)
+    assert "cannot find the input table" in str(excinfo.value)
