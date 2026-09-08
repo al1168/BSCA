@@ -366,7 +366,8 @@ def seed_plan_full(conn, today: date) -> None:
 
 
 def seed_populate_real_members(conn, today: date) -> None:
-    """Seed the four supporting tables against the real Contacts IDs.
+    """Seed Enrollment, Authorization, Availability and Absences against
+    the real Contacts IDs.
 
     Iterates every Contacts row (sorted by Center ID ascending) and
     inserts a happy-path setup. Every 30-cycle rotates through three

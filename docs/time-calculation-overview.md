@@ -10,9 +10,10 @@ and absences.
 
 `monthly_schedule/rows.py` walks every calendar day of the month and
 asks `monthly_schedule/per_day.py:compute_day_eligibility` whether the
-day is eligible (enrollment, authorization, authorized weekday,
-one-off/recurring availability, absence, and a wide-enough placement
-window — see `docs/scheduling-flow.md`).
+day is eligible (enrollment, authorization, center open — not a
+holiday and the weekday has an `OperatingDays` row, authorized
+weekday, one-off/recurring availability, absence, and a wide-enough
+placement window — see `docs/scheduling-flow.md`).
 
 - Eligible day → a full set of times is generated.
 - Non-eligible day → every time cell is left blank (`""`).

@@ -17,7 +17,9 @@ flowchart TD
     B -- No --> X1[/Ineligible: not enrolled/]
     B -- Yes --> C{Active<br/>authorization<br/>covers this day?}
     C -- No --> X2[/Ineligible: no active authorization/]
-    C -- Yes --> D{Day's weekday<br/>is in auth_days?<br/>e.g. Mon/Wed/Fri}
+    C -- Yes --> C2{Center open on<br/>this day? (not a<br/>holiday, weekday<br/>has OperatingDays row)}
+    C2 -- No --> X2b[/Ineligible: center closed/]
+    C2 -- Yes --> D{Day's weekday<br/>is in auth_days?<br/>e.g. Mon/Wed/Fri}
     D -- No --> X3[/Ineligible: weekday not authorized/]
     D -- Yes --> E{One-off<br/>availability row<br/>for this date?}
     E -- "Yes, two or more" --> X4[/Conflict: duplicate one-off rows/]
@@ -43,11 +45,12 @@ flowchart TD
 |---|---|---|---|
 | 1 | Is the member enrolled on this date? | `Enrollment.start_date` ≤ day ≤ `Enrollment.end_date` (or open-ended) | `MemberContext.is_enrolled` |
 | 2 | Is there an active authorization on this date? | `Authorization.effective_start` ≤ day ≤ `Authorization.effective_end` | `MemberContext.active_authorization` |
-| 3 | Is the day's weekday in `auth_days`? | `Authorization.auth_days` (e.g. `"1,3,5"` = Mon/Wed/Fri) | `get_authorized_weekdays` |
-| 4 | Is there a `OneOffAvailability` row for this exact date? | `OneOffAvailability.date == day` | `MemberContext.one_offs_for` |
-| 5 | Is the member absent on this date? | Any `Absences.start_date` ≤ day ≤ `Absences.end_date` | `MemberContext.is_absent` |
-| 6 | Is there a recurring `Availability` row for this weekday? | `Availability.day_of_week == day.isoweekday()` whose effective-date window includes the day | `MemberContext.availability_for` |
-| 7 | Is the placement window wide enough for a session? | `min(latest_time_out, avail_end) − max(earliest_time_in, avail_start)` ≥ `session_length_min` (3h30m) — with the drop-off reserve first subtracted from an early `avail_end` when **Drop off by availability end** is on | `compute_day_eligibility` |
+| 3 | Is the center open on this date? | `Holidays` (any row's `date == day`) and `OperatingDays` (a row for `day.isoweekday()`) via `CenterCalendar.is_closed` | `monthly_schedule/per_day.py` |
+| 4 | Is the day's weekday in `auth_days`? | `Authorization.auth_days` (e.g. `"1,3,5"` = Mon/Wed/Fri) | `get_authorized_weekdays` |
+| 5 | Is there a `OneOffAvailability` row for this exact date? | `OneOffAvailability.date == day` | `MemberContext.one_offs_for` |
+| 6 | Is the member absent on this date? | Any `Absences.start_date` ≤ day ≤ `Absences.end_date` | `MemberContext.is_absent` |
+| 7 | Is there a recurring `Availability` row for this weekday? | `Availability.day_of_week == day.isoweekday()` whose effective-date window includes the day | `MemberContext.availability_for` |
+| 8 | Is the placement window wide enough for a session? | `min(latest_time_out, avail_end) − max(earliest_time_in, avail_start)` ≥ `session_length_min` (3h30m) — with the drop-off reserve first subtracted from an early `avail_end` when **Drop off by availability end** is on | `compute_day_eligibility` |
 
 ## What each attribute means
 
@@ -103,7 +106,7 @@ in the placement window, and everything else is offsets from it.
 Only Time-In and Time-Out are constrained by the placement window. With
 **Drop off by availability end** off, the transport times deliberately
 spill just outside it; with it on (the default), days whose recurring
-availability ends before 16:00 reserve the whole transport tail inside
+availability ends before the day's `latest_time_out` reserve the whole transport tail inside
 the window, so Drop-Off lands at or before `avail_end`. Every generated day
 must satisfy this ordering, or the run reports an error for that member:
 
@@ -139,7 +142,7 @@ Once a day is eligible:
    derived around it using the configurable buffer values in **Settings
    → Scheduling Rules**. Arrival never lands before the member's
    availability start by more than the small Time-In offset, and
-   Time-In/Time-Out stay within the 08:00–16:00 day bounds. Once the
+   Time-In/Time-Out stay within the day's `OperatingDays` bounds. Once the
    placement window is set, `band_for_member` (opt-in, off by default)
    assigns the member to a `morning`/`afternoon` band — by pin or by a
    stable hash of `center_id` — and `build_daily_schedule` prefers that
@@ -160,10 +163,15 @@ absent to member partially constrained**:
 
 1. Enrollment + authorization gate the entire month — failing here
    means we don't bother loading anything else.
-2. Weekday in auth_days is a constant-time set lookup.
-3. One-offs and absences come next because they can produce different
+2. Center open (Holidays / OperatingDays) runs right after
+   authorization: it's a cheap in-memory calendar lookup
+   (`CenterCalendar.is_closed`) and a hard gate that has nothing to do
+   with the member, so there's no reason to check weekday, one-offs,
+   or absences first — matching `compute_day_eligibility`.
+3. Weekday in auth_days is a constant-time set lookup.
+4. One-offs and absences come next because they can produce different
    surfaced reasons (silent skip vs. conflict in the failures CSV).
-4. The placement-window check is last because it depends on the plan's
+5. The placement-window check is last because it depends on the plan's
    day bounds and the chosen availability row.
 
 If you turn on the **Debug** checkbox in the GUI, every day of the

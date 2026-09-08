@@ -190,8 +190,8 @@ stay, etc.).
 **Semantics:** day `D` is blocked iff any Absence row satisfies
 `Start_Date <= D <= End_Date`.
 
-Center-wide closures are the `Holidays` and `OperatingDays` tables
-below, not per-member absences.
+Center-wide closures are modeled by the `Holidays` and `OperatingDays`
+tables below, not as per-member absences.
 
 ### Availability
 
