@@ -31,8 +31,10 @@ SUPPORTING_TABLES = ("Holidays", "OneOffAvailability", "Availability",
 DATA_TABLES = SUPPORTING_TABLES + ("Contacts",)
 
 # Scenarios that should preserve the real Contacts table and only
-# truncate the four supporting tables. Used by main() to decide which
-# list to hand _truncate().
+# truncate the supporting tables. Used by main() to decide which
+# list to hand _truncate(). Because Holidays is in SUPPORTING_TABLES,
+# this also clears the company-wide Holidays rows; re-enter them
+# afterwards if the scenario needs them.
 SCENARIOS_KEEP_CONTACTS = {"populate_real_members"}
 
 
@@ -610,6 +612,7 @@ def main(argv=None) -> int:
 
     try:
         _ensure_plan_type_column(conn)
+        # Must run before _truncate: Holidays is in the truncate list.
         _ensure_calendar_tables(conn)
         truncate_tables = (
             SUPPORTING_TABLES

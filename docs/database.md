@@ -190,9 +190,8 @@ stay, etc.).
 **Semantics:** day `D` is blocked iff any Absence row satisfies
 `Start_Date <= D <= End_Date`.
 
-Center-wide closures (e.g., holidays affecting everyone) are not
-modeled as a dedicated table — they are entered as one Absence per
-member. Revisit if duplicate data entry becomes painful.
+Center-wide closures are the `Holidays` and `OperatingDays` tables
+below, not per-member absences.
 
 ### Availability
 
@@ -268,6 +267,45 @@ standard schema.
 | Phone Number | Short Text (50) | |
 | Relationship | Short Text (100) | |
 
+### Holidays
+
+Company holidays: dates the center is closed for everyone. Entered
+through the Members app's Company Calendar dialog.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| ID | AutoNumber | Primary key. |
+| holiday_name | Short Text | e.g. `Labor Day`. |
+| date | Date/Time | The single closed date. A multi-day closure is one row per day. |
+
+**Semantics:** day `D` is a holiday iff any row's `date` equals `D`.
+The scheduler generates no times that day; it is blank on the
+timesheet, the activity log and the billing sheet (not an absence).
+The debug CSV says `Center closed (<holiday_name>)`.
+
+### OperatingDays
+
+Weekly operating hours, one row per **open** weekday. A weekday with
+no row is closed. Seeded Monday–Sunday 08:00–16:00 by
+[scripts/seed_operating_days.py](../scripts/seed_operating_days.py)
+when the table is empty; edited through the Members app.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| ID | AutoNumber | Primary key. |
+| day_name | Short Text | `Monday` … `Sunday`, for readability in Access. |
+| Day Of Week | Number (LONG) | 1 = Monday … 7 = Sunday, the same convention as `Availability.[Day Of Week]`. The scheduler matches on this column, never on `day_name`. |
+| opening_time | Date/Time | Time-of-day only (`1899-12-30 HH:MM`), like `Availability.avail_start`. |
+| closing_time | Date/Time | Same. Later than `opening_time`. |
+
+**Semantics:** weekday `W` is open iff a row with `[Day Of Week] = W`
+exists; if several exist, the largest `ID` wins. On an open day the
+row's `opening_time` / `closing_time` replace the plan rules'
+`earliest_time_in` / `latest_time_out` (the hard day bounds). A closed
+weekday is blank like a non-authorized weekday; the debug CSV says
+`Center closed on Sundays`. Implementation:
+[monthly_schedule/center_calendar.py](../monthly_schedule/center_calendar.py).
+
 ### Codes
 
 Lookup table mapping each health plan to its billing codes. Read by
@@ -331,12 +369,13 @@ workbook).
 
 1. **Enrollment.** Find an Enrollment row covering `D`. None → ineligible.
 2. **Authorization period.** Find an Authorization row where `effective_start <= D <= effective_end`. None → ineligible.
-3. **Authorized weekday.** That row's `auth_days` must contain `D.isoweekday()`. Otherwise → ineligible.
-4. **One-off override.** If a OneOffAvailability row exists for `D`, its window replaces steps 5–6's absence and availability lookups (a duplicate one-off or a one-off overlapping an Absence is a hard error — see the OneOffAvailability section). Otherwise:
-5. **Absence.** If any Absence row covers `D` → ineligible.
-6. **Availability.** Look up the Availability row matching (`Center ID`, `Day Of Week`, `effective_start_date <= D <= effective_end_date (or NULL)`). No row → eligible with the plan's full day bounds.
-7. **Placement window.** Clip the availability window (recurring or one-off) to the plan's hard day bounds, and for recurring rows reserve the transport lead/tail when the plan's `pickup_by_avail_start` / `dropoff_by_avail_end` rules apply (one-off rows are exempt). If the resulting window can't fit the plan's minimum session length, day → ineligible.
-8. Otherwise → eligible. Generate times.
+3. **Center open.** `D` must not be a Holiday, and `D`'s weekday must have an OperatingDays row. Otherwise → ineligible (blank, not an absence — see the Holidays/OperatingDays sections above).
+4. **Authorized weekday.** That row's `auth_days` must contain `D.isoweekday()`. Otherwise → ineligible.
+5. **One-off override.** If a OneOffAvailability row exists for `D`, its window replaces steps 6–7's absence and availability lookups (a duplicate one-off or a one-off overlapping an Absence is a hard error — see the OneOffAvailability section). Otherwise:
+6. **Absence.** If any Absence row covers `D` → ineligible.
+7. **Availability.** Look up the Availability row matching (`Center ID`, `Day Of Week`, `effective_start_date <= D <= effective_end_date (or NULL)`). No row → eligible with the plan's full day bounds.
+8. **Placement window.** Clip the availability window (recurring or one-off) to the day's hard bounds (the OperatingDays row's `opening_time`/`closing_time`, or the plan rules' fallback if no row applies), and for recurring rows reserve the transport lead/tail when the plan's `pickup_by_avail_start` / `dropoff_by_avail_end` rules apply (one-off rows are exempt). If the resulting window can't fit the plan's minimum session length, day → ineligible.
+9. Otherwise → eligible. Generate times.
 
 If a member is ineligible for *every* day in the month for a
 structural reason, the member is skipped and reported in the

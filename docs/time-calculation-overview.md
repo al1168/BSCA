@@ -41,20 +41,25 @@ override (`get_rules_for_plan`). Current `Default` values:
 | `morning_window_min` | 180 min | Morning band length in minutes measured from `earliest_time_in`; the cutoff for Time-In. |
 | `morning_members` / `afternoon_members` | (empty) | `center_id`s pinned to a band, bypassing the hash (morning wins if an id is somehow in both). |
 
-The earliest/latest bounds and the session length are editable in
-**Settings → Scheduling Rules**; availability further narrows them per
-day.
+The session length is editable in **Settings → Scheduling Rules**. The
+earliest/latest bounds themselves come from the database's
+`OperatingDays` table, one row per open weekday (edited through the
+Members app's Company Calendar dialog; default 08:00–16:00) — the
+08:00/16:00 values above are only the `rules.py` fallback used when no
+`OperatingDays` row applies. See
+[docs/database.md#operatingdays](database.md#operatingdays).
+Availability further narrows the bounds per day.
 
 ## 3. Generating one day (`daily_schedule.build_daily_schedule`)
 
 The attendance block (**Time-In → Time-Out**) is the anchor; the
 transport times are derived around it. The day is given a **placement
-window** `(in_lo, out_hi)` — the 08:00–16:00 day bounds intersected
-with the member's availability — minus the drop-off reserve (max drift
-+ drive time + max buffer) on `out_hi` when `dropoff_by_avail_end`
-applies, plus the same-sized pick-up reserve on `in_lo` when
-`pickup_by_avail_start` applies (just 08:00–16:00 when there is no
-availability rule).
+window** `(in_lo, out_hi)` — the day's `OperatingDays` bounds (default
+08:00–16:00) intersected with the member's availability — minus the
+drop-off reserve (max drift + drive time + max buffer) on `out_hi`
+when `dropoff_by_avail_end` applies, plus the same-sized pick-up
+reserve on `in_lo` when `pickup_by_avail_start` applies (just the
+`OperatingDays` bounds when there is no availability rule).
 
 1. **Length** = random minute count in `session_length_min` (210–240),
    capped to `out_hi − in_lo` so it can't exceed the free time.

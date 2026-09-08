@@ -101,14 +101,17 @@ bitness.
 
 ## Database schema
 
-The scheduler reads from five Access tables: `Contacts` plus the four
-supporting tables `Enrollment`, `Authorization`, `Absences`, and
-`Availability`. A member gets scheduled when an Enrollment row covers
-the month, an Authorization row's effective window covers the target
-date and lists the right weekday, no Absence row blocks that day, and
-any Availability rule for that weekday leaves a wide-enough arrival
-window. See [`docs/database.md`](docs/database.md) for the full schema
-reference and per-day eligibility flow.
+The scheduler reads from `Contacts`, the per-member tables
+`Enrollment`, `Authorization`, `Absences`, `Availability` and
+`OneOffAvailability`, and the center-wide `Holidays` and
+`OperatingDays` tables. A member gets scheduled when an Enrollment row
+covers the month, an Authorization row's effective window covers the
+target date and lists the right weekday, no Absence row blocks that
+day, any Availability rule for that weekday leaves a wide-enough
+arrival window, and the center is open that day (not a holiday, and
+the weekday has an `OperatingDays` row, whose opening and closing
+times are the day's bounds). See [`docs/database.md`](docs/database.md)
+for the full schema reference and per-day eligibility flow.
 
 ## Testing the GUI safely
 

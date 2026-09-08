@@ -26,9 +26,9 @@ flowchart TD
     E -- No --> F{Absent<br/>on this day?}
     F -- Yes --> X6[/Ineligible: absent/]
     F -- No --> G{Recurring<br/>Availability row<br/>for this weekday?}
-    G -- No --> Y1([Eligible — open day: use the<br/>08:00–16:00 bounds])
+    G -- No --> Y1([Eligible — open day: use the<br/>weekday's OperatingDays bounds])
     G -- Yes --> H
-    H --> I{Day bounds 08:00-16:00<br/>intersected with avail,<br/>minus drop-off reserve when<br/>avail ends early — at least<br/>3h30m wide?}
+    H --> I{Day bounds from OperatingDays<br/>intersected with avail,<br/>minus drop-off reserve when<br/>avail ends early — at least<br/>3h30m wide?}
     I -- No --> X7[/Ineligible: availability window too narrow/]
     I -- Yes --> Y2([Eligible — placement window<br/>clipped to availability])
 
@@ -72,9 +72,8 @@ is one or the other.
 |---|---|
 | `avail_start` | The earliest clock time the member can **start the visit** (earliest allowed Time-In) on days this availability row applies. It does not limit Pick-Up/Arrival — those may fall slightly before it, since they are derived backwards from Time-In. |
 | `avail_end` | The latest clock time the member's visit can **end** (latest allowed Time-Out) on those days. Departure/Drop-Off may fall slightly after it. |
-| `earliest_time_in` (default 08:00) | Program-wide hard floor: Time-In may never be earlier than this, no matter how early `avail_start` is. Editable in **Settings → Scheduling Rules**. |
-| `latest_time_out` (default 16:00) | Program-wide hard ceiling: Time-Out may never be later than this, no matter how late `avail_end` runs. |
-| **Placement window** `(in_lo, out_hi)` | The overlap of the two pairs above: `in_lo = max(earliest_time_in, avail_start)`, `out_hi = min(latest_time_out, avail_end)`. With **Drop off by availability end** on (the default), a recurring availability ending before 16:00 further lowers `out_hi` by the drop-off reserve. The whole attendance block (Time-In → Time-Out) must fit inside it. If the member has no availability row, the window is simply 08:00–16:00 (an "open day"). |
+| `earliest_time_in` / `latest_time_out` | The day's hard floor/ceiling: Time-In may never be earlier than `earliest_time_in`, Time-Out never later than `latest_time_out`, no matter what `avail_start`/`avail_end` say. These come from the database's `OperatingDays` row for the day's weekday (`opening_time`/`closing_time`) — see [docs/database.md](database.md#operatingdays); a weekday with no row is closed (see `Holidays`/`OperatingDays`). `rules.py` still defines 08:00/16:00, but only as the fallback used if no `OperatingDays` row applies. |
+| **Placement window** `(in_lo, out_hi)` | The overlap of the two pairs above: `in_lo = max(earliest_time_in, avail_start)`, `out_hi = min(latest_time_out, avail_end)`. With **Drop off by availability end** on (the default), a recurring availability ending before `latest_time_out` further lowers `out_hi` by the drop-off reserve. The whole attendance block (Time-In → Time-Out) must fit inside it. If the member has no availability row, the window is simply the day's `OperatingDays` bounds (an "open day"). |
 | **Drop-off reserve** | Minutes subtracted from an early `avail_end` so the whole ride home fits before home care starts: max Time-Out drift (2) + drive time + max travel buffer (5). Applies only to recurring availability, only when the **Drop off by availability end** checkbox (Settings → Scheduling Rules, on by default) is checked. Guarantees Drop-Off ≤ `avail_end`. One-off rows are exempt. |
 | `session_length_min` (default 210–240) | The allowed visit length in minutes, measured Time-In → Time-Out. A day is only eligible if its placement window is at least the minimum (3 h 30 m) wide. |
 

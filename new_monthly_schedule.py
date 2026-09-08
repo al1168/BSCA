@@ -341,8 +341,8 @@ def process_member(member, ctx, year, month, out_dir,
     of the month is scheduled. When `time_cache` is supplied, daily
     times are reused across runs (idempotency for partial schedules).
     `schedule_rules_overrides` is the user's settings-configured rules
-    (earliest_time_in, latest_time_out, session_length_min,
-    travel_buffer_min, etc.) that replace the built-in defaults.
+    (session_length_min, travel_buffer_min, etc.) that replace the
+    built-in defaults.
     `on_rows(rows, auth_weekdays)` is called only after the workbook is
     written successfully, so callers (the All-Members billing sheet)
     see exactly the members that actually received a timesheet.
