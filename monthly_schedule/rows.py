@@ -3,10 +3,11 @@
 from monthly_schedule.auth_days import (
     get_authorized_weekdays, format_auth_days,
 )
+from monthly_schedule.center_calendar import CenterCalendar, DAY_NAME
 from monthly_schedule.month_dates import get_month_dates
 from monthly_schedule.per_day import (
     compute_day_eligibility, OneOffConflict, REASON_DAY_ABSENT,
-    REASON_DAY_NOT_ENROLLED, REASON_DAY_NO_AUTH,
+    REASON_DAY_CENTER_CLOSED, REASON_DAY_NOT_ENROLLED, REASON_DAY_NO_AUTH,
     REASON_DAY_WRONG_WEEKDAY, REASON_DAY_WINDOW_TOO_NARROW,
 )
 from monthly_schedule.daily_schedule import build_daily_schedule
@@ -14,15 +15,13 @@ from monthly_schedule.rules import parse_hhmm, format_minutes, band_for_member
 from monthly_schedule.time_cache import lookup_times, store_times
 
 DAY_ABBR = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun"}
-DAY_NAME = {1: "Monday", 2: "Tuesday", 3: "Wednesday", 4: "Thursday",
-            5: "Friday", 6: "Saturday", 7: "Sunday"}
 TIME_KEYS = ("pickup", "arrival", "time_in", "time_out", "departure", "dropoff")
 
 
 def build_rows(year, month, ctx, plan_rules, rng,
                start_day=None, end_day=None,
                time_cache=None, center_id=None,
-               plan=None, travel_minutes=None):
+               plan=None, travel_minutes=None, calendar=None):
     """Return a list of row dicts (one per calendar day in the requested
     range — defaults to the full month).
 
@@ -48,20 +47,33 @@ def build_rows(year, month, ctx, plan_rules, rng,
 
     Time-In placement honors the member's morning/afternoon band
     (band_for_member) when the feature is enabled; cached days are
-    reused verbatim regardless of band."""
+    reused verbatim regardless of band.
+
+    `calendar` (CenterCalendar) supplies holidays, closed weekdays and
+    per-weekday day bounds; None means always open with the plan's
+    bounds."""
     rows = []
     use_cache = (
         time_cache is not None and center_id is not None
         and plan is not None and travel_minutes is not None
     )
-    plan_default_window = (
-        parse_hhmm(plan_rules["earliest_time_in"]),
-        parse_hhmm(plan_rules["latest_time_out"]),
-    )
+    if calendar is None:
+        calendar = CenterCalendar.always_open()
     band = band_for_member(center_id, plan_rules)
     for day in get_month_dates(year, month, start_day, end_day):
+        # Per-weekday day bounds from OperatingDays (or the plan's own
+        # when the calendar carries none). Everything below — the
+        # eligibility window, the generator, the cache guard — reads
+        # these rules, so a changed opening time invalidates only that
+        # weekday's cached times.
+        day_rules = calendar.rules_for(day, plan_rules)
+        plan_default_window = (
+            parse_hhmm(day_rules["earliest_time_in"]),
+            parse_hhmm(day_rules["latest_time_out"]),
+        )
         row = {"date": day, "day": DAY_ABBR[day.isoweekday()]}
-        result = compute_day_eligibility(day, ctx, plan_rules)
+        result = compute_day_eligibility(day, ctx, day_rules,
+                                         calendar=calendar)
         if result.eligible:
             effective_window = (
                 result.placement_window
@@ -76,7 +88,7 @@ def build_rows(year, month, ctx, plan_rules, rng,
                 )
             if times is None:
                 times = build_daily_schedule(
-                    plan_rules, rng,
+                    day_rules, rng,
                     window=result.placement_window,
                     band=band,
                 )
@@ -129,13 +141,15 @@ def _reason_detail(reason, availability, reserve, in_lo, out_hi,
     return "; ".join(notes)
 
 
-def _simple_reason(reason, day, authorized, absence, availability):
+def _simple_reason(reason, day, authorized, absence, availability,
+                   closed=None):
     """One plain-English sentence for the debug CSV `reason` column.
 
     `authorized` is the weekday set from the day's authorization (empty
     set when there is none), `absence` the Absences row covering the day
     (or None), `availability` the effective HH:MM-HH:MM window ('' when
-    none applies)."""
+    none applies). `closed` is the calendar's `closed_reason` tuple for
+    the day (or None)."""
     if reason == REASON_DAY_NOT_ENROLLED:
         return "Not enrolled at the center on this day"
     if reason == REASON_DAY_NO_AUTH:
@@ -154,6 +168,12 @@ def _simple_reason(reason, day, authorized, absence, availability):
             return (f"Available time ({availability}) is too short "
                     "to fit a session")
         return "Available time is too short to fit a session"
+    if reason == REASON_DAY_CENTER_CLOSED:
+        if closed is not None and closed[0] == "holiday":
+            name = closed[1]
+            return (f"Center closed ({name})" if name
+                    else "Center closed (holiday)")
+        return f"Center closed on {DAY_NAME[day.isoweekday()]}s"
     return reason
 
 
@@ -167,7 +187,8 @@ def _simple_conflict_reason(detail):
 
 
 def build_debug_rows(year, month, ctx, plan_rules,
-                     start_day=None, end_day=None, center_id=None):
+                     start_day=None, end_day=None, center_id=None,
+                     calendar=None):
     """Diagnostic rows for the debug CSV (one per calendar day).
 
     Every day of the requested range (defaults to the full month,
@@ -194,10 +215,18 @@ def build_debug_rows(year, month, ctx, plan_rules,
     is caught per-day — its simple sentence goes in `reason` and its
     detailed sentence (with the Access row IDs) in `reason_detail` — so
     the CSV always completes even when the schedule build itself fails.
+
+    `calendar` (CenterCalendar) supplies holidays, closed weekdays and
+    per-weekday day bounds; None means always open with the plan's
+    bounds.
     """
     rows = []
+    if calendar is None:
+        calendar = CenterCalendar.always_open()
     band = band_for_member(center_id, plan_rules) or ""
     for day in get_month_dates(year, month, start_day, end_day):
+        day_rules = calendar.rules_for(day, plan_rules)
+        closed = calendar.closed_reason(day)
         auth = ctx.active_authorization(day)
         authorized = (get_authorized_weekdays(auth["auth_days"])
                       if auth else set())
@@ -220,12 +249,13 @@ def build_debug_rows(year, month, ctx, plan_rules,
 
         conflict_detail = ""
         try:
-            result = compute_day_eligibility(day, ctx, plan_rules)
+            result = compute_day_eligibility(day, ctx, day_rules,
+                                             calendar=calendar)
             scheduled = result.eligible
             raw_reason = None if scheduled else (result.reason or "")
             reason = ("Scheduled" if scheduled
                       else _simple_reason(raw_reason, day, authorized,
-                                          absence, availability))
+                                          absence, availability, closed))
             window = result.placement_window
             reserve = result.dropoff_reserve
             pickup_reserve = result.pickup_reserve
@@ -242,19 +272,19 @@ def build_debug_rows(year, month, ctx, plan_rules,
         # the open-day bounds when no availability rule applies.
         if window is None and scheduled:
             window = (
-                parse_hhmm(plan_rules["earliest_time_in"]),
-                parse_hhmm(plan_rules["latest_time_out"]),
+                parse_hhmm(day_rules["earliest_time_in"]),
+                parse_hhmm(day_rules["latest_time_out"]),
             )
         reason_detail = conflict_detail
         if window is not None:
             in_lo, out_hi = window
             placement = f"{format_minutes(in_lo)}-{format_minutes(out_hi)}"
-            max_len = max(0, min(plan_rules["session_length_min"][1],
+            max_len = max(0, min(day_rules["session_length_min"][1],
                                  out_hi - in_lo))
             max_length = format_minutes(max_len)
             reason_detail = _reason_detail(
                 raw_reason, availability, reserve, in_lo, out_hi,
-                plan_rules, avail_row, pickup_reserve,
+                day_rules, avail_row, pickup_reserve,
             )
         else:
             placement = ""

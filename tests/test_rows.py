@@ -2,7 +2,8 @@ import random
 from datetime import date
 
 from monthly_schedule.eligibility_context import MemberContext
-from monthly_schedule.rows import build_rows, build_debug_rows
+from monthly_schedule.center_calendar import CenterCalendar
+from monthly_schedule.rows import build_rows, build_debug_rows, TIME_KEYS
 from monthly_schedule.rules import parse_hhmm, format_minutes
 
 
@@ -867,3 +868,85 @@ def test_debug_rows_band_blank_without_center_id():
     rows = build_debug_rows(2026, 5, _ctx_full_month("1"), PLAN_RULES)
     assert rows
     assert all(r["band"] == "" for r in rows)
+
+
+def _calendar(open_days=(1, 2, 3, 4, 5, 6, 7), holidays=(),
+              opening="08:00", closing="16:00"):
+    return CenterCalendar(
+        [{"id": i + 1, "name": name, "date": day}
+         for i, (name, day) in enumerate(holidays)],
+        [{"id": d, "day_name": "", "day_of_week": d,
+          "opening_time": opening, "closing_time": closing}
+         for d in open_days],
+    )
+
+
+def test_build_rows_holiday_is_blank_and_ineligible():
+    cal = _calendar(holidays=[("Test Holiday", date(2026, 5, 4))])
+    rows = build_rows(2026, 5, _ctx_full_month("1,3,5"), PLAN_RULES,
+                      random.Random(0), calendar=cal)
+    mon = next(r for r in rows if r["date"] == date(2026, 5, 4))
+    assert mon["status"] == "ineligible"
+    assert all(mon[k] == "" for k in TIME_KEYS)
+    wed = next(r for r in rows if r["date"] == date(2026, 5, 6))
+    assert wed["status"] == "attended"
+
+
+def test_build_rows_closed_weekday_is_blank():
+    cal = _calendar(open_days=(2, 4))               # Tue/Thu only
+    rows = build_rows(2026, 5, _ctx_full_month("1,3,5"), PLAN_RULES,
+                      random.Random(0), calendar=cal)
+    assert all(r["status"] == "ineligible" for r in rows)
+
+
+def test_build_rows_uses_weekday_opening_and_closing():
+    cal = _calendar(opening="09:30", closing="15:00")
+    rows = build_rows(2026, 5, _ctx_full_month("1,3,5"), PLAN_RULES,
+                      random.Random(1), calendar=cal)
+    attended = [r for r in rows if r["status"] == "attended"]
+    assert attended
+    for r in attended:
+        assert _to_min(r["time_in"]) >= _to_min("09:30")
+        assert _to_min(r["time_out"]) <= _to_min("15:00")
+
+
+def test_build_rows_cache_regenerates_when_hours_change():
+    """A cached day generated under 08:00 bounds must not be reused
+    once that weekday opens at 12:00."""
+    ctx = _ctx_full_month("1,3,5")
+    cache = {}
+    build_rows(2026, 5, ctx, PLAN_RULES, random.Random(0),
+               time_cache=cache, center_id=1, plan="HF", travel_minutes=10,
+               calendar=_calendar(opening="08:00"))
+    rows = build_rows(2026, 5, ctx, PLAN_RULES, random.Random(0),
+                      time_cache=cache, center_id=1, plan="HF",
+                      travel_minutes=10, calendar=_calendar(opening="12:00"))
+    for r in rows:
+        if r["status"] == "attended":
+            assert _to_min(r["time_in"]) >= _to_min("12:00")
+
+
+def test_debug_rows_holiday_sentence():
+    cal = _calendar(holidays=[("Test Holiday", date(2026, 5, 4))])
+    rows = build_debug_rows(2026, 5, _ctx_full_month("1,3,5"), PLAN_RULES,
+                            calendar=cal)
+    mon = next(r for r in rows if r["date"] == date(2026, 5, 4))
+    assert mon["scheduled"] is False
+    assert mon["reason"] == "Center closed (Test Holiday)"
+
+
+def test_debug_rows_closed_weekday_sentence():
+    cal = _calendar(open_days=(2, 4))
+    rows = build_debug_rows(2026, 5, _ctx_full_month("1,3,5"), PLAN_RULES,
+                            calendar=cal)
+    mon = next(r for r in rows if r["date"] == date(2026, 5, 4))
+    assert mon["reason"] == "Center closed on Mondays"
+
+
+def test_debug_rows_open_day_window_uses_weekday_hours():
+    cal = _calendar(opening="09:00", closing="15:00")
+    rows = build_debug_rows(2026, 5, _ctx_full_month("1,3,5"), PLAN_RULES,
+                            calendar=cal)
+    mon = next(r for r in rows if r["date"] == date(2026, 5, 4))
+    assert mon["scheduled"] is True
+    assert mon["placement_window"] == "09:00-15:00"
