@@ -29,6 +29,7 @@ The master member record. One row per member, keyed by `Center ID`.
 | Health Plan | Short Text | Drives the per-plan timing rules in [monthly_schedule/rules.py](../monthly_schedule/rules.py). |
 | Address | Short Text | Member's home address, used for travel-time calculation. |
 | Long Lat | Short Text | Optional pre-computed `lng,lat` pair. When present, the scheduler skips the Google Geocoding call. |
+| Group | Short Text | Free-text member tag typed into the Setup GUI's "Group" box. Added and seeded by [scripts/add_group_to_contacts.py](../scripts/add_group_to_contacts.py); only blank rows are filled, so hand edits survive re-runs. Not read by the scheduler. |
 | ... | | Other administrative fields exist on Contacts but are not consumed by the scheduler. |
 
 **Column-name normalization.** Databases exported from DBM.accdb name

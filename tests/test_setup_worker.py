@@ -14,7 +14,9 @@ def _qapp():
     yield app
 
 
-from setup_gui.setup_worker import SetupWorker, SETUP_STEPS, TERMINATE_STEP
+from setup_gui.setup_worker import (
+    GROUP_STEP_NAME, SetupWorker, SETUP_STEPS, TERMINATE_STEP,
+)
 
 
 def _run_to_completion(worker, timeout_ms=5000):
@@ -57,15 +59,16 @@ def _stub_all_scripts(monkeypatch, return_code=0):
     return mocks
 
 
-def test_setup_steps_constant_lists_fourteen_scripts():
+def test_setup_steps_constant_lists_fifteen_scripts():
     """The SETUP_STEPS constant is the canonical list of (display_name,
-    module_path) tuples for the 14 setup scripts in execution order."""
-    assert len(SETUP_STEPS) == 14
+    module_path) tuples for the 15 setup scripts in execution order."""
+    assert len(SETUP_STEPS) == 15
     names = [name for name, _path in SETUP_STEPS]
     assert names == [
         "normalize_contacts_columns",
         "create_supporting_tables",
         "add_long_lat_to_contacts",
+        "add_group_to_contacts",
         "add_document_to_authorization",
         "add_document_to_transport_authorization",
         "add_created_at_to_authorization",
@@ -298,3 +301,55 @@ def test_also_terminate_appends_terminate_step(tmp_path, monkeypatch):
     ]
     terminate_mock.assert_called_once_with(["--db", str(db_path)])
 
+
+
+def _group_step_index():
+    return [name for name, _ in SETUP_STEPS].index(GROUP_STEP_NAME)
+
+
+def test_group_text_passed_only_to_group_step(tmp_path, monkeypatch):
+    """`group_text="A"` appends `--group A` to the add_group_to_contacts
+    argv and to nothing else."""
+    db_path = tmp_path / "members.accdb"
+    db_path.write_bytes(b"fake")
+    mocks = _stub_all_scripts(monkeypatch, return_code=0)
+
+    worker = SetupWorker(str(db_path), group_text="A")
+    success, _payload = _run_to_completion(worker)
+
+    assert success is True
+    gi = _group_step_index()
+    for i, mock in enumerate(mocks):
+        if i == gi:
+            mock.assert_called_once_with(
+                ["--db", str(db_path), "--group", "A"],
+            )
+        else:
+            mock.assert_called_once_with(["--db", str(db_path)])
+
+
+def test_group_text_is_stripped_and_blank_means_no_flag(
+    tmp_path, monkeypatch,
+):
+    """Whitespace-only group_text behaves like the default: every step,
+    including add_group_to_contacts, gets the plain --db argv. Padded
+    text is stripped before being passed through."""
+    db_path = tmp_path / "members.accdb"
+    db_path.write_bytes(b"fake")
+    gi = _group_step_index()
+
+    mocks = _stub_all_scripts(monkeypatch, return_code=0)
+    success, _ = _run_to_completion(
+        SetupWorker(str(db_path), group_text="   ")
+    )
+    assert success is True
+    mocks[gi].assert_called_once_with(["--db", str(db_path)])
+
+    mocks = _stub_all_scripts(monkeypatch, return_code=0)
+    success, _ = _run_to_completion(
+        SetupWorker(str(db_path), group_text="  Blue ")
+    )
+    assert success is True
+    mocks[gi].assert_called_once_with(
+        ["--db", str(db_path), "--group", "Blue"],
+    )

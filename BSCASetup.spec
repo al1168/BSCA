@@ -25,6 +25,7 @@ a = Analysis(
         'scripts.normalize_contacts_columns',
         'scripts.create_supporting_tables',
         'scripts.add_long_lat_to_contacts',
+        'scripts.add_group_to_contacts',
         'scripts.add_document_to_authorization',
         'scripts.add_document_to_transport_authorization',
         'scripts.add_created_at_to_authorization',

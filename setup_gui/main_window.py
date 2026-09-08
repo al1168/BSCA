@@ -50,6 +50,20 @@ class MainWindow(QWidget):
         picker_row.addWidget(self._browse_btn)
         root.addLayout(picker_row)
 
+        # ── Group label (optional) ────────────────────────────
+        root.addWidget(QLabel("Group (optional):"))
+        self._group_edit = QLineEdit()
+        self._group_edit.setPlaceholderText("e.g. A")
+        self._group_edit.setMaxLength(255)
+        root.addWidget(self._group_edit)
+        group_hint = QLabel(
+            "Written to the new Contacts [Group] column for every "
+            "member that does not already have one."
+        )
+        group_hint.setWordWrap(True)
+        group_hint.setStyleSheet("color: gray;")
+        root.addWidget(group_hint)
+
         # ── Run button ────────────────────────────────────────
         self._run_btn = QPushButton("Run Setup")
         self._run_btn.setFixedHeight(40)
@@ -112,11 +126,14 @@ class MainWindow(QWidget):
         self._run_btn.setEnabled(False)
         self._browse_btn.setEnabled(False)
         self._db_edit.setEnabled(False)
+        self._group_edit.setEnabled(False)
         self._terminate_check.setEnabled(False)
 
         also_terminate = self._terminate_check.isChecked()
+        group_text = self._group_edit.text().strip()
         self._worker = SetupWorker(
             db_path, also_terminate=also_terminate, parent=self,
+            group_text=group_text,
         )
         self._worker.log_line.connect(self._on_log_line)
         self._worker.progress.connect(self._on_progress)
@@ -134,6 +151,7 @@ class MainWindow(QWidget):
         self._run_btn.setEnabled(True)
         self._browse_btn.setEnabled(True)
         self._db_edit.setEnabled(True)
+        self._group_edit.setEnabled(True)
         self._terminate_check.setEnabled(True)
         self._worker = None
 

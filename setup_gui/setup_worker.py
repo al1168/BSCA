@@ -34,6 +34,8 @@ SETUP_STEPS: list[tuple[str, str]] = [
      "scripts.create_supporting_tables"),
     ("add_long_lat_to_contacts",
      "scripts.add_long_lat_to_contacts"),
+    ("add_group_to_contacts",
+     "scripts.add_group_to_contacts"),
     ("add_document_to_authorization",
      "scripts.add_document_to_authorization"),
     ("add_document_to_transport_authorization",
@@ -57,6 +59,13 @@ SETUP_STEPS: list[tuple[str, str]] = [
     ("backfill_emergency_contacts_from_contacts",
      "scripts.backfill_emergency_contacts_from_contacts"),
 ]
+
+
+# The one step that takes an extra argument. When the worker's
+# `group_text` is non-blank, this step is called with
+# `["--db", path, "--group", group_text]`; every other step (and this
+# one with blank text) gets the plain `["--db", path]`.
+GROUP_STEP_NAME = "add_group_to_contacts"
 
 
 # Optional opt-in step. Same shape as the SETUP_STEPS tuples; the
@@ -86,10 +95,18 @@ class SetupWorker(QThread):
 
     def __init__(
         self, db_path: str, also_terminate: bool = False, parent=None,
+        group_text: str = "",
     ):
         super().__init__(parent)
         self._db_path = db_path
         self._also_terminate = also_terminate
+        self._group_text = (group_text or "").strip()
+
+    def _argv_for(self, step_name: str) -> list[str]:
+        argv = ["--db", self._db_path]
+        if step_name == GROUP_STEP_NAME and self._group_text:
+            argv += ["--group", self._group_text]
+        return argv
 
     def run(self):
         steps = list(SETUP_STEPS)
@@ -120,7 +137,7 @@ class SetupWorker(QThread):
                 # module object's attributes.
                 module = importlib.import_module(module_path)
                 with contextlib.redirect_stdout(buf):
-                    rc = module.main(["--db", self._db_path])
+                    rc = module.main(self._argv_for(name))
                 buf.flush()
             except Exception as exc:
                 buf.flush()
