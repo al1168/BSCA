@@ -529,6 +529,13 @@ def test_map_operating_day_row():
     }
 
 
+def test_holidays_query_is_ordered_by_id():
+    # CenterCalendar keeps the first row for a duplicated date, so the
+    # fetch has to hand it the rows in a fixed order.
+    from monthly_schedule.db import HOLIDAYS_QUERY
+    assert HOLIDAYS_QUERY.endswith("ORDER BY [ID]")
+
+
 def test_get_holidays_missing_db_raises(tmp_path):
     from monthly_schedule.db import get_holidays
     with pytest.raises(FileNotFoundError):

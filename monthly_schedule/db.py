@@ -431,7 +431,11 @@ def get_all_one_offs(db_path: str) -> dict:
     return _index_by_center_id(rows)
 
 
-HOLIDAYS_QUERY = "SELECT [ID], [holiday_name], [date] FROM [Holidays]"
+# Ordered by ID so the "first row wins" tie-break CenterCalendar
+# applies to duplicate dates is the same on every run.
+HOLIDAYS_QUERY = (
+    "SELECT [ID], [holiday_name], [date] FROM [Holidays] ORDER BY [ID]"
+)
 
 
 def map_holiday_row(row):
