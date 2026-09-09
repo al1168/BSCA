@@ -17,6 +17,23 @@ DAY_NAME = {1: "Monday", 2: "Tuesday", 3: "Wednesday", 4: "Thursday",
             5: "Friday", 6: "Saturday", 7: "Sunday"}
 
 
+def _is_usable(row) -> bool:
+    """True when an OperatingDays row can actually open a weekday: a
+    real weekday number and a non-empty opening time strictly before a
+    non-empty closing time. Zero-padded 'HH:MM' strings compare in
+    clock order, so no parsing is needed."""
+    if row.get("day_of_week") not in DAY_NAME:
+        return False
+    opening = row.get("opening_time")
+    closing = row.get("closing_time")
+    if not isinstance(opening, str) or not isinstance(closing, str):
+        return False
+    opening, closing = opening.strip(), closing.strip()
+    if not opening or not closing:
+        return False
+    return closing > opening
+
+
 class CenterCalendar:
     def __init__(self, holidays=(), operating_days=None):
         """`holidays`: dicts from db.get_holidays ({id, name, date}).
@@ -24,7 +41,10 @@ class CenterCalendar:
         day_of_week, opening_time, closing_time, ...}) or None for
         "no weekday information" (every weekday open, rules untouched).
         An empty list means every weekday is closed — that is what the
-        table says when staff uncheck all seven days."""
+        table says when staff uncheck all seven days.
+
+        A row with a missing or inverted time is ignored, so that
+        weekday is closed — loud and blank beats quiet and wrong."""
         self._holidays = {}
         for row in holidays:
             day = row.get("date")
@@ -39,6 +59,8 @@ class CenterCalendar:
             # the newest (largest ID) wins.
             self._days = {}
             for row in operating_days:
+                if not _is_usable(row):
+                    continue
                 dow = row["day_of_week"]
                 current = self._days.get(dow)
                 if current is None or row["id"] > current["id"]:

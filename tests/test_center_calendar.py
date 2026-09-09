@@ -83,3 +83,46 @@ def test_duplicate_holiday_dates_first_row_wins():
         [{"id": 1, "name": "A", "date": MON}, {"id": 2, "name": "B", "date": MON}],
         ALL_WEEK)
     assert cal.closed_reason(MON) == ("holiday", "A")
+
+
+def test_row_with_null_times_is_ignored():
+    rows = _open(1)
+    rows[0]["opening_time"] = None
+    rows[0]["closing_time"] = None
+    cal = CenterCalendar([], rows)
+    assert cal.closed_reason(MON) == ("weekday", None)
+    assert cal.rules_for(MON, PLAN_RULES) is PLAN_RULES
+
+
+def test_row_with_inverted_times_is_ignored():
+    cal = CenterCalendar([], _open(1, opening="16:00", closing="08:00"))
+    assert cal.closed_reason(MON) == ("weekday", None)
+
+
+def test_row_with_equal_times_is_ignored():
+    cal = CenterCalendar([], _open(1, opening="08:00", closing="08:00"))
+    assert cal.closed_reason(MON) == ("weekday", None)
+
+
+def test_row_with_out_of_range_weekday_is_ignored():
+    rows = _open(1)
+    rows[0]["day_of_week"] = 8
+    cal = CenterCalendar([], rows)
+    assert cal.closed_reason(MON) == ("weekday", None)
+
+
+def test_invalid_duplicate_does_not_beat_a_valid_row():
+    # The bad row has the larger ID, but invalid rows are dropped before
+    # the largest-ID pick, so Monday stays open on its good row.
+    rows = _open(1, opening="09:00", closing="15:00")
+    rows += _open(1, opening="16:00", closing="08:00", first_id=9)
+    cal = CenterCalendar([], rows)
+    assert cal.closed_reason(MON) is None
+    assert cal.rules_for(MON, PLAN_RULES)["earliest_time_in"] == "09:00"
+
+
+def test_valid_duplicate_with_larger_id_still_wins():
+    rows = _open(1, opening="16:00", closing="08:00")
+    rows += _open(1, opening="10:00", closing="14:00", first_id=9)
+    cal = CenterCalendar([], rows)
+    assert cal.rules_for(MON, PLAN_RULES)["earliest_time_in"] == "10:00"
