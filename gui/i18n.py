@@ -350,7 +350,7 @@ STRINGS: dict[str, dict[str, str]] = {
             "If Microsoft Office (64-bit) is already installed, contact "
             "your IT support."
         ),
-        "errors.db_generic": "Could not connect to the database:\n\n{message}",
+        "errors.db_generic": "Database error:\n\n{message}",
     },
     "zh": {
         # app
@@ -658,7 +658,7 @@ STRINGS: dict[str, dict[str, str]] = {
             "  3. 重启此应用程序\n\n"
             "如果已安装 Microsoft Office (64 位)，请联系您的 IT 支持。"
         ),
-        "errors.db_generic": "无法连接到数据库：\n\n{message}",
+        "errors.db_generic": "数据库错误：\n\n{message}",
     },
 }
 
