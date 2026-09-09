@@ -17,6 +17,8 @@ import sys
 from datetime import datetime
 
 
+# Standalone copy of center_calendar.DAY_NAME: the Setup exe bundles
+# scripts/ but not monthly_schedule/.
 DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
              "Saturday", "Sunday")
 
