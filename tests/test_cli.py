@@ -132,6 +132,19 @@ def test_driver_error_returns_1(monkeypatch, capsys):
     assert "Could not open the Access database" in capsys.readouterr().err
 
 
+def test_missing_calendar_table_returns_1(monkeypatch, capsys):
+    # The Setup step that creates OperatingDays never ran: the run must
+    # stop with the driver's own message rather than a traceback.
+    def _raise(db):
+        raise RuntimeError(
+            "cannot find the input table or query 'OperatingDays'")
+    monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
+    monkeypatch.setattr(cli, "get_operating_days", _raise)
+    rc = cli.main(["--center-id", "24010", "--year", "2026", "--month", "5"])
+    assert rc == 1
+    assert "OperatingDays" in capsys.readouterr().err
+
+
 def test_main_reads_sys_argv_when_argv_none(monkeypatch, tmp_path):
     """Exercises the argv is None branch (real CLI invocation path)."""
     monkeypatch.setattr(cli, "get_member", lambda cid, db: FAKE_MEMBER)
