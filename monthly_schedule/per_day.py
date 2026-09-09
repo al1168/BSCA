@@ -16,6 +16,7 @@ REASON_ABSENT_MONTH = "absent for the entire month"
 REASON_NO_ELIGIBLE_DAYS = (
     "no day is both enrolled and authorized this month"
 )
+REASON_CENTER_CLOSED_MONTH = "the center is closed every day in this range"
 
 # Per-day rejection reasons surfaced by compute_day_eligibility().
 # Stable strings so the debug CSV and i18n table can key off them.
@@ -261,7 +262,9 @@ def compute_month_failure(year: int, month: int, ctx,
     """Return a whole-member failure reason string for the requested
     range (defaults to the full month), or None if the member has at
     least one eligible day in that range. Days the center is closed
-    (per `calendar`) count as unschedulable, like wrong weekdays."""
+    (per `calendar`) count as unschedulable, like wrong weekdays; when
+    closures alone empty the range the reason says so, so staff look at
+    the calendar rather than hunting for an enrollment problem."""
     days = list(get_month_dates(year, month, start_day, end_day))
 
     if not any(ctx.is_enrolled(d) for d in days):
@@ -269,11 +272,13 @@ def compute_month_failure(year: int, month: int, ctx,
     if not any(ctx.active_authorization(d) is not None for d in days):
         return REASON_NO_AUTH
 
-    # A day is schedulable only when the member is enrolled AND an
-    # authorization covers it AND its weekday is authorized. Track that
-    # separately from the absence blanket so a member whose enrolled
-    # days never coincide with authorized days (an all-blank sheet) is
-    # skipped with its own reason instead of slipping through.
+    # A day the member could attend needs enrollment AND an
+    # authorization covering it AND an authorized weekday; a schedulable
+    # day is such a day the center is also open. Tracking the two apart
+    # (and both apart from the absence blanket) gives each blank sheet
+    # the reason that names its actual cause: an all-blank auth sheet,
+    # the center's calendar, or a month-long absence.
+    has_attendable = False
     has_schedulable = False
     has_unblocked = False
     for d in days:
@@ -282,9 +287,10 @@ def compute_month_failure(year: int, month: int, ctx,
         auth = ctx.active_authorization(d)
         if auth is None:
             continue
-        if calendar is not None and calendar.is_closed(d):
-            continue
         if d.isoweekday() not in get_authorized_weekdays(auth["auth_days"]):
+            continue
+        has_attendable = True
+        if calendar is not None and calendar.is_closed(d):
             continue
         has_schedulable = True
         if ctx.is_absent(d):
@@ -292,8 +298,10 @@ def compute_month_failure(year: int, month: int, ctx,
         has_unblocked = True
         break
 
-    if not has_schedulable:
+    if not has_attendable:
         return REASON_NO_ELIGIBLE_DAYS
+    if not has_schedulable:
+        return REASON_CENTER_CLOSED_MONTH
     if not has_unblocked:
         return REASON_ABSENT_MONTH
 

@@ -45,6 +45,7 @@ from monthly_schedule.per_day import (
     REASON_NO_AUTH,
     REASON_ABSENT_MONTH,
     REASON_NO_ELIGIBLE_DAYS,
+    REASON_CENTER_CLOSED_MONTH,
 )
 
 
@@ -105,6 +106,8 @@ def _translate_reason(reason: str, detail: dict = None) -> str:
         return tr("summary.reason.absent_month")
     if reason == REASON_NO_ELIGIBLE_DAYS:
         return tr("summary.reason.no_eligible_days")
+    if reason == REASON_CENTER_CLOSED_MONTH:
+        return tr("summary.reason.center_closed_month")
     return reason
 
 

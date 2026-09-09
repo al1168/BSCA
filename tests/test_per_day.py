@@ -781,11 +781,33 @@ def test_open_day_with_calendar_is_eligible():
 
 
 def test_month_failure_when_authorized_weekdays_all_closed():
-    from monthly_schedule.per_day import REASON_NO_ELIGIBLE_DAYS
+    # Mon/Wed/Fri member, Tue/Thu center: every day this member could
+    # attend is a closed day, which is a calendar problem, not an
+    # enrollment one.
+    from monthly_schedule.per_day import REASON_CENTER_CLOSED_MONTH
     cal = CenterCalendar([], _open_days(2, 4))
     failure = compute_month_failure(
         2026, 5, _ctx(authorized="1,3,5"), calendar=cal)
-    assert failure == REASON_NO_ELIGIBLE_DAYS
+    assert failure == REASON_CENTER_CLOSED_MONTH
+
+
+def test_month_failure_when_center_closed_every_day():
+    from monthly_schedule.per_day import REASON_CENTER_CLOSED_MONTH
+    cal = CenterCalendar([], [])            # no weekday is open at all
+    failure = compute_month_failure(
+        2026, 5, _ctx(authorized="1,3,5"), calendar=cal)
+    assert failure == REASON_CENTER_CLOSED_MONTH
+
+
+def test_month_failure_no_authorized_weekday_beats_closed_reason():
+    # The authorization covers the month but names no weekday, so there
+    # is no day the closure could even apply to → still the enrollment
+    # /authorization reason, not the calendar one.
+    from monthly_schedule.per_day import REASON_NO_ELIGIBLE_DAYS
+    cal = CenterCalendar([], _open_days(2, 4))
+    ctx = _window_ctx(date(2026, 5, 1), None, auth_days="")
+    assert compute_month_failure(
+        2026, 5, ctx, calendar=cal) == REASON_NO_ELIGIBLE_DAYS
 
 
 def test_month_failure_none_when_calendar_open():

@@ -309,6 +309,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "summary.reason.no_eligible_days": (
             "no day is both enrolled and authorized this month"
         ),
+        "summary.reason.center_closed_month": (
+            "the center is closed every day in this range"
+        ),
         # One-off conflicts. Built from the structured detail on the
         # failure rather than a fixed string, so the message can name
         # both offending records. Keep in step with
@@ -620,6 +623,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "summary.reason.no_auth": "本月无有效授权",
         "summary.reason.absent_month": "整月缺席",
         "summary.reason.no_eligible_days": "本月没有同时在册且有授权的日子",
+        "summary.reason.center_closed_month": "本时段内中心每天都关闭",
         # 一次性可用时段冲突。leave_type 是数据库中的自由文本
         # （例如 Vacation），照原样显示。
         "summary.reason.one_off_absence": (

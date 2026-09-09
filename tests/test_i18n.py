@@ -60,6 +60,22 @@ def test_no_eligible_days_reason_key_present_in_both_languages():
     assert "summary.reason.no_eligible_days" in STRINGS["zh"]
 
 
+def test_center_closed_month_reason_key_present_in_both_languages():
+    from gui.i18n import STRINGS
+    assert "summary.reason.center_closed_month" in STRINGS["en"]
+    assert "summary.reason.center_closed_month" in STRINGS["zh"]
+
+
+def test_translate_reason_center_closed_month():
+    from gui import i18n
+    from gui.main_window import _translate_reason
+    from monthly_schedule.per_day import REASON_CENTER_CLOSED_MONTH
+    i18n.set_language("zh")
+    assert _translate_reason(REASON_CENTER_CLOSED_MONTH) == (
+        i18n.STRINGS["zh"]["summary.reason.center_closed_month"]
+    )
+
+
 def test_translate_reason_no_eligible_days():
     from gui import i18n
     from gui.main_window import _translate_reason
