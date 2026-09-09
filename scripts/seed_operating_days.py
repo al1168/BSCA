@@ -17,8 +17,9 @@ import sys
 from datetime import datetime
 
 
-# Standalone copy of center_calendar.DAY_NAME: the Setup exe bundles
-# scripts/ but not monthly_schedule/.
+# Deliberate standalone copy of monthly_schedule.center_calendar.DAY_NAME:
+# this script must run on its own (python scripts/seed_operating_days.py)
+# without importing monthly_schedule.
 DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
              "Saturday", "Sunday")
 
