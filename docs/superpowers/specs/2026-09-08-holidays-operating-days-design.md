@@ -30,6 +30,12 @@ this document covers the tables, the Setup chain, and the scheduler.
 - **A weekday with no OperatingDays row is closed.** The table holds at
   most one row per weekday. "Deleting the day" in the dialog removes the
   row.
+- **Data hygiene: unusable rows read as closed.** An OperatingDays row
+  with a missing time, or a closing time at or before its opening time,
+  is ignored, so that weekday is closed rather than generating sessions
+  outside the center's hours. A range where every attendable day is
+  closed gets its own skip reason, so staff look at the calendar
+  instead of hunting for an enrollment problem.
 - **Missing tables fail the run**, exactly like the other supporting
   tables. Re-running the Setup GUI (idempotent) creates them. The
   Members app lists them in its startup schema warning.
@@ -99,7 +105,7 @@ Both use `_fetch_all_unfiltered`. A missing table raises the same
 ```python
 class CenterCalendar:
     def __init__(self, holidays, operating_days): ...
-    def closed_reason(self, day) -> str | None
+    def closed_reason(self, day) -> tuple | None
     def rules_for(self, day, plan_rules) -> dict
 ```
 
@@ -173,13 +179,13 @@ days once per run, build one `CenterCalendar`, and pass it to
 `gui/settings_dialog.py` drops the earliest Time-In and latest Time-Out
 rows; `gui/app_settings.py` drops the two keys from the default
 `schedule_rules`. Old settings files that still contain them load fine:
-`get_rules_for_plan` still merges them, and the calendar overrides them
-per day. The i18n table entries for the two labels are removed.
+the loader drops unknown rule keys. The i18n table entries for the two
+labels are removed.
 
 ### 2g. Test DB scaffold
 
-`scripts/make_test_db.py` creates both tables (through the shared
-`_DDLS`) and seeds the seven default OperatingDays rows in every
+`scripts/make_test_db.py` creates both tables (importing the two DDL
+constants) and seeds the seven default OperatingDays rows in every
 scenario, so GUI scenario runs behave as before. `seed_happy_path`
 additionally adds one holiday on a weekday inside the target month so
 the scenario visibly exercises the feature.
