@@ -149,6 +149,111 @@ def _parse_args(argv):
     return p.parse_args(argv)
 
 
+# ---------------------------------------------------------------------------
+# database
+# ---------------------------------------------------------------------------
+
+_ACTIVE_MEMBERS_QUERY = (
+    "SELECT c.[Center ID], c.[Last Name], c.[First Name], "
+    "c.[Health Plan], c.[HHA] "
+    "FROM [Contacts] c "
+    "WHERE c.[Center ID] IN "
+    "(SELECT e.[Center ID] FROM [Enrollment] e WHERE e.[end_date] IS NULL) "
+    "ORDER BY c.[Center ID]"
+)
+_OPERATING_DAYS_QUERY = (
+    "SELECT [Day Of Week], [closing_time] FROM [OperatingDays] ORDER BY [ID]"
+)
+_AVAIL_OPEN_QUERY = (
+    "SELECT [ID], [avail_start], [avail_end] FROM [Availability] "
+    "WHERE [Center ID] = ? AND [Day Of Week] = ? "
+    "AND [effective_end_date] IS NULL"
+)
+_AVAIL_UPDATE = (
+    "UPDATE [Availability] SET [avail_start] = ?, [avail_end] = ?, "
+    "[Notes] = ? WHERE [ID] = ?"
+)
+_AVAIL_INSERT = (
+    "INSERT INTO [Availability] "
+    "([Center ID], [effective_start_date], [effective_end_date], "
+    "[Day Of Week], [avail_start], [avail_end], [Notes]) "
+    "VALUES (?, ?, NULL, ?, ?, ?, ?)"
+)
+
+_FALLBACK_CLOSING_MIN = 16 * 60   # rules.py latest_time_out when no row
+
+
+def _minutes_to_time(minutes):
+    return datetime.time(minutes // 60, minutes % 60)
+
+
+def _time_to_minutes(value):
+    """Access stores time-of-day as DATETIME with a 1899-12-30 date part;
+    pyodbc returns datetime.datetime. Accept datetime.time too."""
+    t = value.time() if hasattr(value, "time") else value
+    return t.hour * 60 + t.minute
+
+
+def _fetch_active_members(cur):
+    """Active = has an Enrollment row with end_date IS NULL."""
+    cur.execute(_ACTIVE_MEMBERS_QUERY)
+    members = []
+    for cid, last, first, plan, hha in cur.fetchall():
+        if cid is None:
+            continue
+        members.append({
+            "center_id": int(cid),
+            "last_name": (last or "").strip(),
+            "first_name": (first or "").strip(),
+            "health_plan": (plan or "").strip(),
+            "hha": (hha or "").strip(),
+        })
+    return members
+
+
+def _fetch_closing_times(cur):
+    """{iso_weekday: closing minutes}; the largest ID wins per weekday
+    (matches CenterCalendar); weekdays without a row fall back to 16:00."""
+    closing = {d: _FALLBACK_CLOSING_MIN for d in range(1, 8)}
+    cur.execute(_OPERATING_DAYS_QUERY)
+    for dow, closing_time in cur.fetchall():
+        if dow is None or closing_time is None:
+            continue
+        closing[int(dow)] = _time_to_minutes(closing_time)
+    return closing
+
+
+def _fetch_open_window(cur, center_id, day):
+    """(row_id, (start_min, end_min)) for the open row, or None."""
+    cur.execute(_AVAIL_OPEN_QUERY, str(center_id), day)
+    row = cur.fetchone()
+    if row is None:
+        return None
+    row_id, start, end = row
+    return int(row_id), (_time_to_minutes(start), _time_to_minutes(end))
+
+
+def _upsert_window(cur, center_id, day, start_min, end_min, notes, today):
+    """Write the window to the open row (UPDATE) or a new row (INSERT).
+    Returns the previous (start_min, end_min) or None if there was no row."""
+    found = _fetch_open_window(cur, center_id, day)
+    start_t, end_t = _minutes_to_time(start_min), _minutes_to_time(end_min)
+    if found is None:
+        cur.execute(_AVAIL_INSERT, str(center_id), today, day,
+                    start_t, end_t, notes)
+        return None
+    row_id, old = found
+    cur.execute(_AVAIL_UPDATE, start_t, end_t, notes, row_id)
+    return old
+
+
+def _build_connection_string(db_path):
+    return (
+        "DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};"
+        f"DBQ={db_path};"
+    )
+
+
 def main(argv=None):  # filled in by Task 8
     raise NotImplementedError
 
