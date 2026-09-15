@@ -108,8 +108,8 @@ Only the currently-open row per `(Center ID, Day Of Week)` —
   replaced (user decision); the old window is preserved in the report.
 - If no open row exists: `INSERT` with `effective_start_date = <today>`,
   `effective_end_date = NULL`, the estimated times and the note.
-- `Notes` records provenance, e.g. `TP envelope 2026-07..09, n=13` or
-  `member-wide envelope (no Wed data) 2026-07..09, n=39`, so an operator
+- `Notes` records provenance, e.g. `Attendance envelope 2026-07..09, n=13`
+  or `member-wide envelope (no Wed data) 2026-07..09, n=39`, so an operator
   looking at the row in Access or the Members app can tell where the
   numbers came from. Any existing note is overwritten (all are empty
   today).
