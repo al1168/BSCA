@@ -240,6 +240,42 @@ committing. The skipped CSV lands at
 Excel renders CJK correctly). Full design in
 [`docs/superpowers/specs/2026-06-02-authorization-backfill-design.md`](docs/superpowers/specs/2026-06-02-authorization-backfill-design.md).
 
+## Backfill Availability from Attendance sheets
+
+One-shot script that estimates each active member's availability
+window from what was actually printed on the last three months of
+Attendance sheets, and writes it to `Availability`. The HHA text is
+too vague to derive hours from, but the printed Time-In / Time-Out
+already avoided each member's home-care hours by hand, so their
+envelope (earliest Time-In, latest Time-Out, per weekday) is a good
+estimate of when the member can be at the center.
+
+```
+python scripts\backfill_availability_from_attendance.py --db <PATH> --dry-run
+python scripts\backfill_availability_from_attendance.py --db <PATH>
+```
+
+Options: `--sheets-root DIR` (default the Dell-NJ02 share),
+`--months 2026-07,2026-08,2026-09` (default: the three months ending
+this month), `--csv-out DIR`, `--min-samples N` (weekdays with fewer
+samples widen to the member-wide envelope; default 4), `--quiet`.
+
+Every active member's seven open rows are overwritten, including
+hand-edited ones; the old window is kept in the report
+`<csv-out>/attendance_availability_<YYYY-MM-DD>.csv`. Members with no
+sheets in the lookback are left untouched and listed as `no_data`.
+`OperatingDays` is never changed: windows that run past the closing
+time are written as-is and flagged `past_close` / `afternoon_only`.
+A non-dry run first copies the `.accdb` to
+`<name>.backup_<timestamp>.accdb`.
+
+**The windows describe Time-In..Time-Out**, so the two rules
+"Drop-off by availability end" and "Pick-up by availability start"
+(Settings → Scheduling Rules) must be **unchecked** in the deployment
+that uses them; with them on, the scheduler reserves travel time
+inside the window on both ends and most days go blank. Design in
+[`docs/superpowers/specs/2026-09-15-attendance-availability-backfill-design.md`](docs/superpowers/specs/2026-09-15-attendance-availability-backfill-design.md).
+
 ## Setup
 
 ```
