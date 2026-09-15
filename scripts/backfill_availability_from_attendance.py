@@ -254,8 +254,229 @@ def _build_connection_string(db_path):
     )
 
 
-def main(argv=None):  # filled in by Task 8
-    raise NotImplementedError
+# ---------------------------------------------------------------------------
+# report + backup
+# ---------------------------------------------------------------------------
+
+_REPORT_COLUMNS = [
+    "center_id", "last_name", "first_name", "health_plan", "day",
+    "old_window", "new_window", "samples", "flags", "hha",
+]
+_DEFAULT_WINDOW = (8 * 60, 13 * 60)   # the post-setup seeded default
+
+_REMINDER = (
+    "  Reminder: in the Monthly Schedule Generator (Settings -> Scheduling\n"
+    "  Rules) uncheck \"Drop-off by availability end\" and\n"
+    "  \"Pick-up by availability start\" before the next run. These windows\n"
+    "  describe Time-In..Time-Out; pick-up and drop-off fall around them."
+)
+
+
+def _window_str(window):
+    if window is None:
+        return ""
+    return f"{hhmm(window[0])}-{hhmm(window[1])}"
+
+
+def _months_label(months):
+    """['2026-07','2026-08','2026-09'] -> '2026-07..09';
+    a single month -> '2026-07'; mixed years -> '2025-11..2026-01'."""
+    if len(months) == 1:
+        return months[0]
+    first, last = months[0], months[-1]
+    if first[:4] == last[:4]:
+        return f"{first}..{last[5:]}"
+    return f"{first}..{last}"
+
+
+def _note_for(day, est, label, member_samples):
+    if "member_wide" in est.flags:
+        return (f"member-wide envelope (no {_DAY_NAMES[day]} data) "
+                f"{label}, n={member_samples}")
+    if "low_samples" in est.flags:
+        return (f"Attendance envelope widened to member-wide "
+                f"(n={est.samples}) {label}, member n={member_samples}")
+    return f"Attendance envelope {label}, n={est.samples}"
+
+
+def _write_report(rows, out_dir, today):
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(
+        out_dir, f"attendance_availability_{today.isoformat()}.csv")
+    with open(path, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=_REPORT_COLUMNS)
+        w.writeheader()
+        w.writerows(rows)
+    return path
+
+
+def _backup_db(db_path):
+    """Copy <name>.accdb -> <name>.backup_<YYYY-MM-DD-HHMMSS>.accdb next to
+    it. Returns the copy's path. Raises OSError on failure."""
+    stamp = datetime.datetime.now().strftime("%Y-%m-%d-%H%M%S")
+    base, _ext = os.path.splitext(db_path)
+    target = f"{base}.backup_{stamp}.accdb"
+    shutil.copy2(db_path, target)
+    return target
+
+
+# ---------------------------------------------------------------------------
+# main
+# ---------------------------------------------------------------------------
+
+def main(argv=None):
+    args = _parse_args(argv)
+    if not os.path.exists(args.db):
+        print(f"ERROR: database not found: {args.db}", file=sys.stderr)
+        return 2
+    try:
+        months = (_parse_months(args.months) if args.months
+                  else _default_months(_today()))
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
+    # 1. Sheets -> samples (before touching the DB, so a bad share path
+    #    fails fast and never leaves a backup copy behind).
+    sheet_errors = []
+    all_rows = []
+    sheets_read = 0
+    for month in months:
+        seen_ids = set()
+
+        def _on_error(msg, _month=month):
+            sheet_errors.append(f"{_month}: {msg}")
+
+        for row in read_month_sheets(args.sheets_root, month, _on_error):
+            seen_ids.add(row[0])
+            all_rows.append(row)
+        sheets_read += len(seen_ids)
+    samples, dropped = collect_samples(all_rows)
+    rows_with_times = sum(len(v) for v in samples.values())
+    if not samples:
+        print("ERROR: no Attendance samples found under "
+              f"{args.sheets_root} for {', '.join(months)}", file=sys.stderr)
+        for err in sheet_errors:
+            print(f"  {err}", file=sys.stderr)
+        return 2
+
+    # 2. Backup (skipped on dry run).
+    backup_path = None
+    if not args.dry_run:
+        try:
+            backup_path = _backup_db(args.db)
+        except OSError as exc:
+            print(f"ERROR: could not back up the database: {exc}",
+                  file=sys.stderr)
+            return 2
+
+    # 3. DB.
+    import pyodbc
+    try:
+        conn = pyodbc.connect(_build_connection_string(args.db))
+    except pyodbc.Error as exc:
+        print(
+            "ERROR: could not open the Access database. Verify the "
+            "Microsoft Access ODBC driver is installed and its "
+            "bitness matches this Python interpreter. "
+            f"Original error: {exc}",
+            file=sys.stderr,
+        )
+        return 2
+
+    label = _months_label(months)
+    try:
+        cur = conn.cursor()
+        today = _today()
+        members = _fetch_active_members(cur)
+        closing = _fetch_closing_times(cur)
+
+        stats = {
+            "members": len(members), "written": 0, "no_data": 0,
+            "updated": 0, "inserted": 0,
+        }
+        flag_counts = {k: 0 for k in (
+            "past_close", "afternoon_only", "low_samples", "member_wide",
+            "hand_edit_replaced", "narrow")}
+        report = []
+
+        for m in members:
+            cid = m["center_id"]
+            by_weekday = {d: samples.get((cid, d), []) for d in range(1, 8)}
+            member_samples = sum(len(v) for v in by_weekday.values())
+            estimates = estimate_windows(by_weekday, args.min_samples)
+            base = {
+                "center_id": cid, "last_name": m["last_name"],
+                "first_name": m["first_name"],
+                "health_plan": m["health_plan"], "hha": m["hha"],
+            }
+            if not estimates:
+                stats["no_data"] += 1
+                report.append({**base, "day": "", "old_window": "",
+                               "new_window": "", "samples": 0,
+                               "flags": "no_data"})
+                continue
+
+            stats["written"] += 1
+            for day in range(1, 8):
+                est = estimates[day]
+                note = _note_for(day, est, label, member_samples)
+                old = _upsert_window(cur, cid, day, est.start, est.end,
+                                     note, today)
+                if old is None:
+                    stats["inserted"] += 1
+                else:
+                    stats["updated"] += 1
+                flags = list(est.flags)
+                flags += window_flags(est.start, est.end, closing[day])
+                if old is not None and old != _DEFAULT_WINDOW:
+                    flags.append("hand_edit_replaced")
+                for fl in flags:
+                    flag_counts[fl] += 1
+                report.append({
+                    **base, "day": day,
+                    "old_window": _window_str(old),
+                    "new_window": _window_str((est.start, est.end)),
+                    "samples": est.samples, "flags": ";".join(flags),
+                })
+                if not args.quiet:
+                    print(f"  {cid} {_DAY_NAMES[day]}: "
+                          f"{_window_str(old) or '(none)'} -> "
+                          f"{_window_str((est.start, est.end))}"
+                          f"  [{';'.join(flags)}]")
+
+        if args.dry_run:
+            conn.rollback()
+            mode = "DRY-RUN (no changes committed)"
+        else:
+            conn.commit()
+            mode = "APPLIED"
+
+        out_dir = args.csv_out or os.path.dirname(os.path.abspath(args.db))
+        csv_path = _write_report(report, out_dir, today)
+
+        print()
+        print("Attendance availability backfill summary")
+        print(f"  Months scanned:                {', '.join(months)}")
+        print(f"  Sheets read / errors:          {sheets_read} / {len(sheet_errors)}")
+        for err in sheet_errors:
+            print(f"    {err}")
+        print(f"  Dated rows with times:         {rows_with_times}   (dropped: {dropped})")
+        print(f"  Active members:                {stats['members']}")
+        print(f"    with estimates written:      {stats['written']}")
+        print(f"    no attendance data:          {stats['no_data']}")
+        print(f"  Availability rows updated:     {stats['updated']}")
+        print(f"  Availability rows inserted:    {stats['inserted']}")
+        print("  Weekday rows flagged:          "
+              + "  ".join(f"{k}={v}" for k, v in flag_counts.items()))
+        print(f"  Report CSV: {csv_path}")
+        print(f"  Backup:     {backup_path or 'none - dry run'}")
+        print(f"  Mode: {mode}")
+        print()
+        print(_REMINDER)
+    finally:
+        conn.close()
+    return 0
 
 
 if __name__ == "__main__":
