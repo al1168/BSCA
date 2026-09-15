@@ -81,3 +81,28 @@ def collect_samples(rows):
         samples.setdefault((center_id, weekday), []).append(
             (time_in, time_out))
     return samples, dropped
+
+
+ROUND_STEP_MIN = 5
+AFTERNOON_START_MIN = 10 * 60 + 30   # Time-In at/after this -> afternoon_only
+NARROW_WIDTH_MIN = 240               # under this -> narrow
+
+
+def round_window(start, end):
+    """Round start DOWN and end UP to ROUND_STEP_MIN (outward)."""
+    lo = (start // ROUND_STEP_MIN) * ROUND_STEP_MIN
+    hi = -(-end // ROUND_STEP_MIN) * ROUND_STEP_MIN
+    return lo, hi
+
+
+def window_flags(start, end, closing_min):
+    """Report flags for a window against the day's closing time.
+    Order is fixed: past_close, afternoon_only, narrow."""
+    flags = []
+    if end > closing_min:
+        flags.append("past_close")
+    if start >= AFTERNOON_START_MIN:
+        flags.append("afternoon_only")
+    if end - start < NARROW_WIDTH_MIN:
+        flags.append("narrow")
+    return flags

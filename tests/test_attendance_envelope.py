@@ -7,6 +7,8 @@ from monthly_schedule.attendance_envelope import (
     hhmm,
     normalize_time,
     parse_sheet_filename,
+    round_window,
+    window_flags,
 )
 
 
@@ -118,3 +120,43 @@ def test_collect_samples_skips_rows_missing_a_time():
     samples, dropped = collect_samples(rows)
     assert samples == {(1001, 1): [(500, 745)]}
     assert dropped == 0
+
+
+# ---------------------------------------------------------------------------
+# round_window — start down, end up, to 5 minutes
+# ---------------------------------------------------------------------------
+
+def test_round_window_rounds_outward():
+    assert round_window(8 * 60 + 21, 12 * 60 + 23) == (8 * 60 + 20, 12 * 60 + 25)
+
+
+def test_round_window_keeps_exact_multiples():
+    assert round_window(8 * 60 + 20, 12 * 60 + 25) == (8 * 60 + 20, 12 * 60 + 25)
+
+
+# ---------------------------------------------------------------------------
+# window_flags
+# ---------------------------------------------------------------------------
+
+def test_window_flags_plain_morning_window():
+    assert window_flags(8 * 60 + 20, 12 * 60 + 25, closing_min=14 * 60) == []
+
+
+def test_window_flags_past_close():
+    assert window_flags(9 * 60 + 55, 14 * 60 + 25, closing_min=14 * 60) == ["past_close"]
+
+
+def test_window_flags_afternoon_only_and_past_close():
+    assert window_flags(12 * 60 + 30, 17 * 60 + 25, closing_min=14 * 60) == [
+        "past_close", "afternoon_only",
+    ]
+
+
+def test_window_flags_afternoon_boundary_is_inclusive():
+    assert "afternoon_only" in window_flags(10 * 60 + 30, 15 * 60, closing_min=16 * 60)
+    assert "afternoon_only" not in window_flags(10 * 60 + 29, 15 * 60, closing_min=16 * 60)
+
+
+def test_window_flags_narrow():
+    assert window_flags(8 * 60, 11 * 60 + 55, closing_min=14 * 60) == ["narrow"]
+    assert "narrow" not in window_flags(8 * 60, 12 * 60, closing_min=14 * 60)
