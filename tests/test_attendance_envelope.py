@@ -3,7 +3,9 @@ import datetime
 import pytest
 
 from monthly_schedule.attendance_envelope import (
+    Estimate,
     collect_samples,
+    estimate_windows,
     hhmm,
     normalize_time,
     parse_sheet_filename,
@@ -160,3 +162,59 @@ def test_window_flags_afternoon_boundary_is_inclusive():
 def test_window_flags_narrow():
     assert window_flags(8 * 60, 11 * 60 + 55, closing_min=14 * 60) == ["narrow"]
     assert "narrow" not in window_flags(8 * 60, 12 * 60, closing_min=14 * 60)
+
+
+# ---------------------------------------------------------------------------
+# estimate_windows — {weekday: [(in, out), ...]} -> {1..7: Estimate}
+# ---------------------------------------------------------------------------
+
+def _samples(n, lo_in, hi_in, lo_out, hi_out):
+    """n samples spread evenly between the given bounds."""
+    if n == 1:
+        return [(lo_in, lo_out)]
+    return [
+        (lo_in + (hi_in - lo_in) * i // (n - 1),
+         lo_out + (hi_out - lo_out) * i // (n - 1))
+        for i in range(n)
+    ]
+
+
+def test_estimate_windows_per_weekday_envelope_rounded_outward():
+    member = {
+        d: _samples(13, 8 * 60 + 21, 8 * 60 + 33, 12 * 60 + 18, 12 * 60 + 33)
+        for d in (1, 2, 3, 4, 5)
+    }
+    est = estimate_windows(member, min_samples=4)
+    assert est[1] == Estimate(start=8 * 60 + 20, end=12 * 60 + 35,
+                              samples=13, flags=[])
+
+
+def test_estimate_windows_low_samples_widen_to_member_envelope():
+    member = {
+        1: _samples(13, 8 * 60 + 21, 8 * 60 + 33, 12 * 60 + 18, 12 * 60 + 33),
+        6: [(8 * 60 + 40, 12 * 60 + 40), (8 * 60 + 41, 12 * 60 + 42)],
+    }
+    est = estimate_windows(member, min_samples=4)
+    # Saturday union: start = min(8:40, 8:21)=8:21 -> 8:20;
+    #                 end   = max(12:42, 12:33)=12:42 -> 12:45
+    assert est[6] == Estimate(start=8 * 60 + 20, end=12 * 60 + 45,
+                              samples=2, flags=["low_samples"])
+
+
+def test_estimate_windows_no_data_weekday_gets_member_envelope():
+    member = {1: _samples(13, 8 * 60 + 21, 8 * 60 + 33, 12 * 60 + 18, 12 * 60 + 33)}
+    est = estimate_windows(member, min_samples=4)
+    assert set(est) == {1, 2, 3, 4, 5, 6, 7}
+    assert est[3] == Estimate(start=8 * 60 + 20, end=12 * 60 + 35,
+                              samples=0, flags=["member_wide"])
+
+
+def test_estimate_windows_empty_member_is_empty():
+    assert estimate_windows({}, min_samples=4) == {}
+
+
+def test_estimate_windows_afternoon_member_keeps_afternoon():
+    member = {2: _samples(13, 12 * 60 + 32, 12 * 60 + 47, 16 * 60 + 50, 16 * 60 + 59)}
+    est = estimate_windows(member, min_samples=4)
+    assert est[2].start == 12 * 60 + 30
+    assert est[2].end == 17 * 60

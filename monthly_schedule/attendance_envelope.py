@@ -106,3 +106,56 @@ def window_flags(start, end, closing_min):
     if end - start < NARROW_WIDTH_MIN:
         flags.append("narrow")
     return flags
+
+
+DEFAULT_MIN_SAMPLES = 4
+
+
+@dataclass
+class Estimate:
+    """One weekday's estimated window (minutes since midnight, already
+    rounded) with the per-weekday sample count and provenance flags
+    (subset of: low_samples, member_wide)."""
+    start: int
+    end: int
+    samples: int
+    flags: list = field(default_factory=list)
+
+
+def _envelope(pairs):
+    return min(p[0] for p in pairs), max(p[1] for p in pairs)
+
+
+def estimate_windows(samples_by_weekday, min_samples=DEFAULT_MIN_SAMPLES):
+    """Spec §3. `samples_by_weekday` is {iso_weekday: [(in, out), ...]}
+    for ONE member. Returns {1..7: Estimate}, or {} when the member has
+    no samples at all.
+
+    - A weekday with >= min_samples samples gets its own envelope.
+    - A weekday with 1..min_samples-1 samples gets the union of its own
+      envelope and the member-wide envelope (flag low_samples).
+    - A weekday with no samples gets the member-wide envelope
+      (flag member_wide).
+    Windows are rounded outward to 5 minutes.
+    """
+    all_pairs = [p for pairs in samples_by_weekday.values() for p in pairs]
+    if not all_pairs:
+        return {}
+    member_lo, member_hi = _envelope(all_pairs)
+
+    result = {}
+    for weekday in range(1, 8):
+        pairs = samples_by_weekday.get(weekday) or []
+        flags = []
+        if not pairs:
+            lo, hi = member_lo, member_hi
+            flags.append("member_wide")
+        else:
+            lo, hi = _envelope(pairs)
+            if len(pairs) < min_samples:
+                lo, hi = min(lo, member_lo), max(hi, member_hi)
+                flags.append("low_samples")
+        lo, hi = round_window(lo, hi)
+        result[weekday] = Estimate(start=lo, end=hi, samples=len(pairs),
+                                   flags=flags)
+    return result
