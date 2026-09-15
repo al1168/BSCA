@@ -5,6 +5,7 @@ import pytest
 from monthly_schedule.attendance_envelope import (
     hhmm,
     normalize_time,
+    parse_sheet_filename,
 )
 
 
@@ -56,3 +57,29 @@ def test_normalize_time_blank_is_none(blank):
 
 def test_normalize_time_rejects_garbage():
     assert normalize_time("lunch") is None
+
+
+# ---------------------------------------------------------------------------
+# parse_sheet_filename
+# ---------------------------------------------------------------------------
+
+def test_parse_sheet_filename_real_pattern():
+    assert parse_sheet_filename(
+        "(1001).Zhang, Mingli Attendance 2026-08.xlsm"
+    ) == (1001, "Zhang, Mingli", "2026-08")
+
+
+def test_parse_sheet_filename_tolerates_spaces_and_case():
+    assert parse_sheet_filename(
+        "(25).Lin,  Bo Hua  Attendance 2026-07.XLSM"
+    ) == (25, "Lin,  Bo Hua", "2026-07")
+
+
+@pytest.mark.parametrize("name", [
+    "Daily Sign-in-out 2026-08.xlsm",
+    "(1001).Zhang, Mingli TP 2026-08.xlsm",
+    "Zhang, Mingli Attendance 2026-08.xlsm",
+    "~$(1001).Zhang, Mingli Attendance 2026-08.xlsm",
+])
+def test_parse_sheet_filename_rejects_other_files(name):
+    assert parse_sheet_filename(name) is None

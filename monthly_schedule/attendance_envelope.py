@@ -45,3 +45,18 @@ def normalize_time(value):
             return None
         return _apply_pm_rule(int(m.group(1)) * 60 + int(m.group(2)))
     return None
+
+
+_FILENAME_RE = re.compile(
+    r"^\((\d+)\)\.(.+?)\s+Attendance\s+(\d{4}-\d{2})\.xlsm$", re.IGNORECASE,
+)
+
+
+def parse_sheet_filename(name):
+    """'(1001).Zhang, Mingli Attendance 2026-08.xlsm'
+    -> (1001, 'Zhang, Mingli', '2026-08'); None for anything else
+    (Excel lock files starting with '~$' included)."""
+    m = _FILENAME_RE.match(name)
+    if not m:
+        return None
+    return int(m.group(1)), m.group(2).strip(), m.group(3)
