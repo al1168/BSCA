@@ -3,6 +3,7 @@ import datetime
 import pytest
 
 from monthly_schedule.attendance_envelope import (
+    collect_samples,
     hhmm,
     normalize_time,
     parse_sheet_filename,
@@ -83,3 +84,37 @@ def test_parse_sheet_filename_tolerates_spaces_and_case():
 ])
 def test_parse_sheet_filename_rejects_other_files(name):
     assert parse_sheet_filename(name) is None
+
+
+# ---------------------------------------------------------------------------
+# collect_samples — rows: (center_id, iso_weekday, time_in_min, time_out_min)
+# ---------------------------------------------------------------------------
+
+def test_collect_samples_groups_by_member_and_weekday():
+    rows = [
+        (1001, 1, 500, 745),
+        (1001, 1, 505, 750),
+        (1001, 2, 510, 755),
+        (1002, 1, 600, 840),
+    ]
+    samples, dropped = collect_samples(rows)
+    assert samples == {
+        (1001, 1): [(500, 745), (505, 750)],
+        (1001, 2): [(510, 755)],
+        (1002, 1): [(600, 840)],
+    }
+    assert dropped == 0
+
+
+def test_collect_samples_drops_out_not_after_in():
+    rows = [(1001, 1, 500, 500), (1001, 1, 600, 550), (1001, 1, 500, 745)]
+    samples, dropped = collect_samples(rows)
+    assert samples == {(1001, 1): [(500, 745)]}
+    assert dropped == 2
+
+
+def test_collect_samples_skips_rows_missing_a_time():
+    rows = [(1001, 1, None, 745), (1001, 1, 500, None), (1001, 1, 500, 745)]
+    samples, dropped = collect_samples(rows)
+    assert samples == {(1001, 1): [(500, 745)]}
+    assert dropped == 0

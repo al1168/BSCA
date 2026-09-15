@@ -60,3 +60,24 @@ def parse_sheet_filename(name):
     if not m:
         return None
     return int(m.group(1)), m.group(2).strip(), m.group(3)
+
+
+def collect_samples(rows):
+    """Group (center_id, iso_weekday, in_min, out_min) rows into
+    {(center_id, weekday): [(in, out), ...]}.
+
+    Rows with either time missing are skipped silently (a day with no
+    visit). Rows whose Time-Out is not after Time-In are dropped and
+    counted; returns (samples, dropped_count).
+    """
+    samples = {}
+    dropped = 0
+    for center_id, weekday, time_in, time_out in rows:
+        if time_in is None or time_out is None:
+            continue
+        if time_out <= time_in:
+            dropped += 1
+            continue
+        samples.setdefault((center_id, weekday), []).append(
+            (time_in, time_out))
+    return samples, dropped
