@@ -131,8 +131,12 @@ New keys in both languages in `gui/i18n.py`:
 | `log.title` | Progress log | 进度日志 |
 | `summary.title` | Summary | 摘要 |
 
-No other text changes. Existing `opts.*` keys keep their names even
-though the widgets now sit in the Actions group.
+The `opts.mltc_folders` text is shortened in both languages so it
+fits the 560px column without clipping (checkboxes do not wrap):
+English "All Members: one folder per MLTC plan", Chinese
+"所有成员：每个 MLTC 计划一个文件夹". No other text changes. Existing
+`opts.*` keys keep their names even though the widgets now sit in
+the Actions group.
 
 ## Tests
 
