@@ -48,6 +48,14 @@ from monthly_schedule.per_day import (
     REASON_CENTER_CLOSED_MONTH,
 )
 
+# Landscape layout (spec 2026-09-23): controls in a fixed-width left
+# column, progress/log/summary on the right, everything on screen at
+# once on a 1366x768 display.
+WINDOW_SIZE = (1280, 720)
+MIN_SIZE = (1100, 680)
+LEFT_WIDTH = 560
+PLAN_ROW_HEIGHT = 24
+
 
 def _translate_one_off_reason(detail: dict) -> str:
     """Build the one-off conflict sentence in the current language from
@@ -114,7 +122,6 @@ def _translate_reason(reason: str, detail: dict = None) -> str:
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setMinimumWidth(560)
         self._settings = app_settings.load()
         self._worker = None
         self._print_worker = None
@@ -131,8 +138,18 @@ class MainWindow(QWidget):
         # Cleared when a new generation run finishes (files rewritten).
         self._printed_ok = set()
 
-        root = QVBoxLayout(self)
+        root = QHBoxLayout(self)
         root.setSpacing(12)
+        self._left_panel = QWidget()
+        self._left_panel.setMinimumWidth(LEFT_WIDTH - 40)
+        self._left_panel.setMaximumWidth(LEFT_WIDTH)
+        left = QVBoxLayout(self._left_panel)
+        left.setContentsMargins(0, 0, 0, 0)
+        left.setSpacing(6)
+        right = QVBoxLayout()
+        right.setSpacing(6)
+        root.addWidget(self._left_panel, 0)
+        root.addLayout(right, 1)
 
         # ── Top bar ────────────────────────────────────────────────
         top = QHBoxLayout()
@@ -159,11 +176,13 @@ class MainWindow(QWidget):
         self._settings_btn.setFixedSize(32, 32)
         self._settings_btn.clicked.connect(self._open_settings)
         top.addWidget(self._settings_btn)
-        root.addLayout(top)
+        left.addLayout(top)
 
         # ── WHO ────────────────────────────────────────────────────
         self._who_box = QGroupBox()
         who_layout = QVBoxLayout(self._who_box)
+        who_layout.setSpacing(4)
+        who_layout.setContentsMargins(8, 4, 8, 6)
 
         radio_row = QHBoxLayout()
         self._radio_single = QRadioButton()
@@ -240,6 +259,7 @@ class MainWindow(QWidget):
         self._syncing_selection = False
 
         self._plan_table = QTableWidget(len(PLAN_CODES) + 1, 3)
+        self._plan_table.verticalHeader().setDefaultSectionSize(PLAN_ROW_HEIGHT)
         self._plan_table.verticalHeader().setVisible(False)
         self._plan_table.setEditTriggers(
             QAbstractItemView.EditTrigger.NoEditTriggers
@@ -291,11 +311,13 @@ class MainWindow(QWidget):
         caption_row.addWidget(self._excluded_label)
         who_layout.addLayout(caption_row)
 
-        root.addWidget(self._who_box)
+        left.addWidget(self._who_box)
 
         # ── WHEN ───────────────────────────────────────────────────
         self._when_box = QGroupBox()
         when_outer = QVBoxLayout(self._when_box)
+        when_outer.setSpacing(4)
+        when_outer.setContentsMargins(8, 4, 8, 6)
         when_layout = QHBoxLayout()
         when_outer.addLayout(when_layout)
         self._month_label_widget = QLabel()
@@ -350,11 +372,18 @@ class MainWindow(QWidget):
             lambda _v: self._counts_timer.start()
         )
         self._update_range_max()
-        root.addWidget(self._when_box)
+        left.addWidget(self._when_box)
 
         # ── SAVE TO ────────────────────────────────────────────────
-        self._save_box = QGroupBox()
-        save_layout = QHBoxLayout(self._save_box)
+        # A plain row, not a group box: the group frame and title cost
+        # ~25px the left column cannot spare (spec 2026-09-23).
+        save_layout = QHBoxLayout()
+        save_layout.setContentsMargins(8, 0, 8, 0)
+        self._save_title = QLabel()
+        save_font = QFont()
+        save_font.setBold(True)
+        self._save_title.setFont(save_font)
+        save_layout.addWidget(self._save_title)
         self._out_label = QLabel(self._settings.get("output_path", "."))
         self._out_label.setWordWrap(True)
         save_layout.addWidget(self._out_label, 1)
@@ -362,17 +391,20 @@ class MainWindow(QWidget):
         self._change_btn.setFixedWidth(80)
         self._change_btn.clicked.connect(self._open_settings)
         save_layout.addWidget(self._change_btn)
-        root.addWidget(self._save_box)
+        left.addLayout(save_layout)
 
-        # ── Options ────────────────────────────────────────────────
+        # ── Actions ────────────────────────────────────────────────
+        self._actions_box = QGroupBox()
+        actions = QVBoxLayout(self._actions_box)
+        actions.setSpacing(4)
+        actions.setContentsMargins(8, 4, 8, 6)
         self._debug_check = QCheckBox()
-        root.addWidget(self._debug_check)
+        actions.addWidget(self._debug_check)
         # All-Members only: split output into per-MLTC folders. Default
         # off -> everyone in one <Month>_<Year>_Timesheets folder.
         self._mltc_folders_check = QCheckBox()
-        root.addWidget(self._mltc_folders_check)
+        actions.addWidget(self._mltc_folders_check)
 
-        # ── Generate ───────────────────────────────────────────────
         self._generate_btn = QPushButton()
         self._generate_btn.setFixedHeight(40)
         gen_font = QFont()
@@ -380,37 +412,50 @@ class MainWindow(QWidget):
         gen_font.setBold(True)
         self._generate_btn.setFont(gen_font)
         self._generate_btn.clicked.connect(self._run)
-        root.addWidget(self._generate_btn)
+        actions.addWidget(self._generate_btn)
 
         self._scope_label = QLabel()
         self._scope_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._scope_label.setStyleSheet("color: gray; font-size: 11px;")
-        root.addWidget(self._scope_label)
+        actions.addWidget(self._scope_label)
 
-        # ── Progress + Log ─────────────────────────────────────────
+        btn_row = QHBoxLayout()
+        self._open_folder_btn = QPushButton()
+        self._open_folder_btn.clicked.connect(self._open_output_folder)
+        btn_row.addWidget(self._open_folder_btn)
+        # Prints every schedule from the last run (never debug CSVs);
+        # enabled only once a run has produced files.
+        self._print_btn = QPushButton()
+        self._print_btn.setEnabled(False)
+        self._print_btn.clicked.connect(self._print_schedules)
+        btn_row.addWidget(self._print_btn)
+        actions.addLayout(btn_row)
+        left.addWidget(self._actions_box)
+        left.addStretch(1)
+
+        # ── Right column: progress, log, summary ───────────────────
         self._progress = QProgressBar()
-        self._progress.setVisible(False)
-        root.addWidget(self._progress)
+        self._progress.setRange(0, 1)
+        self._progress.setValue(0)
+        right.addWidget(self._progress)
 
+        self._log_label = QLabel()
+        right.addWidget(self._log_label)
         self._log = QPlainTextEdit()
         self._log.setReadOnly(True)
-        self._log.setVisible(False)
-        log_font = QFont("Consolas", 9)
-        self._log.setFont(log_font)
-        self._log.setMinimumHeight(120)
-        root.addWidget(self._log)
+        self._log.setFont(QFont("Consolas", 9))
+        # A long run logs a line per member; cap the scrollback.
+        self._log.setMaximumBlockCount(5000)
+        right.addWidget(self._log, 2)
 
-        self._open_folder_btn = QPushButton()
-        self._open_folder_btn.setVisible(False)
-        self._open_folder_btn.clicked.connect(self._open_output_folder)
-        root.addWidget(self._open_folder_btn)
+        self._summary_label = QLabel()
+        right.addWidget(self._summary_label)
+        self._summary = QPlainTextEdit()
+        self._summary.setReadOnly(True)
+        right.addWidget(self._summary, 3)
 
-        # Appears after a successful run; prints every generated
-        # schedule to the default printer (never debug CSVs).
-        self._print_btn = QPushButton()
-        self._print_btn.setVisible(False)
-        self._print_btn.clicked.connect(self._print_schedules)
-        root.addWidget(self._print_btn)
+        self.setMinimumSize(*MIN_SIZE)
+        self.resize(*WINDOW_SIZE)
 
         self._update_plan_table()
         row_h = self._plan_table.verticalHeader().defaultSectionSize()
@@ -460,7 +505,7 @@ class MainWindow(QWidget):
         self._range_from_label.setText(tr("when.range_from"))
         self._range_to_label.setText(tr("when.range_to"))
 
-        self._save_box.setTitle(tr("save.title"))
+        self._save_title.setText(tr("save.title"))
         self._change_btn.setText(tr("save.change"))
 
         self._debug_check.setText(tr("opts.debug"))
@@ -468,6 +513,9 @@ class MainWindow(QWidget):
         self._generate_btn.setText(tr("opts.generate"))
         self._open_folder_btn.setText(tr("opts.open_folder"))
         self._print_btn.setText(tr("opts.print"))
+        self._actions_box.setTitle(tr("actions.title"))
+        self._log_label.setText(tr("log.title"))
+        self._summary_label.setText(tr("summary.title"))
 
     # ── Slots ─────────────────────────────────────────────────────
 
