@@ -46,12 +46,15 @@ STRINGS: dict[str, dict[str, str]] = {
         # save to
         "save.title": "Save To",
         "save.change": "Change…",
+        # actions group / right column (spec 2026-09-23)
+        "actions.title": "Actions",
+        "log.title": "Progress log",
+        "summary.title": "Summary",
         # options
         "opts.debug": "Debug (write per-day reason CSV next to each schedule)",
-        "opts.mltc_folders": (
-            "All Members: separate output into per-MLTC folders "
-            "(off = one Month_Year_Timesheets folder)"
-        ),
+        # Short on purpose: checkboxes do not wrap and the left column
+        # is 560px wide (spec 2026-09-23).
+        "opts.mltc_folders": "All Members: one folder per MLTC plan",
         "opts.generate": "Generate Schedule",
         "opts.open_folder": "Open Output Folder",
         "opts.print": "Print All Schedules",
@@ -393,9 +396,12 @@ STRINGS: dict[str, dict[str, str]] = {
         # save to
         "save.title": "保存到",
         "save.change": "更改…",
+        "actions.title": "操作",
+        "log.title": "进度日志",
+        "summary.title": "摘要",
         # options
         "opts.debug": "调试（在每个日程旁写入每日原因 CSV）",
-        "opts.mltc_folders": "所有成员：按 MLTC 分文件夹输出（关闭＝统一放入一个 月份_年份_Timesheets 文件夹）",
+        "opts.mltc_folders": "所有成员：每个 MLTC 计划一个文件夹",
         "opts.generate": "生成日程表",
         "opts.open_folder": "打开输出文件夹",
         "opts.print": "打印所有日程表",

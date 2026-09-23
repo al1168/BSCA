@@ -239,3 +239,15 @@ def test_unknown_language_falls_back_to_missing():
     i18n.set_language("fr")  # unsupported
     # _current_lang is "fr"; tr() falls through to the missing-key path
     assert i18n.tr("opts.generate") == "opts.generate"
+
+
+def test_landscape_window_keys_exist():
+    from gui import i18n
+    i18n.set_language("en")
+    assert i18n.tr("actions.title") == "Actions"
+    assert i18n.tr("log.title") == "Progress log"
+    assert i18n.tr("summary.title") == "Summary"
+    i18n.set_language("zh")
+    assert i18n.tr("actions.title") == "操作"
+    assert i18n.tr("log.title") == "进度日志"
+    assert i18n.tr("summary.title") == "摘要"
