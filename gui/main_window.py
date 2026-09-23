@@ -54,7 +54,10 @@ from monthly_schedule.per_day import (
 WINDOW_SIZE = (1280, 720)
 MIN_SIZE = (1100, 680)
 LEFT_WIDTH = 560
-PLAN_ROW_HEIGHT = 24
+PLAN_ROW_HEIGHT = 22
+# Pixels left for the Save To path once the title and Change button
+# have taken theirs (560 - margins - ~70 title - 80 button).
+OUT_PATH_WIDTH = 360
 
 
 def _translate_one_off_reason(detail: dict) -> str:
@@ -145,7 +148,7 @@ class MainWindow(QWidget):
         self._left_panel.setMaximumWidth(LEFT_WIDTH)
         left = QVBoxLayout(self._left_panel)
         left.setContentsMargins(0, 0, 0, 0)
-        left.setSpacing(6)
+        left.setSpacing(4)
         right = QVBoxLayout()
         right.setSpacing(6)
         root.addWidget(self._left_panel, 0)
@@ -384,9 +387,11 @@ class MainWindow(QWidget):
         save_font.setBold(True)
         self._save_title.setFont(save_font)
         save_layout.addWidget(self._save_title)
-        self._out_label = QLabel(self._settings.get("output_path", "."))
-        self._out_label.setWordWrap(True)
+        # One line, elided in the middle: a long path that wrapped would
+        # push the column below the fold. The full path is the tooltip.
+        self._out_label = QLabel()
         save_layout.addWidget(self._out_label, 1)
+        self._set_out_path(self._settings.get("output_path", "."))
         self._change_btn = QPushButton()
         self._change_btn.setFixedWidth(80)
         self._change_btn.clicked.connect(self._open_settings)
@@ -406,7 +411,7 @@ class MainWindow(QWidget):
         actions.addWidget(self._mltc_folders_check)
 
         self._generate_btn = QPushButton()
-        self._generate_btn.setFixedHeight(40)
+        self._generate_btn.setFixedHeight(34)
         gen_font = QFont()
         gen_font.setPointSize(11)
         gen_font.setBold(True)
@@ -674,9 +679,15 @@ class MainWindow(QWidget):
                 old_db = self._settings.get("db_path")
                 self._settings.update(result)
                 app_settings.save(self._settings)
-                self._out_label.setText(self._settings.get("output_path", "."))
+                self._set_out_path(self._settings.get("output_path", "."))
                 if self._settings.get("db_path") != old_db:
                     self._start_counts_refresh()
+
+    def _set_out_path(self, path: str):
+        metrics = self._out_label.fontMetrics()
+        self._out_label.setText(metrics.elidedText(
+            path, Qt.TextElideMode.ElideMiddle, OUT_PATH_WIDTH))
+        self._out_label.setToolTip(path)
 
     def _open_output_folder(self):
         """The last run's folder, else the Settings output folder so the

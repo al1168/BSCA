@@ -8,7 +8,14 @@ import pytest
 pytest.importorskip("PyQt6")
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# The offscreen platform ships no fonts; its fallback glyphs are smaller
+# than Segoe UI, which made the height check pass at 656px when the
+# real window measured 710px. Point Qt at the Windows fonts so the
+# geometry test sees the same metrics as the running app.
+if os.path.isdir(r"C:\Windows\Fonts"):
+    os.environ.setdefault("QT_QPA_FONTDIR", r"C:\Windows\Fonts")
 
+from PyQt6.QtGui import QFont  # noqa: E402
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from gui import app_settings  # noqa: E402
@@ -22,6 +29,9 @@ _APP = None
 def app():
     global _APP
     _APP = QApplication.instance() or QApplication([])
+    _APP.setStyle("Fusion")                 # as gui.py does
+    if "Segoe UI" in QFont("Segoe UI").family():
+        _APP.setFont(QFont("Segoe UI", 9))  # the Windows default
     return _APP
 
 
@@ -103,3 +113,12 @@ def test_open_folder_falls_back_to_settings_path(window, monkeypatch, tmp_path):
     w._last_out_dir = None
     w._open_output_folder()
     assert opened == [str(tmp_path)]
+
+
+def test_long_output_path_stays_on_one_line(window):
+    w = window
+    long_path = "C:\\" + "\\".join(["a-very-long-folder-name"] * 8)
+    w._set_out_path(long_path)
+    assert "…" in w._out_label.text()
+    assert w._out_label.toolTip() == long_path
+    assert w._out_label.sizeHint().height() <= w._change_btn.sizeHint().height()
