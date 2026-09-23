@@ -50,9 +50,7 @@ window to the same shape.
 | | Month [Sept v]  Year [2026]               |  | |              | |
 | | [ ] Custom range  From [1] To [30]        |  | |              | |
 | +-------------------------------------------+  | |              | |
-| +-- Save To --------------------------------+  | |              | |
-| | C:\...\output                    [Change…]|  | |              | |
-| +-------------------------------------------+  | |              | |
+|  Save To  C:\Users\...\output       [Change…]  | |              | |
 | +-- Actions --------------------------------+  | |              | |
 | | [ ] Debug (per-day reason CSV)            |  | |              | |
 | | [ ] All Members: per-MLTC folders         |  | |              | |
@@ -71,7 +69,8 @@ Same widgets and behaviour as today, in this order:
 2. **Who** group: radio row, stacked input panel, plan table, roster
    and excluded captions. Unchanged apart from spacing.
 3. **When** group: month, year, custom day-range row. Unchanged.
-4. **Save To** group: output path label and Change button. Unchanged.
+4. **Save To** row: bold label, output path elided in the middle on
+   one line (full path as tooltip), Change button. No group box.
 5. **Actions** group (new `QGroupBox`, title key `actions.title`):
    debug checkbox, per-MLTC-folders checkbox, Generate button, scope
    caption, then Open Output Folder and Print All Schedules side by
@@ -89,20 +88,28 @@ Same widgets and behaviour as today, in this order:
 
 ### Fitting the height
 
-The left column today measures about 770px. The target is a left
-column `sizeHint().height()` of at most 680px so the 720px default
-window and a 1366x768 laptop (about 690px available) both show it in
-full. Levers, applied in this order until the test passes:
+The left column measured 710px with the app's real font (Segoe UI
+9pt) before tightening. The target is a left column
+`sizeHint().height()` of at most 680px so the 720px default window and
+a 1366x768 laptop (about 690px available) both show it in full.
+Levers applied, in order (implemented 2026-09-23, result 678px):
 
-1. Root and group-box layout spacing 6px instead of 12px; group-box
-   content margins tightened.
-2. Plan table row height 24px (from the Fusion default of 30) via
-   `verticalHeader().setDefaultSectionSize(24)`; the fixed table
+1. Column spacing 4px and group-box layout spacing 4px with tight
+   content margins, instead of the previous 12px.
+2. Plan table row height 22px via
+   `verticalHeader().setDefaultSectionSize(22)`; the fixed table
    height formula already derives from that value.
 3. Open Folder and Print on one row instead of two.
-4. Fallback, only if the above still overflows: drop the Save To group
-   from the main window, since Settings owns the output path. The
-   spec does not expect this to be needed.
+4. Generate button 34px tall instead of 40px.
+5. Save To is a plain row rather than a group box, saving the frame
+   and title.
+6. The Save To path is one line elided in the middle at 360px, with
+   the full path as a tooltip. A long path that wrapped pushed the
+   column to 686px.
+
+Measured on the offscreen platform with no fonts, the same column
+reads 656px, so the geometry test points Qt at the Windows fonts
+folder and sets Segoe UI 9pt to see the real metrics.
 
 ## Behaviour changes
 
@@ -155,6 +162,9 @@ following Cathay's `tests/test_main_window.py`:
 - `test_print_button_enabled_only_after_generation`: disabled after
   construction; enabled after `_on_finished` with a non-empty
   `generated_paths`; disabled again after one with an empty list.
+- `test_long_output_path_stays_on_one_line`: a very long path is
+  elided (contains an ellipsis), kept whole in the tooltip, and the
+  label is no taller than the Change button.
 - `test_open_folder_falls_back_to_settings_path`: with `_last_out_dir`
   None and a settings `output_path` pointing at `tmp_path`, the folder
   opener is called with that path (`os.startfile` monkeypatched).
