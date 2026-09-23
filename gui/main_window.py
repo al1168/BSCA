@@ -679,11 +679,14 @@ class MainWindow(QWidget):
                     self._start_counts_refresh()
 
     def _open_output_folder(self):
-        if self._last_out_dir and os.path.isdir(self._last_out_dir):
+        """The last run's folder, else the Settings output folder so the
+        button works before any run this session."""
+        target = self._last_out_dir or self._settings.get("output_path", "")
+        if target and os.path.isdir(target):
             if sys.platform == "win32":
-                os.startfile(self._last_out_dir)
+                os.startfile(target)
             else:
-                subprocess.Popen(["xdg-open", self._last_out_dir])
+                subprocess.Popen(["xdg-open", target])
 
     def _print_schedules(self):
         files = printable_schedules(self._last_generated)
@@ -701,8 +704,6 @@ class MainWindow(QWidget):
         self._generate_btn.setEnabled(False)
         self._progress.setRange(0, len(to_print))
         self._progress.setValue(0)
-        self._progress.setVisible(True)
-        self._log.setVisible(True)
         self._log.appendPlainText("")
         self._log.appendPlainText(tr("print.started", count=len(to_print)))
         self._print_worker = PrintWorker(to_print)
@@ -759,6 +760,8 @@ class MainWindow(QWidget):
     def _on_print_finished(self, success: bool, payload: dict):
         self._print_btn.setEnabled(True)
         self._generate_btn.setEnabled(True)
+        self._progress.setRange(0, 1)
+        self._progress.setValue(0)
         # Remember every file that reached the printer, even on partial
         # failure — a re-click offers to print only the remainder.
         for p in payload.get("printed", []):
@@ -907,12 +910,11 @@ class MainWindow(QWidget):
         out_dir = resolve_output_dir(out_base, plan_code, year, month)
 
         self._log.clear()
-        self._log.setVisible(True)
+        self._summary.clear()
+        self._progress.setRange(0, 1)
         self._progress.setValue(0)
-        self._progress.setVisible(True)
-        self._open_folder_btn.setVisible(False)
-        self._print_btn.setVisible(False)
         self._generate_btn.setEnabled(False)
+        self._print_btn.setEnabled(False)
         self._last_out_dir = out_dir
 
         self._worker = ScheduleWorker(
@@ -951,16 +953,13 @@ class MainWindow(QWidget):
             summary = payload["error_text"]
         else:
             summary = self._build_summary(payload)
-        self._log.appendPlainText("")
-        self._log.appendPlainText(summary)
+        self._summary.setPlainText(summary)
         self._generate_btn.setEnabled(True)
         self._last_generated = payload.get("generated_paths", []) or []
         self._printed_ok.clear()   # fresh files — nothing printed yet
-        # Show the folder/print buttons whenever at least one schedule was
-        # written — even on a partial run where some members were skipped.
-        if self._last_generated:
-            self._open_folder_btn.setVisible(True)
-            self._print_btn.setVisible(True)
+        # Print only makes sense once at least one schedule was written,
+        # even on a partial run where some members were skipped.
+        self._print_btn.setEnabled(bool(self._last_generated))
         if not success:
             QMessageBox.warning(
                 self, tr("msg.completed_errors.title"), summary

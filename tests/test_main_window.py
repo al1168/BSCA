@@ -54,3 +54,52 @@ def test_window_is_landscape_and_fully_visible(window):
     assert w._left_panel.maximumWidth() <= 600
     # Every left-column control fits inside the default window height.
     assert w._left_panel.sizeHint().height() <= 680
+
+
+def _quiet_warning(monkeypatch):
+    monkeypatch.setattr("gui.main_window.QMessageBox.warning",
+                        lambda *a, **k: None)
+
+
+def _ok_payload(paths):
+    return {
+        "scope": {"year": 2026, "month": 9, "mode": "single"},
+        "verb_key": "summary.verb.wrote",
+        "success": len(paths),
+        "total": len(paths),
+        "out_dir": None,
+        "failures": [],
+        "generated_paths": paths,
+    }
+
+
+def test_summary_pane_shows_result(window, monkeypatch):
+    _quiet_warning(monkeypatch)
+    w = window
+    w._on_finished(True, _ok_payload(["a.xlsx"]))
+    assert w._summary.toPlainText().strip() != ""
+    assert w._log.toPlainText() == ""
+    assert w._generate_btn.isEnabled()
+    w._on_finished(False, {"error_text": "bad"})
+    assert w._summary.toPlainText() == "bad"
+
+
+def test_print_button_enabled_only_after_generation(window, monkeypatch):
+    _quiet_warning(monkeypatch)
+    w = window
+    assert not w._print_btn.isEnabled()
+    w._on_finished(True, _ok_payload(["a.xlsx"]))
+    assert w._print_btn.isEnabled()
+    w._on_finished(True, _ok_payload([]))
+    assert not w._print_btn.isEnabled()
+
+
+def test_open_folder_falls_back_to_settings_path(window, monkeypatch, tmp_path):
+    opened = []
+    monkeypatch.setattr("gui.main_window.sys.platform", "win32")
+    monkeypatch.setattr("gui.main_window.os.startfile",
+                        lambda p: opened.append(p), raising=False)
+    w = window
+    w._last_out_dir = None
+    w._open_output_folder()
+    assert opened == [str(tmp_path)]
