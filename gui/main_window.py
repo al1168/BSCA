@@ -1,5 +1,6 @@
 import calendar
 import datetime
+import math
 import os
 import subprocess
 import sys
@@ -8,6 +9,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QIntValidator
 from PyQt6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -58,6 +60,26 @@ PLAN_ROW_HEIGHT = 22
 # Pixels left for the Save To path once the title and Change button
 # have taken theirs (560 - margins - ~70 title - 80 button).
 OUT_PATH_WIDTH = 360
+# Every pixel size and font size in this window is a design value for
+# WINDOW_SIZE. A bigger window (maximized on a 1080p monitor) scales
+# them all up in UI_SCALE_STEP steps, so the left column keeps the
+# share of the window it has at the default size instead of the log
+# and summary panes taking all the extra room (spec 2026-09-25).
+UI_SCALE_STEP = 0.1
+UI_SCALE_MAX = 2.0
+BASE_FONT_PT = 9     # Segoe UI 9pt, the Windows default UI font
+CAPTION_PX = 11
+
+
+def max_ui_scale(width: int) -> float:
+    """The largest UI scale a window this wide can take: how many times
+    wider it is than WINDOW_SIZE, rounded down to a step, never below
+    1.0 or above UI_SCALE_MAX. The height limit is measured instead
+    (see MainWindow._fit_ui_scale): padding, spacing and check boxes
+    do not grow with the text, so a height ratio would undershoot."""
+    raw = width / WINDOW_SIZE[0]
+    steps = math.floor(raw / UI_SCALE_STEP + 1e-9)
+    return max(1.0, min(UI_SCALE_MAX, round(steps * UI_SCALE_STEP, 1)))
 
 
 def _translate_one_off_reason(detail: dict) -> str:
@@ -140,12 +162,18 @@ class MainWindow(QWidget):
         # after a printer failure send only the unprinted remainder.
         # Cleared when a new generation run finishes (files rewritten).
         self._printed_ok = set()
+        # Scaling state (see max_ui_scale). The registries hold design
+        # values; _apply_ui_scale re-applies them at the current scale.
+        self._ui_scale = 1.0
+        self._left_heights = {}  # scale -> left column height, measured
+        self._fixed_sizes = []   # (widget, width or None, height or None)
+        self._fixed_fonts = []   # (widget, family or None, points, bold)
+        self._captions = []      # small gray labels sized in pixels
+        self._out_path = ""
 
         root = QHBoxLayout(self)
         root.setSpacing(12)
         self._left_panel = QWidget()
-        self._left_panel.setMinimumWidth(LEFT_WIDTH - 40)
-        self._left_panel.setMaximumWidth(LEFT_WIDTH)
         left = QVBoxLayout(self._left_panel)
         left.setContentsMargins(0, 0, 0, 0)
         left.setSpacing(4)
@@ -157,16 +185,13 @@ class MainWindow(QWidget):
         # ── Top bar ────────────────────────────────────────────────
         top = QHBoxLayout()
         self._title_label = QLabel()
-        title_font = QFont()
-        title_font.setPointSize(13)
-        title_font.setBold(True)
-        self._title_label.setFont(title_font)
+        self._fix_font(self._title_label, 13, bold=True)
         top.addWidget(self._title_label, 1)
 
         self._lang_combo = QComboBox()
         self._lang_combo.addItem("English", "en")
         self._lang_combo.addItem("中文", "zh")
-        self._lang_combo.setFixedWidth(90)
+        self._fix_size(self._lang_combo, width=90)
         # Reflect the current language without firing a switch.
         current_lang = self._settings.get("language", "en")
         idx = self._lang_combo.findData(current_lang)
@@ -176,7 +201,7 @@ class MainWindow(QWidget):
         top.addWidget(self._lang_combo)
 
         self._settings_btn = QPushButton("⚙")
-        self._settings_btn.setFixedSize(32, 32)
+        self._fix_size(self._settings_btn, 32, 32)
         self._settings_btn.clicked.connect(self._open_settings)
         top.addWidget(self._settings_btn)
         left.addLayout(top)
@@ -217,7 +242,7 @@ class MainWindow(QWidget):
         self._single_id = QLineEdit()
         self._single_id.setMaxLength(10)
         self._single_id.setValidator(QIntValidator(1, 2147483647))
-        self._single_id.setFixedWidth(120)
+        self._fix_size(self._single_id, width=120)
         p0_layout.addWidget(self._single_id)
         p0_layout.addStretch()
 
@@ -262,7 +287,6 @@ class MainWindow(QWidget):
         self._syncing_selection = False
 
         self._plan_table = QTableWidget(len(PLAN_CODES) + 1, 3)
-        self._plan_table.verticalHeader().setDefaultSectionSize(PLAN_ROW_HEIGHT)
         self._plan_table.verticalHeader().setVisible(False)
         self._plan_table.setEditTriggers(
             QAbstractItemView.EditTrigger.NoEditTriggers
@@ -284,8 +308,6 @@ class MainWindow(QWidget):
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        self._plan_table.setColumnWidth(1, 130)
-        self._plan_table.setColumnWidth(2, 100)
         for row in range(len(PLAN_CODES) + 1):
             for col in range(3):
                 item = QTableWidgetItem("")
@@ -307,8 +329,7 @@ class MainWindow(QWidget):
         caption_row = QHBoxLayout()
         self._roster_label = QLabel()
         self._excluded_label = QLabel()
-        for lbl in (self._roster_label, self._excluded_label):
-            lbl.setStyleSheet("color: gray; font-size: 11px;")
+        self._captions += [self._roster_label, self._excluded_label]
         caption_row.addWidget(self._roster_label)
         caption_row.addStretch()
         caption_row.addWidget(self._excluded_label)
@@ -336,7 +357,7 @@ class MainWindow(QWidget):
         self._year_spin = QSpinBox()
         self._year_spin.setRange(2020, 2040)
         self._year_spin.setValue(datetime.date.today().year)
-        self._year_spin.setFixedWidth(80)
+        self._fix_size(self._year_spin, width=80)
         when_layout.addWidget(self._year_spin)
         when_layout.addStretch()
 
@@ -350,7 +371,7 @@ class MainWindow(QWidget):
         self._range_from_spin = QSpinBox()
         self._range_from_spin.setRange(1, 31)
         self._range_from_spin.setValue(1)
-        self._range_from_spin.setFixedWidth(56)
+        self._fix_size(self._range_from_spin, width=56)
         self._range_from_spin.setEnabled(False)
         range_row.addWidget(self._range_from_spin)
         self._range_to_label = QLabel()
@@ -358,7 +379,7 @@ class MainWindow(QWidget):
         self._range_to_spin = QSpinBox()
         self._range_to_spin.setRange(1, 31)
         self._range_to_spin.setValue(31)
-        self._range_to_spin.setFixedWidth(56)
+        self._fix_size(self._range_to_spin, width=56)
         self._range_to_spin.setEnabled(False)
         range_row.addWidget(self._range_to_spin)
         range_row.addStretch()
@@ -393,7 +414,7 @@ class MainWindow(QWidget):
         save_layout.addWidget(self._out_label, 1)
         self._set_out_path(self._settings.get("output_path", "."))
         self._change_btn = QPushButton()
-        self._change_btn.setFixedWidth(80)
+        self._fix_size(self._change_btn, width=80)
         self._change_btn.clicked.connect(self._open_settings)
         save_layout.addWidget(self._change_btn)
         left.addLayout(save_layout)
@@ -411,17 +432,14 @@ class MainWindow(QWidget):
         actions.addWidget(self._mltc_folders_check)
 
         self._generate_btn = QPushButton()
-        self._generate_btn.setFixedHeight(34)
-        gen_font = QFont()
-        gen_font.setPointSize(11)
-        gen_font.setBold(True)
-        self._generate_btn.setFont(gen_font)
+        self._fix_size(self._generate_btn, height=34)
+        self._fix_font(self._generate_btn, 11, bold=True)
         self._generate_btn.clicked.connect(self._run)
         actions.addWidget(self._generate_btn)
 
         self._scope_label = QLabel()
         self._scope_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._scope_label.setStyleSheet("color: gray; font-size: 11px;")
+        self._captions.append(self._scope_label)
         actions.addWidget(self._scope_label)
 
         btn_row = QHBoxLayout()
@@ -448,7 +466,7 @@ class MainWindow(QWidget):
         right.addWidget(self._log_label)
         self._log = QPlainTextEdit()
         self._log.setReadOnly(True)
-        self._log.setFont(QFont("Consolas", 9))
+        self._fix_font(self._log, 9, family="Consolas")
         # A long run logs a line per member; cap the scrollback.
         self._log.setMaximumBlockCount(5000)
         right.addWidget(self._log, 2)
@@ -463,12 +481,7 @@ class MainWindow(QWidget):
         self.resize(*WINDOW_SIZE)
 
         self._update_plan_table()
-        row_h = self._plan_table.verticalHeader().defaultSectionSize()
-        self._plan_table.setFixedHeight(
-            self._plan_table.horizontalHeader().sizeHint().height()
-            + row_h * (len(PLAN_CODES) + 1)
-            + 2 * self._plan_table.frameWidth()
-        )
+        self._apply_ui_scale(1.0)
 
         # Wire up live retranslation and apply once.
         LanguageManager.instance().languageChanged.connect(self._retranslate)
@@ -521,6 +534,10 @@ class MainWindow(QWidget):
         self._actions_box.setTitle(tr("actions.title"))
         self._log_label.setText(tr("log.title"))
         self._summary_label.setText(tr("summary.title"))
+        # New text can change the left column's height (Chinese uses a
+        # taller font), so measure every scale again.
+        self._left_heights.clear()
+        self._fit_ui_scale()
 
     # ── Slots ─────────────────────────────────────────────────────
 
@@ -684,10 +701,87 @@ class MainWindow(QWidget):
                     self._start_counts_refresh()
 
     def _set_out_path(self, path: str):
+        self._out_path = path
         metrics = self._out_label.fontMetrics()
         self._out_label.setText(metrics.elidedText(
-            path, Qt.TextElideMode.ElideMiddle, OUT_PATH_WIDTH))
+            path, Qt.TextElideMode.ElideMiddle, self._px(OUT_PATH_WIDTH)))
         self._out_label.setToolTip(path)
+
+    # -- Scaling on large windows (spec 2026-09-25) --------------------
+
+    def _px(self, design_px: int) -> int:
+        """A design-size pixel value at the current UI scale."""
+        return round(design_px * self._ui_scale)
+
+    def _fix_size(self, widget, width=None, height=None):
+        """Fix the widget's width and/or height, given in design pixels;
+        _apply_ui_scale keeps it in step with the UI scale."""
+        self._fixed_sizes.append((widget, width, height))
+
+    def _fix_font(self, widget, points, bold=False, family=None):
+        """Give the widget its own font size (design points) that
+        _apply_ui_scale keeps in step with the UI scale."""
+        self._fixed_fonts.append((widget, family, points, bold))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit_ui_scale()
+
+    def _fit_ui_scale(self):
+        """Use the largest scale the window width allows whose left
+        column still fits the window height."""
+        margins = self.layout().contentsMargins()
+        room = self.height() - margins.top() - margins.bottom()
+        scale = max_ui_scale(self.width())
+        while scale > 1.0 and self._left_height(scale) > room:
+            scale = round(scale - UI_SCALE_STEP, 1)
+        if scale != self._ui_scale:
+            self._apply_ui_scale(scale)
+
+    def _left_height(self, scale: float) -> int:
+        """The left column's height at this scale, measured the first
+        time it is asked for, so dragging the window edge re-lays out
+        only when the chosen scale changes."""
+        if scale not in self._left_heights:
+            self._apply_ui_scale(scale)
+            self._left_heights[scale] = self._left_panel.sizeHint().height()
+        return self._left_heights[scale]
+
+    def _apply_ui_scale(self, scale: float):
+        """Re-apply every font and fixed size at this scale (1.0 is the
+        design size). The window font carries the scale to every widget
+        without a font of its own."""
+        self._ui_scale = scale
+        base = QFont(QApplication.font())
+        base.setPointSizeF(BASE_FONT_PT * scale)
+        self.setFont(base)
+        for widget, family, points, bold in self._fixed_fonts:
+            font = QFont(family) if family else QFont()
+            font.setPointSizeF(points * scale)
+            font.setBold(bold)
+            widget.setFont(font)
+        for label in self._captions:
+            label.setStyleSheet(
+                f"color: gray; font-size: {self._px(CAPTION_PX)}px;")
+        for widget, width, height in self._fixed_sizes:
+            if width is not None:
+                widget.setFixedWidth(self._px(width))
+            if height is not None:
+                widget.setFixedHeight(self._px(height))
+        self._left_panel.setMinimumWidth(self._px(LEFT_WIDTH - 40))
+        self._left_panel.setMaximumWidth(self._px(LEFT_WIDTH))
+        # Plan table: rows and number columns grow with the text, and
+        # the table stays exactly tall enough to show every row.
+        table = self._plan_table
+        table.verticalHeader().setDefaultSectionSize(self._px(PLAN_ROW_HEIGHT))
+        table.setColumnWidth(1, self._px(130))
+        table.setColumnWidth(2, self._px(100))
+        table.setFixedHeight(
+            table.horizontalHeader().sizeHint().height()
+            + table.verticalHeader().defaultSectionSize() * table.rowCount()
+            + 2 * table.frameWidth()
+        )
+        self._set_out_path(self._out_path)
 
     def _open_output_folder(self):
         """The last run's folder, else the Settings output folder so the

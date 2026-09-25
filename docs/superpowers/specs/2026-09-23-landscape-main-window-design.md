@@ -184,3 +184,50 @@ simply reports unavailable, as it already does today.
 
 Rebuild `dist/MonthlyScheduleGenerator.exe` after the change so the
 packaged app picks up the new window.
+
+## Scaling on large windows (added 2026-09-25)
+
+**Problem.** Maximized on a 1920x1080 monitor, the left column stayed
+520px wide and its controls ended about 360px above the bottom of the
+window. The log and summary panes took all the extra room, so the
+left column shrank to 27% of the width.
+
+**Rule.** Every pixel and font size in the window is a design value
+for the 1280x720 default. `_fit_ui_scale()` runs on every resize and
+picks the UI scale in 0.1 steps between 1.0 and 2.0:
+
+1. The ceiling is the width ratio, `max_ui_scale(width)`, which is
+   window width / 1280 rounded down to a step.
+2. Step down from there until the left column's `sizeHint()` height
+   fits the window height. The height is measured, not taken from the
+   height ratio, because padding, spacing and check-box indicators do
+   not grow with the text. A height ratio picked 1.4 at 1080p and left
+   159px empty. Measuring picks 1.5 and leaves about 75px, close to
+   the 43px at the default size.
+3. Each scale's height is measured once and cached, so dragging the
+   window edge re-lays out only when the chosen scale changes. A
+   language change clears the cache and re-fits, because Chinese text
+   uses a taller font.
+
+**What scales.** The window font (Segoe UI 9pt × scale, inherited by
+every widget without a font of its own), the title, Generate and log
+fonts, the gray caption pixel sizes, every fixed width and height
+registered through `_fix_size()`, the left column's min/max width, the
+plan table's row height, number column widths and fixed height, and
+the Save To elide width. Layout margins, spacing and check-box
+indicators stay at design size. Dialogs are not scaled.
+
+**Results** (offscreen, Segoe UI):
+
+| Window | Scale | Left column | Share of width |
+|---|---|---|---|
+| 1280x720 | 1.0 | 520px | 41% |
+| 1366x768 maximized | 1.0 | 520px | 39% |
+| 1920x1080 maximized | 1.5 | 780px | 41% |
+
+**Tests** in `tests/test_main_window.py`: the width ceiling steps, the
+1080p window (scale 1.5, fonts and fixed sizes scaled, every plan row
+visible, left column at least 39% of the width and its controls
+filling 90% of the height without overflowing), a wide but short
+window staying within the height, shrinking back to 1.0, Chinese text
+still fitting, and the Save To path eliding to the scaled width.

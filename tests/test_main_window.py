@@ -122,3 +122,103 @@ def test_long_output_path_stays_on_one_line(window):
     assert "…" in w._out_label.text()
     assert w._out_label.toolTip() == long_path
     assert w._out_label.sizeHint().height() <= w._change_btn.sizeHint().height()
+
+
+# ── Scaling on large windows (spec 2026-09-25) ──────────────────────
+# The layout is tuned for 1280x720. A bigger window (maximized on a
+# 1080p monitor) scales text and fixed-size controls up in 0.1 steps:
+# as far as the width allows, then down until the left column fits
+# the height. The left column keeps the share of the window it has by
+# default instead of the right-hand panes taking all the extra room.
+
+def _show_at(w, width, height):
+    w.show()
+    w.resize(width, height)
+    QApplication.processEvents()
+
+
+def _left_content_bottom(w):
+    box = w._actions_box
+    return box.mapTo(w, box.rect().bottomLeft()).y()
+
+
+def test_max_ui_scale_follows_window_width():
+    from gui.main_window import max_ui_scale
+    assert max_ui_scale(1280) == 1.0
+    assert max_ui_scale(1100) == 1.0      # never below the design size
+    assert max_ui_scale(1366) == 1.0      # maximized 1366x768 laptop
+    assert max_ui_scale(1920) == 1.5      # maximized 1080p
+    assert max_ui_scale(1700) == 1.3
+    assert max_ui_scale(5000) == 2.0      # capped
+
+
+def test_maximized_1080p_window_scales_up_and_stays_balanced(window):
+    w = window
+    _show_at(w, 1920, 1009)
+    s = w._ui_scale
+    assert s == 1.5
+    # Text and fixed-size controls grow together.
+    assert w._title_label.font().pointSizeF() == pytest.approx(13 * s)
+    assert w._generate_btn.font().pointSizeF() == pytest.approx(11 * s)
+    assert w._log.font().pointSizeF() == pytest.approx(9 * s)
+    assert w.font().pointSizeF() == pytest.approx(9 * s)
+    assert w._generate_btn.height() == round(34 * s)
+    assert w._lang_combo.width() == round(90 * s)
+    assert w._change_btn.width() == round(80 * s)
+    assert f"font-size: {round(11 * s)}px" in w._scope_label.styleSheet()
+    # Every plan row, All Members included, is still fully visible.
+    t = w._plan_table
+    assert t.verticalHeader().defaultSectionSize() == round(22 * s)
+    last = t.visualRect(t.model().index(t.rowCount() - 1, 0))
+    assert last.bottom() < t.viewport().height()
+    # The left column keeps its default share of the width (about 40%;
+    # unscaled it was 27%) and its controls fill the height the way
+    # they do at the default size, without running off the bottom.
+    assert w._left_panel.width() >= 0.39 * w.width()
+    assert 0.9 * w.height() <= _left_content_bottom(w) <= w.height()
+
+
+def test_wide_short_window_scales_only_as_far_as_the_height_allows(window):
+    w = window
+    _show_at(w, 2560, 720)
+    assert w._ui_scale == 1.0
+    assert _left_content_bottom(w) <= w.height()
+    _show_at(w, 2560, 900)
+    assert 1.0 < w._ui_scale < 2.0
+    assert _left_content_bottom(w) <= w.height()
+
+
+def test_scale_returns_to_normal_when_window_shrinks(window):
+    w = window
+    _show_at(w, 1920, 1009)
+    _show_at(w, 1280, 720)
+    assert w._ui_scale == 1.0
+    assert w._title_label.font().pointSizeF() == pytest.approx(13)
+    assert w._generate_btn.height() == 34
+    assert w._left_panel.maximumWidth() == 560
+    assert _left_content_bottom(w) <= w.height()
+
+
+def test_chinese_text_still_fits_when_scaled(window):
+    from gui.i18n import LanguageManager
+    w = window
+    _show_at(w, 1920, 1009)
+    LanguageManager.instance().set_language("zh")
+    try:
+        QApplication.processEvents()
+        assert w._ui_scale > 1.0
+        assert _left_content_bottom(w) <= w.height()
+    finally:
+        LanguageManager.instance().set_language("en")
+
+
+def test_output_path_elides_to_the_scaled_width(window):
+    from gui.main_window import OUT_PATH_WIDTH
+    w = window
+    long_path = "C:\\" + "\\".join(["a-very-long-folder-name"] * 8)
+    w._set_out_path(long_path)
+    _show_at(w, 1920, 1009)
+    text = w._out_label.text()
+    assert "…" in text
+    advance = w._out_label.fontMetrics().horizontalAdvance(text)
+    assert OUT_PATH_WIDTH < advance <= round(OUT_PATH_WIDTH * w._ui_scale)
